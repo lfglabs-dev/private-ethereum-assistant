@@ -1,29 +1,26 @@
 "use client"
 
 import { useChat } from "@ai-sdk/react"
-import { useEffect, useRef, useState } from "react"
-import { Bot } from "lucide-react"
+import { useState } from "react"
+import { AnimatePresence, motion } from "framer-motion"
+import { ArrowDown, Bot } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
 import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
 import { ChatMessage } from "@/components/chat/chat-message"
 import { ChatWelcome } from "@/components/chat/chat-welcome"
 import { ChatInput } from "@/components/chat/chat-input"
 import { ChatError } from "@/components/chat/chat-error"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { useScrollToBottom } from "@/hooks/use-scroll-to-bottom"
 
 export default function Home() {
   const { messages, sendMessage, stop, status, error, clearError } = useChat()
   const [input, setInput] = useState("")
-  const scrollRef = useRef<HTMLDivElement>(null)
+  const { containerRef, endRef, isAtBottom, scrollToBottom } = useScrollToBottom()
 
   const isLoading = status === "submitted" || status === "streaming"
   const isSubmitted = status === "submitted"
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({
-      top: scrollRef.current.scrollHeight,
-      behavior: "smooth",
-    })
-  }, [messages, error, status])
 
   const handleSubmit = () => {
     if (!input.trim() || isLoading) return
@@ -46,21 +43,24 @@ export default function Home() {
             <Bot className="size-4 text-primary" />
           </div>
           <div>
-            <h1 className="text-sm font-semibold">Private Ethereum Assistant</h1>
+            <h1 className="font-serif text-sm font-semibold">Private Ethereum Assistant</h1>
             <p className="text-xs text-muted-foreground">
               Local LLM &middot; Base Network &middot; Safe
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="size-2 rounded-full bg-green-500" />
-          <span className="text-xs text-muted-foreground">Local</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="size-2 rounded-full bg-green-500" />
+            <span className="text-xs text-muted-foreground">Local</span>
+          </div>
+          <ThemeToggle />
         </div>
       </header>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-3xl space-y-6 px-4 py-6">
+      <div ref={containerRef} className="relative flex-1 overflow-y-auto">
+        <div ref={endRef} className="mx-auto max-w-3xl space-y-6 px-4 py-6">
           {messages.length === 0 && !error && (
             <ChatWelcome onSuggestionClick={handleSuggestion} />
           )}
@@ -75,7 +75,11 @@ export default function Home() {
 
           {/* Thinking state - shows when submitted but no assistant message yet */}
           {isSubmitted && (messages.length === 0 || messages[messages.length - 1].role === "user") && (
-            <div className="flex gap-3">
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex gap-3"
+            >
               <Avatar size="sm" className="mt-0.5 shrink-0">
                 <AvatarFallback className="bg-secondary">
                   <Bot className="size-3.5" />
@@ -84,11 +88,33 @@ export default function Home() {
               <div className="rounded-2xl rounded-tl-sm bg-secondary/30 px-4 py-3">
                 <ThinkingIndicator />
               </div>
-            </div>
+            </motion.div>
           )}
 
           {error && <ChatError error={error} onDismiss={clearError} />}
         </div>
+
+        {/* Scroll to bottom button */}
+        <AnimatePresence>
+          {!isAtBottom && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="sticky bottom-4 flex justify-center"
+            >
+              <Button
+                variant="outline"
+                size="icon"
+                className="size-8 rounded-full bg-background/80 shadow-md backdrop-blur-sm"
+                onClick={() => scrollToBottom()}
+              >
+                <ArrowDown className="size-4" />
+              </Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Input */}

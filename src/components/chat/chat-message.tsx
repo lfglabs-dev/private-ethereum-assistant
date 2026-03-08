@@ -1,11 +1,13 @@
 "use client"
 
 import type { UIMessage } from "ai"
+import { motion } from "framer-motion"
 import { Bot, Loader2, User } from "lucide-react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer"
 import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
 import { ToolResultCard } from "@/components/chat/tool-result-card"
+import { MessageActions } from "@/components/chat/message-actions"
 
 type Part = { type: string; [key: string]: unknown }
 
@@ -22,6 +24,14 @@ function getToolOutput(part: Part): { state: string; output?: unknown; toolName:
   }
 }
 
+function getTextContent(parts: Part[] | undefined): string {
+  if (!parts) return ""
+  return parts
+    .filter((p) => p.type === "text")
+    .map((p) => String(p.text || ""))
+    .join("\n")
+}
+
 interface ChatMessageProps {
   message: UIMessage
   isStreaming?: boolean
@@ -36,9 +46,12 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   )
 
   return (
-    <div
+    <motion.div
       data-testid={`message-${message.role}`}
-      className={`flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+      className={`group flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}
     >
       <Avatar size="sm" className="mt-0.5 shrink-0">
         <AvatarFallback className={isUser ? "bg-primary text-primary-foreground" : "bg-secondary"}>
@@ -78,7 +91,12 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
               const toolInfo = getToolOutput(part)
               if (toolInfo) {
                 return (
-                  <div key={i}>
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 0.2 }}
+                  >
                     {toolInfo.state === "output" ? (
                       <ToolResultCard result={toolInfo.output} />
                     ) : (
@@ -89,7 +107,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
                         </span>
                       </div>
                     )}
-                  </div>
+                  </motion.div>
                 )
               }
 
@@ -97,9 +115,13 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
             })}
 
             {isStreaming && !hasContent && <ThinkingIndicator />}
+
+            {!isStreaming && hasContent && (
+              <MessageActions content={getTextContent(parts)} />
+            )}
           </>
         )}
       </div>
-    </div>
+    </motion.div>
   )
 }
