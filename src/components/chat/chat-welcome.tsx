@@ -1,7 +1,7 @@
 "use client"
 
 import { motion } from "framer-motion"
-import { Shield } from "lucide-react"
+import { EthereumIcon } from "@/components/icons/ethereum-icon"
 import { Button } from "@/components/ui/button"
 
 const SUGGESTIONS = [
@@ -27,7 +27,7 @@ export function ChatWelcome({ onSuggestionClick }: ChatWelcomeProps) {
         transition={{ duration: 0.4, ease: "easeOut" }}
         className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary/10"
       >
-        <Shield className="size-7 text-primary" />
+        <EthereumIcon className="size-7 text-primary" />
       </motion.div>
 
       <motion.h2

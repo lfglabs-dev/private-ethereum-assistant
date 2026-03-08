@@ -3,7 +3,8 @@
 import { useChat } from "@ai-sdk/react"
 import { useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { ArrowDown, Bot } from "lucide-react"
+import { ArrowDown } from "lucide-react"
+import { EthereumIcon } from "@/components/icons/ethereum-icon"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
@@ -40,7 +41,7 @@ export default function Home() {
       <header className="flex items-center justify-between border-b px-6 py-3">
         <div className="flex items-center gap-3">
           <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
-            <Bot className="size-4 text-primary" />
+            <EthereumIcon className="size-4 text-primary" />
           </div>
           <div>
             <h1 className="font-serif text-sm font-semibold">Private Ethereum Assistant</h1>
@@ -82,7 +83,7 @@ export default function Home() {
             >
               <Avatar size="sm" className="mt-0.5 shrink-0">
                 <AvatarFallback className="bg-secondary">
-                  <Bot className="size-3.5" />
+                  <EthereumIcon className="size-3.5" />
                 </AvatarFallback>
               </Avatar>
               <div className="rounded-2xl rounded-tl-sm bg-secondary/30 px-4 py-3">
