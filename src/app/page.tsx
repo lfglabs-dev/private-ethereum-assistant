@@ -1,135 +1,104 @@
-"use client";
+"use client"
 
-import { useChat } from "@ai-sdk/react";
-import { ChatMessage } from "@/components/chat-message";
-import { useEffect, useRef, useState } from "react";
+import { useChat } from "@ai-sdk/react"
+import { useEffect, useRef, useState } from "react"
+import { Bot } from "lucide-react"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
+import { ChatMessage } from "@/components/chat/chat-message"
+import { ChatWelcome } from "@/components/chat/chat-welcome"
+import { ChatInput } from "@/components/chat/chat-input"
+import { ChatError } from "@/components/chat/chat-error"
 
 export default function Home() {
-  const { messages, sendMessage, stop, status, error, clearError } = useChat();
-  const [input, setInput] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const isLoading = status === "submitted" || status === "streaming";
+  const { messages, sendMessage, stop, status, error, clearError } = useChat()
+  const [input, setInput] = useState("")
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  const isLoading = status === "submitted" || status === "streaming"
+  const isSubmitted = status === "submitted"
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
-    });
-  }, [messages, error]);
+    })
+  }, [messages, error, status])
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
-    clearError();
-    sendMessage({ text: input });
-    setInput("");
-  };
+  const handleSubmit = () => {
+    if (!input.trim() || isLoading) return
+    clearError()
+    sendMessage({ text: input })
+    setInput("")
+  }
+
+  const handleSuggestion = (suggestion: string) => {
+    clearError()
+    sendMessage({ text: suggestion })
+  }
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-950">
+    <div className="flex h-dvh flex-col bg-background">
       {/* Header */}
-      <header className="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
-        <div>
-          <h1 className="text-lg font-semibold text-white">
-            Private Ethereum Assistant
-          </h1>
-          <p className="text-xs text-zinc-400">
-            Local LLM · Base Network · Safe Transactions
-          </p>
+      <header className="flex items-center justify-between border-b px-6 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
+            <Bot className="size-4 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold">Private Ethereum Assistant</h1>
+            <p className="text-xs text-muted-foreground">
+              Local LLM &middot; Base Network &middot; Safe
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-green-500" />
-          <span className="text-xs text-zinc-400">Local</span>
+          <span className="size-2 rounded-full bg-green-500" />
+          <span className="text-xs text-muted-foreground">Local</span>
         </div>
       </header>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mx-auto max-w-3xl space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-3xl space-y-6 px-4 py-6">
           {messages.length === 0 && !error && (
-            <div className="flex flex-col items-center justify-center pt-32 text-center">
-              <div className="mb-4 text-4xl">🔒</div>
-              <h2 className="text-xl font-semibold text-white">
-                Private Ethereum Assistant
-              </h2>
-              <p className="mt-2 max-w-md text-sm text-zinc-400">
-                Ask me about Ethereum balances, transactions, or propose Safe
-                transactions. Everything runs locally — your data never leaves
-                this machine.
-              </p>
-              <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {[
-                  "What's the ETH balance of our Safe?",
-                  "Show pending transactions",
-                  "Resolve vitalik.eth",
-                  "Get Safe info",
-                ].map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => setInput(suggestion)}
-                    className="rounded-lg border border-zinc-800 px-4 py-2 text-left text-sm text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
+            <ChatWelcome onSuggestionClick={handleSuggestion} />
+          )}
+
+          {messages.map((message, index) => (
+            <ChatMessage
+              key={message.id}
+              message={message}
+              isStreaming={isLoading && index === messages.length - 1 && message.role === "assistant"}
+            />
+          ))}
+
+          {/* Thinking state - shows when submitted but no assistant message yet */}
+          {isSubmitted && (messages.length === 0 || messages[messages.length - 1].role === "user") && (
+            <div className="flex gap-3">
+              <Avatar size="sm" className="mt-0.5 shrink-0">
+                <AvatarFallback className="bg-secondary">
+                  <Bot className="size-3.5" />
+                </AvatarFallback>
+              </Avatar>
+              <div className="rounded-2xl rounded-tl-sm bg-secondary/30 px-4 py-3">
+                <ThinkingIndicator />
               </div>
             </div>
           )}
 
-          {messages.map((message) => (
-            <ChatMessage key={message.id} message={message} />
-          ))}
-
-          {error && (
-            <div className="rounded-lg border border-red-800/50 bg-red-950/30 px-4 py-3 text-sm text-red-400">
-              <p className="font-medium">Connection Error</p>
-              <p className="mt-1 text-red-500/80">
-                {error.message.includes("fetch")
-                  ? "Could not connect to the LLM. Is Ollama running? Try: ollama serve"
-                  : error.message || "An unexpected error occurred."}
-              </p>
-              <button
-                onClick={clearError}
-                className="mt-2 text-xs text-red-400 underline hover:text-red-300"
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
+          {error && <ChatError error={error} onDismiss={clearError} />}
         </div>
       </div>
 
       {/* Input */}
-      <div className="border-t border-zinc-800 px-4 py-4">
-        <form
-          onSubmit={handleSubmit}
-          className="mx-auto flex max-w-3xl items-center gap-3"
-        >
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about Ethereum..."
-            className="flex-1 rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-sm text-white placeholder-zinc-500 outline-none transition-colors focus:border-zinc-500"
-          />
-          {isLoading ? (
-            <button
-              type="button"
-              onClick={stop}
-              className="rounded-xl bg-red-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-red-500"
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!input.trim()}
-              className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:opacity-40 disabled:hover:bg-blue-600"
-            >
-              Send
-            </button>
-          )}
-        </form>
-      </div>
+      <ChatInput
+        value={input}
+        onChange={setInput}
+        onSubmit={handleSubmit}
+        onStop={stop}
+        isLoading={isLoading}
+      />
     </div>
-  );
+  )
 }

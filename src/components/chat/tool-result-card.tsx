@@ -1,0 +1,239 @@
+"use client"
+
+import {
+  ArrowUpRight,
+  Check,
+  CircleDot,
+  ExternalLink,
+  Hash,
+  Shield,
+  Users,
+  Wallet,
+  X,
+} from "lucide-react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+
+function BalanceResult({ data }: { data: Record<string, unknown> }) {
+  return (
+    <Card size="sm" className="border-0 bg-secondary/50">
+      <CardHeader className="pb-0">
+        <div className="flex items-center gap-2">
+          <Wallet className="size-4 text-muted-foreground" />
+          <CardTitle className="text-xs font-normal text-muted-foreground">Balance</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p className="text-lg font-semibold">
+          {String(data.balance)} {String(data.token)}
+        </p>
+        {"address" in data && (
+          <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+            {String(data.address)}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function TransactionProposalResult({ data }: { data: Record<string, unknown> }) {
+  const tx = data.transaction as Record<string, string>
+  return (
+    <Card size="sm" className="border-amber-500/20 bg-amber-500/5">
+      <CardHeader className="pb-0">
+        <div className="flex items-center gap-2">
+          <ArrowUpRight className="size-4 text-amber-500" />
+          <CardTitle className="text-sm text-amber-500">Transaction Prepared</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div className="space-y-1 text-sm">
+          <div className="flex gap-2">
+            <span className="text-muted-foreground">To:</span>
+            <span className="truncate font-mono text-xs">{tx.to}</span>
+          </div>
+          <div className="flex gap-2">
+            <span className="text-muted-foreground">Value:</span>
+            <span>{tx.value}</span>
+          </div>
+          {tx.data && tx.data !== "0x (simple transfer)" && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Data:</span>
+              <span className="truncate font-mono text-xs">{tx.data}</span>
+            </div>
+          )}
+        </div>
+        <a
+          href={String(data.safeUrl)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-400"
+        >
+          Open Safe to Approve
+          <ExternalLink className="size-3" />
+        </a>
+      </CardContent>
+    </Card>
+  )
+}
+
+function SafeInfoResult({ data }: { data: Record<string, unknown> }) {
+  const owners = data.owners as string[]
+  return (
+    <Card size="sm" className="border-0 bg-secondary/50">
+      <CardHeader className="pb-0">
+        <div className="flex items-center gap-2">
+          <Shield className="size-4 text-muted-foreground" />
+          <CardTitle className="text-sm">Safe Info</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <div className="flex gap-2">
+          <span className="text-muted-foreground">Address:</span>
+          <span className="truncate font-mono text-xs">{String(data.address)}</span>
+        </div>
+        <div className="flex gap-2">
+          <span className="text-muted-foreground">Balance:</span>
+          <span>{String(data.balance)}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">Threshold:</span>
+          <Badge variant="secondary">
+            <Users className="size-3" />
+            {String(data.threshold)} of {owners.length}
+          </Badge>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Owners:</span>
+          <ul className="mt-1 space-y-0.5">
+            {owners.map((owner) => (
+              <li key={owner} className="truncate font-mono text-xs text-muted-foreground">
+                {owner}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function PendingTransactionsResult({ data }: { data: Record<string, unknown> }) {
+  const txs = data.transactions as Array<Record<string, string | number>>
+  if (txs.length === 0) {
+    return (
+      <Card size="sm" className="border-0 bg-secondary/50">
+        <CardContent className="text-sm text-muted-foreground">
+          No pending transactions.
+        </CardContent>
+      </Card>
+    )
+  }
+  return (
+    <div className="space-y-2">
+      {txs.map((tx) => (
+        <Card key={String(tx.safeTxHash)} size="sm" className="border-0 bg-secondary/50">
+          <CardHeader className="pb-0">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CircleDot className="size-4 text-muted-foreground" />
+                <CardTitle className="text-xs font-normal text-muted-foreground">Pending Tx</CardTitle>
+              </div>
+              <Badge variant="outline" className="text-xs">
+                {String(tx.confirmations)}/{String(tx.confirmationsRequired)} sigs
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">To:</span>
+              <span className="truncate font-mono text-xs">{String(tx.to)}</span>
+            </div>
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Value:</span>
+              <span>{String(tx.value)}</span>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  )
+}
+
+function EnsResult({ data }: { data: Record<string, unknown> }) {
+  return (
+    <Card size="sm" className="border-0 bg-secondary/50">
+      <CardHeader className="pb-0">
+        <div className="flex items-center gap-2">
+          <Hash className="size-4 text-muted-foreground" />
+          <CardTitle className="text-xs font-normal text-muted-foreground">
+            {String(data.name)}
+          </CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p className="font-mono text-sm">
+          {data.address ? String(data.address) : "Not found"}
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function TransactionResult({ data }: { data: Record<string, unknown> }) {
+  const isSuccess = data.status === "Success"
+  return (
+    <Card size="sm" className="border-0 bg-secondary/50">
+      <CardHeader className="pb-0">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm">Transaction</CardTitle>
+          <Badge variant={isSuccess ? "secondary" : "destructive"}>
+            {isSuccess ? <Check className="size-3" /> : <X className="size-3" />}
+            {String(data.status)}
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-1 text-sm">
+        <div className="flex gap-2">
+          <span className="text-muted-foreground">From:</span>
+          <span className="truncate font-mono text-xs">{String(data.from)}</span>
+        </div>
+        <div className="flex gap-2">
+          <span className="text-muted-foreground">To:</span>
+          <span className="truncate font-mono text-xs">{String(data.to)}</span>
+        </div>
+        <div className="flex gap-2">
+          <span className="text-muted-foreground">Value:</span>
+          <span>{String(data.value)} ETH</span>
+        </div>
+        <div className="flex gap-2">
+          <span className="text-muted-foreground">Block:</span>
+          <span>{String(data.blockNumber)}</span>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+export function ToolResultCard({ result }: { result: unknown }) {
+  if (!result || typeof result !== "object") return null
+  const data = result as Record<string, unknown>
+
+  if ("balance" in data && "token" in data) return <BalanceResult data={data} />
+  if ("safeUrl" in data && "transaction" in data) return <TransactionProposalResult data={data} />
+  if ("owners" in data && "threshold" in data) return <SafeInfoResult data={data} />
+  if ("transactions" in data) return <PendingTransactionsResult data={data} />
+  if ("name" in data && "address" in data) return <EnsResult data={data} />
+  if ("hash" in data && "from" in data && "status" in data) return <TransactionResult data={data} />
+
+  return (
+    <Card size="sm" className="border-0 bg-secondary/50">
+      <CardContent>
+        <pre className="overflow-x-auto text-xs text-muted-foreground">
+          {JSON.stringify(result, null, 2)}
+        </pre>
+      </CardContent>
+    </Card>
+  )
+}
