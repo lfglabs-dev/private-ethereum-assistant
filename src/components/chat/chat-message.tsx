@@ -2,7 +2,8 @@
 
 import type { UIMessage } from "ai"
 import { motion } from "framer-motion"
-import { Bot, Loader2, User } from "lucide-react"
+import { Loader2, User } from "lucide-react"
+import { EthereumIcon } from "@/components/icons/ethereum-icon"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer"
 import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
@@ -55,7 +56,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
     >
       <Avatar size="sm" className="mt-0.5 shrink-0">
         <AvatarFallback className={isUser ? "bg-primary text-primary-foreground" : "bg-secondary"}>
-          {isUser ? <User className="size-3.5" /> : <Bot className="size-3.5" />}
+          {isUser ? <User className="size-3.5" /> : <EthereumIcon className="size-3.5" />}
         </AvatarFallback>
       </Avatar>
 
