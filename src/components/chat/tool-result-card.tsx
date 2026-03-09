@@ -6,6 +6,7 @@ import {
   CircleDot,
   ExternalLink,
   Hash,
+  Info,
   Shield,
   Users,
   Wallet,
@@ -37,49 +38,138 @@ function BalanceResult({ data }: { data: Record<string, unknown> }) {
   )
 }
 
-function TransactionProposalResult({ data }: { data: Record<string, unknown> }) {
-  const tx = data.transaction as Record<string, string>
+function shortenAddress(value: string) {
+  if (!value || value.length < 12) return value
+  return `${value.slice(0, 6)}...${value.slice(-4)}`
+}
+
+function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
+  const tx = (data.transaction as Record<string, string | undefined>) ?? {}
+  const signers = Array.isArray(data.signers) ? (data.signers as string[]) : []
   const status = String(data.status ?? "")
-  const isProposed = status === "proposed"
-  const title = isProposed ? "Transaction Proposed" : "Manual Safe Action Required"
-  const ctaLabel = isProposed ? "Open Safe Queue" : "Open Safe to Create"
+  const currentConfirmations = Number(data.currentConfirmations ?? 0)
+  const requiredConfirmations = Number(data.requiredConfirmations ?? 0)
+  const statusLabel = String(data.statusLabel ?? "")
+  const safeUILink = String(data.safeUILink ?? data.safeUrl ?? "")
+  const safeTxHash = data.safeTxHash ? String(data.safeTxHash) : null
+  const safeAddress = data.safeAddress ? String(data.safeAddress) : null
+  const proposerAddress = data.proposerAddress ? String(data.proposerAddress) : null
+  const title =
+    status === "proposed"
+      ? "Safe Transaction Proposed"
+      : status === "manual_creation_required"
+        ? "Manual Safe Action Required"
+        : "Safe Transaction Error"
+  const accentClass =
+    status === "error"
+      ? "border-destructive/20 bg-destructive/5"
+      : "border-amber-500/20 bg-amber-500/5"
+  const titleClass = status === "error" ? "text-destructive" : "text-amber-500"
+  const iconClass = status === "error" ? "text-destructive" : "text-amber-500"
+  const ctaLabel = status === "proposed" ? "Sign on Safe" : "Open Safe"
+
   return (
-    <Card size="sm" className="border-amber-500/20 bg-amber-500/5">
+    <Card size="sm" className={accentClass}>
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
-          <ArrowUpRight className="size-4 text-amber-500" />
-          <CardTitle className="text-sm text-amber-500">{title}</CardTitle>
+          <ArrowUpRight className={`size-4 ${iconClass}`} />
+          <CardTitle className={`text-sm ${titleClass}`}>{title}</CardTitle>
         </div>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="space-y-3">
+        {"summary" in data && (
+          <p className="text-sm font-medium">{String(data.summary)}</p>
+        )}
         {"message" in data && (
           <p className="text-sm text-muted-foreground">{String(data.message)}</p>
         )}
+        {"signerMessage" in data && (
+          <p className="text-xs text-muted-foreground">{String(data.signerMessage)}</p>
+        )}
         <div className="space-y-1 text-sm">
+          {safeAddress && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Safe:</span>
+              <span className="font-mono text-xs">{shortenAddress(safeAddress)}</span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <span className="text-muted-foreground">Type:</span>
+            <span>{String(tx.type ?? "Transaction")}</span>
+          </div>
           <div className="flex gap-2">
             <span className="text-muted-foreground">To:</span>
-            <span className="truncate font-mono text-xs">{tx.to}</span>
+            <span className="truncate font-mono text-xs">{String(tx.to ?? "Unknown")}</span>
           </div>
           <div className="flex gap-2">
             <span className="text-muted-foreground">Value:</span>
-            <span>{tx.value}</span>
+            <span>{String(tx.value ?? "0 ETH")}</span>
           </div>
+          {tx.tokenAmount && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Amount:</span>
+              <span>{String(tx.tokenAmount)}</span>
+            </div>
+          )}
           {tx.data && tx.data !== "0x" && (
             <div className="flex gap-2">
               <span className="text-muted-foreground">Data:</span>
-              <span className="truncate font-mono text-xs">{tx.data}</span>
+              <span className="truncate font-mono text-xs">{String(tx.data)}</span>
+            </div>
+          )}
+          {safeTxHash && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Safe Tx:</span>
+              <span className="truncate font-mono text-xs">{safeTxHash}</span>
+            </div>
+          )}
+          {requiredConfirmations > 0 && (
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <span className="text-muted-foreground">Confirmations</span>
+              <Badge variant="outline" className="text-xs">
+                {currentConfirmations}/{requiredConfirmations} signatures
+              </Badge>
+            </div>
+          )}
+          {statusLabel && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground">Status</span>
+              <Badge variant={status === "error" ? "destructive" : "secondary"}>
+                {status === "error" ? <X className="size-3" /> : <Info className="size-3" />}
+                {statusLabel}
+              </Badge>
+            </div>
+          )}
+          {signers.length > 0 && (
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground">Threshold</span>
+              <Badge variant="secondary">
+                <Users className="size-3" />
+                {requiredConfirmations || Number(data.threshold ?? 0)} of {signers.length} owners
+              </Badge>
+            </div>
+          )}
+          {proposerAddress && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Signer:</span>
+              <span className="font-mono text-xs">{shortenAddress(proposerAddress)}</span>
             </div>
           )}
         </div>
-        <a
-          href={String(data.safeUrl)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-400"
-        >
-          {ctaLabel}
-          <ExternalLink className="size-3" />
-        </a>
+        {"pendingTransactionsHint" in data && (
+          <p className="text-xs text-muted-foreground">{String(data.pendingTransactionsHint)}</p>
+        )}
+        {safeUILink && (
+          <a
+            href={safeUILink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-400"
+          >
+            {ctaLabel}
+            <ExternalLink className="size-3" />
+          </a>
+        )}
       </CardContent>
     </Card>
   )
@@ -128,11 +218,14 @@ function SafeInfoResult({ data }: { data: Record<string, unknown> }) {
 
 function PendingTransactionsResult({ data }: { data: Record<string, unknown> }) {
   const txs = data.transactions as Array<Record<string, string | number>>
+  const safeUILink = data.safeUILink ? String(data.safeUILink) : null
+  const safeAddress = data.safeAddress ? String(data.safeAddress) : null
   if (txs.length === 0) {
     return (
       <Card size="sm" className="border-0 bg-secondary/50">
-        <CardContent className="text-sm text-muted-foreground">
-          No pending transactions.
+        <CardContent className="space-y-2 text-sm text-muted-foreground">
+          <p>No pending transactions.</p>
+          {safeAddress && <p className="font-mono text-xs">{shortenAddress(safeAddress)}</p>}
         </CardContent>
       </Card>
     )
@@ -148,11 +241,23 @@ function PendingTransactionsResult({ data }: { data: Record<string, unknown> }) 
                 <CardTitle className="text-xs font-normal text-muted-foreground">Pending Tx</CardTitle>
               </div>
               <Badge variant="outline" className="text-xs">
-                {String(tx.confirmations)}/{String(tx.confirmationsRequired)} sigs
+                {String(tx.currentConfirmations)}/{String(tx.requiredConfirmations)} sigs
               </Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-1 text-sm">
+            {tx.safeAddress && (
+              <div className="flex gap-2">
+                <span className="text-muted-foreground">Safe:</span>
+                <span className="font-mono text-xs">{shortenAddress(String(tx.safeAddress))}</span>
+              </div>
+            )}
+            {"transactionType" in tx && (
+              <div className="flex gap-2">
+                <span className="text-muted-foreground">Type:</span>
+                <span>{String(tx.transactionType)}</span>
+              </div>
+            )}
             <div className="flex gap-2">
               <span className="text-muted-foreground">To:</span>
               <span className="truncate font-mono text-xs">{String(tx.to)}</span>
@@ -161,6 +266,21 @@ function PendingTransactionsResult({ data }: { data: Record<string, unknown> }) 
               <span className="text-muted-foreground">Value:</span>
               <span>{String(tx.value)}</span>
             </div>
+            {"status" in tx && (
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <span className="text-muted-foreground">Status</span>
+                <Badge variant="secondary">{String(tx.status)}</Badge>
+              </div>
+            )}
+            <a
+              href={String(tx.safeUILink ?? safeUILink ?? "")}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 transition-colors hover:text-amber-500"
+            >
+              Sign on Safe
+              <ExternalLink className="size-3" />
+            </a>
           </CardContent>
         </Card>
       ))}
@@ -228,7 +348,9 @@ export function ToolResultCard({ result }: { result: unknown }) {
   const data = result as Record<string, unknown>
 
   if ("balance" in data && "token" in data) return <BalanceResult data={data} />
-  if ("safeUrl" in data && "transaction" in data) return <TransactionProposalResult data={data} />
+  if (("safeUILink" in data || "safeUrl" in data) && ("transaction" in data || "status" in data)) {
+    return <SafeTransactionResult data={data} />
+  }
   if ("owners" in data && "threshold" in data) return <SafeInfoResult data={data} />
   if ("transactions" in data) return <PendingTransactionsResult data={data} />
   if ("name" in data && "address" in data) return <EnsResult data={data} />

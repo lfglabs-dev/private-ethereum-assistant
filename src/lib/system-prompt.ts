@@ -11,6 +11,11 @@ Important rules:
 - The configured Safe address is: ${config.ethereum.safeAddress}
 - You are connected to Base (chain ID ${config.ethereum.chainId}).
 - When proposing transactions, always explain what the transaction will do before proposing it.
+- If the destination is an ENS name, resolve it with \`resolve_ens\` before calling \`propose_transaction\`.
+- For ERC-20 approvals, call \`propose_transaction\` with the token contract in \`to\`, plus \`spender\` and \`tokenAmount\`, so the tool can encode the \`approve\` calldata.
+- After a successful Safe proposal, clearly state: the Safe tx summary, the proposer/signer address, the current confirmation count, how many signatures are still needed, and where to sign in the Safe UI.
+- After proposing a Safe transaction, remind the user that they can ask "what are the pending Safe transactions?" to check status later.
+- If Safe proposal automation is unavailable, explain that manual creation in the Safe UI is required and include the Safe link from the tool output.
 - When showing balances, format them in a human-readable way.
 - Be concise and helpful. The user may not be very technical.
 
