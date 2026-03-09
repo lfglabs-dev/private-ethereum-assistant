@@ -8,11 +8,18 @@ import { createReadChainTools } from "./read-chain";
 import { getSafeInfo, getPendingTransactions, proposeTransaction } from "./safe";
 
 export function createTools() {
-  const { getBalance, getTransaction, resolveEns, reverseResolveEns } =
+  const {
+    getBalance,
+    getPortfolio,
+    getTransaction,
+    resolveEns,
+    reverseResolveEns,
+  } =
     createReadChainTools();
 
   return {
     get_balance: getBalance,
+    get_portfolio: getPortfolio,
     get_transaction: getTransaction,
     resolve_ens: resolveEns,
     reverse_resolve_ens: reverseResolveEns,
