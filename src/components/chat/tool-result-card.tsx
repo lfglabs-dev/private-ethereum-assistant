@@ -1,12 +1,14 @@
 "use client"
 
 import {
+  AlertCircle,
   ArrowUpRight,
   Check,
   CircleDot,
   ExternalLink,
   Hash,
   Info,
+  Loader2,
   Shield,
   Users,
   Wallet,
@@ -14,6 +16,82 @@ import {
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+
+type ToolResultCardProps = {
+  result: unknown
+  preliminary?: boolean
+}
+
+type TransactionPreviewData = {
+  kind: "transaction_preview"
+  status: "awaiting_confirmation"
+  summary: string
+  message: string
+  chain: { id: number; name: string; nativeSymbol: string }
+  confirmationId?: string
+  sender?: string
+  recipient?: string
+  recipientInput?: string
+  resolvedEnsName?: string
+  asset?: { type: "ETH" | "ERC20"; symbol: string; tokenAddress?: string }
+  amount?: string
+  balance?: { asset: string; amount: string }
+  gasEstimate?: {
+    gasLimit: string
+    maxFeePerGasGwei: string
+    maxPriorityFeePerGasGwei?: string
+    gasCostNative: string
+  }
+}
+
+type TransactionErrorData = {
+  kind: "transaction_error" | "tool_error"
+  summary?: string
+  message?: string
+  error?: string
+  toolName?: string
+}
+
+type ProgressStep = {
+  key: string
+  label: string
+  status: "pending" | "in_progress" | "complete" | "error"
+  detail?: string
+}
+
+type TransactionProgressData = {
+  kind: "transaction_progress"
+  status:
+    | "estimating_gas"
+    | "building"
+    | "signing"
+    | "broadcasting"
+    | "waiting_for_confirmation"
+    | "confirmed"
+    | "reverted"
+    | "error"
+  summary: string
+  message: string
+  chain: { id: number; name: string; nativeSymbol: string }
+  sender: string
+  recipient: string
+  recipientInput: string
+  resolvedEnsName?: string
+  asset: { type: "ETH" | "ERC20"; symbol: string; tokenAddress?: string }
+  amount: string
+  steps: ProgressStep[]
+  txHash?: string
+  explorerUrl?: string
+  receipt?: {
+    status: "success" | "reverted"
+    blockNumber: number
+    gasUsed: string
+    effectiveGasPriceGwei?: string
+    gasCostNative?: string
+  }
+  revertReason?: string
+  error?: string
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
@@ -404,6 +482,244 @@ function TransactionResult({ data }: { data: Record<string, unknown> }) {
   )
 }
 
+function TransactionErrorResult({ data }: { data: TransactionErrorData }) {
+  return (
+    <Card size="sm" className="border-destructive/20 bg-destructive/5">
+      <CardHeader className="pb-0">
+        <div className="flex items-center gap-2">
+          <AlertCircle className="size-4 text-destructive" />
+          <CardTitle className="text-sm text-destructive">
+            {data.summary ?? "Tool Error"}
+          </CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <p className="text-muted-foreground">{data.error ?? data.message}</p>
+        {data.toolName && (
+          <p className="font-mono text-xs text-muted-foreground">{data.toolName}</p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
+  return (
+    <Card size="sm" className="border-amber-500/20 bg-amber-500/5">
+      <CardHeader className="pb-0">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Wallet className="size-4 text-amber-500" />
+            <CardTitle className="text-sm text-amber-500">Ready to Confirm</CardTitle>
+          </div>
+          <Badge variant="outline" className="border-amber-500/30 text-amber-600">
+            Awaiting confirmation
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p>{data.summary}</p>
+        <div className="space-y-1.5">
+          <div className="flex gap-2">
+            <span className="text-muted-foreground">Network:</span>
+            <span>{data.chain.name}</span>
+          </div>
+          {data.sender && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">From:</span>
+              <span className="truncate font-mono text-xs">{data.sender}</span>
+            </div>
+          )}
+          {data.recipient && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">To:</span>
+              <span className="truncate font-mono text-xs">{data.recipient}</span>
+            </div>
+          )}
+          {data.resolvedEnsName && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">ENS:</span>
+              <span>{data.resolvedEnsName}</span>
+            </div>
+          )}
+          {data.asset && data.amount && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Amount:</span>
+              <span>
+                {data.amount} {data.asset.symbol}
+              </span>
+            </div>
+          )}
+          {data.gasEstimate && (
+            <>
+              <div className="flex gap-2">
+                <span className="text-muted-foreground">Gas limit:</span>
+                <span>{data.gasEstimate.gasLimit}</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-muted-foreground">Max fee:</span>
+                <span>{data.gasEstimate.maxFeePerGasGwei} gwei</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="text-muted-foreground">Gas cost:</span>
+                <span>
+                  ~{data.gasEstimate.gasCostNative} {data.chain.nativeSymbol}
+                </span>
+              </div>
+            </>
+          )}
+          {data.balance && (
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Signer balance:</span>
+              <span>
+                {data.balance.amount} {data.balance.asset}
+              </span>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function StepIcon({ status }: { status: ProgressStep["status"] }) {
+  if (status === "complete") return <Check className="size-3.5 text-emerald-600" />
+  if (status === "error") return <X className="size-3.5 text-destructive" />
+  if (status === "in_progress") return <Loader2 className="size-3.5 animate-spin text-amber-500" />
+  return <CircleDot className="size-3.5 text-muted-foreground/50" />
+}
+
+function TransactionProgressResult({
+  data,
+  preliminary,
+}: {
+  data: TransactionProgressData
+  preliminary?: boolean
+}) {
+  const isSuccess = data.status === "confirmed"
+  const isFailure = data.status === "reverted" || data.status === "error"
+  const badgeVariant = isSuccess ? "secondary" : isFailure ? "destructive" : "outline"
+  const badgeLabel = isSuccess
+    ? "Confirmed"
+    : data.status === "reverted"
+      ? "Reverted"
+      : data.status === "error"
+        ? "Error"
+        : preliminary
+          ? "Streaming"
+          : "In progress"
+
+  return (
+    <Card
+      size="sm"
+      className={
+        isSuccess
+          ? "border-emerald-500/20 bg-emerald-500/5"
+          : isFailure
+            ? "border-destructive/20 bg-destructive/5"
+            : "border-amber-500/20 bg-amber-500/5"
+      }
+    >
+      <CardHeader className="pb-0">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ArrowUpRight className="size-4 text-amber-500" />
+            <CardTitle className="text-sm">{data.summary}</CardTitle>
+          </div>
+          <Badge variant={badgeVariant}>{badgeLabel}</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p className="text-muted-foreground">{data.message}</p>
+
+        <div className="space-y-1.5">
+          <div className="flex gap-2">
+            <span className="text-muted-foreground">From:</span>
+            <span className="truncate font-mono text-xs">{data.sender}</span>
+          </div>
+          <div className="flex gap-2">
+            <span className="text-muted-foreground">To:</span>
+            <span className="truncate font-mono text-xs">{data.recipient}</span>
+          </div>
+          <div className="flex gap-2">
+            <span className="text-muted-foreground">Amount:</span>
+            <span>
+              {data.amount} {data.asset.symbol}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {data.steps.map((step) => (
+            <div key={step.key} className="flex items-start gap-2 rounded-md bg-background/50 px-2.5 py-2">
+              <div className="pt-0.5">
+                <StepIcon status={step.status} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm">{step.label}</p>
+                {step.detail && (
+                  <p className="break-all text-xs text-muted-foreground">{step.detail}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {data.txHash && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Tx hash:</span>
+            {data.explorerUrl ? (
+              <a
+                href={data.explorerUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-w-0 items-center gap-1 text-primary hover:underline"
+              >
+                <span className="truncate font-mono text-xs">{data.txHash}</span>
+                <ExternalLink className="size-3" />
+              </a>
+            ) : (
+              <span className="truncate font-mono text-xs">{data.txHash}</span>
+            )}
+          </div>
+        )}
+
+        {data.receipt && (
+          <div className="space-y-1.5 rounded-md bg-background/50 px-2.5 py-2 text-sm">
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Block:</span>
+              <span>{data.receipt.blockNumber}</span>
+            </div>
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Gas used:</span>
+              <span>{data.receipt.gasUsed}</span>
+            </div>
+            {data.receipt.effectiveGasPriceGwei && (
+              <div className="flex gap-2">
+                <span className="text-muted-foreground">Effective gas price:</span>
+                <span>{data.receipt.effectiveGasPriceGwei} gwei</span>
+              </div>
+            )}
+            {data.receipt.gasCostNative && (
+              <div className="flex gap-2">
+                <span className="text-muted-foreground">Actual gas cost:</span>
+                <span>
+                  {data.receipt.gasCostNative} {data.chain.nativeSymbol}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {data.revertReason && (
+          <p className="text-sm text-destructive">{data.revertReason}</p>
+        )}
+        {data.error && <p className="text-sm text-destructive">{data.error}</p>}
+      </CardContent>
+    </Card>
+  )
+}
+
 function RailgunResult({ data }: { data: Record<string, unknown> }) {
   const operation = String(data.operation ?? "")
   const isError = data.status === "error"
@@ -558,10 +874,24 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
   )
 }
 
-export function ToolResultCard({ result }: { result: unknown }) {
+export function ToolResultCard({ result, preliminary }: ToolResultCardProps) {
   if (!result || typeof result !== "object") return null
   const data = result as Record<string, unknown>
 
+  if ("kind" in data && data.kind === "transaction_preview") {
+    return <TransactionPreviewResult data={data as unknown as TransactionPreviewData} />
+  }
+  if ("kind" in data && data.kind === "transaction_progress") {
+    return (
+      <TransactionProgressResult
+        data={data as unknown as TransactionProgressData}
+        preliminary={preliminary}
+      />
+    )
+  }
+  if ("kind" in data && (data.kind === "transaction_error" || data.kind === "tool_error")) {
+    return <TransactionErrorResult data={data as unknown as TransactionErrorData} />
+  }
   if ("nativeBalance" in data && "tokens" in data) return <BalanceResult data={data} />
   if (data.railgun === true) return <RailgunResult data={data} />
   if (("safeUILink" in data || "safeUrl" in data) && ("transaction" in data || "status" in data)) {
