@@ -1,7 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
 import SafeApiKit from "@safe-global/api-kit";
-import { createPublicClient, http, formatEther } from "viem";
+import Safe from "@safe-global/protocol-kit";
+import { createPublicClient, http, formatEther, parseEther } from "viem";
 import { base } from "viem/chains";
 import { config } from "../config";
 
@@ -13,6 +14,7 @@ const client = createPublicClient({
 function getApiKit() {
   return new SafeApiKit({
     chainId: BigInt(config.ethereum.chainId),
+    txServiceUrl: `https://safe-transaction-base.safe.global/api`,
   });
 }
 
@@ -67,7 +69,7 @@ export const getPendingTransactions = tool({
 
 export const proposeTransaction = tool({
   description:
-    "Propose a new transaction on the Gnosis Safe. The transaction will need to be approved by Safe owners in the Safe UI before it executes. This tool only creates the proposal — it does NOT execute anything.",
+    "Propose a new transaction on the Gnosis Safe. If a signer key is configured, the transaction is signed and submitted to the Safe Transaction Service. Otherwise, transaction details and a Safe App link are returned so the user can create and sign it manually in the Safe web UI.",
   inputSchema: z.object({
     to: z.string().describe("The destination address (0x...)"),
     value: z
@@ -81,19 +83,61 @@ export const proposeTransaction = tool({
       ),
   }),
   execute: async ({ to, value, data }) => {
+    const signerKey = process.env.SAFE_SIGNER_PRIVATE_KEY;
+    const valueInWei = parseEther(value).toString();
+
+    if (signerKey) {
+      const protocolKit = await Safe.init({
+        provider: config.ethereum.rpcUrl,
+        signer: signerKey,
+        safeAddress,
+      });
+
+      const safeTransaction = await protocolKit.createTransaction({
+        transactions: [{ to, value: valueInWei, data: data || "0x" }],
+      });
+
+      const signedTx = await protocolKit.signTransaction(safeTransaction);
+      const txHash = await protocolKit.getTransactionHash(signedTx);
+
+      const apiKit = getApiKit();
+      await apiKit.proposeTransaction({
+        safeAddress,
+        safeTransactionData: signedTx.data,
+        safeTxHash: txHash,
+        senderAddress:
+          (await protocolKit.getSafeProvider().getSignerAddress()) ||
+          (await protocolKit.getAddress()),
+        senderSignature: signedTx.encodedSignatures(),
+      });
+
+      return {
+        status: "proposed",
+        message:
+          "Transaction signed and submitted to the Safe Transaction Service. Owners can approve it in the Safe UI.",
+        safeTxHash: txHash,
+        transaction: { to, value: value + " ETH", data: data || "0x" },
+        safeUrl: `https://app.safe.global/transactions/queue?safe=base:${safeAddress}`,
+      };
+    }
+
+    // No signer key: generate a Safe App link for manual signing
     const apiKit = getApiKit();
-    const nonce = await apiKit.getSafeInfo(safeAddress).then((info) => info.nonce);
+    const nonce = await apiKit
+      .getSafeInfo(safeAddress)
+      .then((info) => info.nonce);
 
     const safeUrl = `https://app.safe.global/transactions/queue?safe=base:${safeAddress}`;
 
     return {
-      status: "prepared",
+      status: "manual_creation_required",
       message:
-        "Transaction prepared. Please review the details and submit via the Safe UI.",
+        "Transaction details prepared. Open the Safe App link below, create the transaction in Safe, and sign it with your connected wallet.",
       transaction: {
         to,
         value: value + " ETH",
-        data: data || "0x (simple transfer)",
+        valueWei: valueInWei,
+        data: data || "0x",
         nonce,
       },
       safeUrl,
