@@ -343,10 +343,165 @@ function TransactionResult({ data }: { data: Record<string, unknown> }) {
   )
 }
 
+function RailgunResult({ data }: { data: Record<string, unknown> }) {
+  const operation = String(data.operation ?? "")
+  const isError = data.status === "error"
+  const titleByOperation: Record<string, string> = {
+    balance: "Railgun Balances",
+    shield: "Railgun Shield",
+    transfer: "Railgun Transfer",
+    unshield: "Railgun Unshield",
+  }
+
+  if (isError) {
+    const setup = Array.isArray(data.setup) ? (data.setup as string[]) : []
+    return (
+      <Card size="sm" className="border-red-500/20 bg-red-500/5">
+        <CardHeader className="pb-0">
+          <div className="flex items-center gap-2">
+            <Shield className="size-4 text-red-500" />
+            <CardTitle className="text-sm text-red-500">
+              {titleByOperation[operation] ?? "Railgun Error"}
+            </CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p>{String(data.message ?? "Unknown Railgun error")}</p>
+          {setup.length > 0 && (
+            <ul className="space-y-1 text-xs text-muted-foreground">
+              {setup.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (operation === "balance") {
+    const balances = Array.isArray(data.balances)
+      ? (data.balances as Array<Record<string, unknown>>)
+      : []
+
+    return (
+      <Card size="sm" className="border-0 bg-secondary/50">
+        <CardHeader className="pb-0">
+          <div className="flex items-center gap-2">
+            <Shield className="size-4 text-muted-foreground" />
+            <CardTitle className="text-sm">Railgun Balances</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2 text-sm">
+          <p className="truncate font-mono text-xs text-muted-foreground">
+            {String(data.railgunAddress)}
+          </p>
+          {balances.length === 0 ? (
+            <p className="text-muted-foreground">No shielded balances found.</p>
+          ) : (
+            <div className="space-y-1">
+              {balances.map((balance) => (
+                <div
+                  key={`${String(balance.tokenAddress)}-${String(balance.rawAmount)}`}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <span>{String(balance.symbol)}</span>
+                  <span className="font-medium">{String(balance.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const stages = Array.isArray(data.stages)
+    ? (data.stages as Array<Record<string, unknown>>)
+    : []
+  const proofProgress = Array.isArray(data.proofProgress)
+    ? (data.proofProgress as Array<Record<string, unknown>>)
+    : []
+
+  return (
+    <Card size="sm" className="border-0 bg-secondary/50">
+      <CardHeader className="pb-0">
+        <div className="flex items-center gap-2">
+          <Shield className="size-4 text-muted-foreground" />
+          <CardTitle className="text-sm">
+            {titleByOperation[operation] ?? "Railgun Operation"}
+          </CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="flex flex-wrap items-center gap-2">
+          {"amount" in data && "token" in data && (
+            <Badge variant="secondary">
+              {String(data.amount)} {String(data.token)}
+            </Badge>
+          )}
+          {"recipient" in data && (
+            <Badge variant="outline" className="max-w-full truncate font-mono text-[10px]">
+              {String(data.recipient)}
+            </Badge>
+          )}
+        </div>
+
+        {stages.length > 0 && (
+          <div className="space-y-1.5">
+            {stages.map((stage, index) => (
+              <div key={`${String(stage.label)}-${index}`} className="flex items-start gap-2">
+                <Check className="mt-0.5 size-3.5 text-green-500" />
+                <div>
+                  <p>{String(stage.label)}</p>
+                  {"detail" in stage && Boolean(stage.detail) && (
+                    <p className="text-xs text-muted-foreground">{String(stage.detail)}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {proofProgress.length > 0 && (
+          <div className="rounded-md bg-background/50 p-2">
+            <p className="text-xs font-medium text-muted-foreground">Proof generation</p>
+            <div className="mt-1 space-y-1">
+              {proofProgress.slice(-3).map((stage, index) => (
+                <div key={`${String(stage.status)}-${index}`} className="flex items-center justify-between gap-2 text-xs">
+                  <span>{String(stage.status)}</span>
+                  <span>{String(stage.progress)}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {"privacyNote" in data && (
+          <p className="text-xs text-muted-foreground">{String(data.privacyNote)}</p>
+        )}
+
+        {"txHash" in data && (
+          <a
+            href={String(data.explorerUrl)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:opacity-90"
+          >
+            View on Arbiscan
+            <ExternalLink className="size-3" />
+          </a>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function ToolResultCard({ result }: { result: unknown }) {
   if (!result || typeof result !== "object") return null
   const data = result as Record<string, unknown>
 
+  if (data.railgun === true) return <RailgunResult data={data} />
   if ("balance" in data && "token" in data) return <BalanceResult data={data} />
   if (("safeUILink" in data || "safeUrl" in data) && ("transaction" in data || "status" in data)) {
     return <SafeTransactionResult data={data} />

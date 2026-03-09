@@ -1,3 +1,9 @@
+import {
+  getRailgunBalance,
+  railgunPrivateTransfer,
+  railgunShieldTokens,
+  railgunWithdraw,
+} from "./railgun";
 import { createReadChainTools } from "./read-chain";
 import { getSafeInfo, getPendingTransactions, proposeTransaction } from "./safe";
 
@@ -13,5 +19,9 @@ export function createTools() {
     get_safe_info: getSafeInfo,
     get_pending_transactions: getPendingTransactions,
     propose_transaction: proposeTransaction,
+    railgun_balance: getRailgunBalance,
+    railgun_shield: railgunShieldTokens,
+    railgun_transfer: railgunPrivateTransfer,
+    railgun_unshield: railgunWithdraw,
   };
 }

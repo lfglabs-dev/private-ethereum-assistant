@@ -8,4 +8,19 @@ export const config = {
     rpcUrl: process.env.RPC_URL || "https://mainnet.base.org",
     chainId: Number(process.env.CHAIN_ID || "8453"),
   },
+  railgun: {
+    networkLabel: "Arbitrum",
+    rpcUrl: process.env.RAILGUN_RPC_URL || "https://arb1.arbitrum.io/rpc",
+    chainId: Number(process.env.RAILGUN_CHAIN_ID || "42161"),
+    explorerTxBaseUrl: process.env.RAILGUN_EXPLORER_TX_URL || "https://arbiscan.io/tx/",
+    poiNodeUrls: (process.env.RAILGUN_POI_NODE_URLS || "https://ppoi-agg.horsewithsixlegs.xyz")
+      .split(",")
+      .map((url) => url.trim())
+      .filter(Boolean),
+    mnemonic: process.env.RAILGUN_MNEMONIC,
+    signerPrivateKey: process.env.EOA_PRIVATE_KEY,
+    walletCreationBlock: Number(process.env.RAILGUN_WALLET_CREATION_BLOCK || "56109834"),
+    scanTimeoutMs: Number(process.env.RAILGUN_SCAN_TIMEOUT_MS || "180000"),
+    pollingIntervalMs: Number(process.env.RAILGUN_POLLING_INTERVAL_MS || "15000"),
+  },
 } as const;
