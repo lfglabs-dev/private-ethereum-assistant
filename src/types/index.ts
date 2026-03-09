@@ -1,9 +1,15 @@
 export interface SafeTransactionProposal {
+  status: "proposed" | "manual_creation_required" | "error";
   safeTxHash: string;
+  safeAddress: string;
   to: string;
   value: string;
   data: string;
-  safeUrl: string;
+  type: string;
+  currentConfirmations: number;
+  requiredConfirmations: number;
+  safeUILink: string;
+  signers: string[];
 }
 
 export interface SafeInfo {
@@ -16,10 +22,14 @@ export interface SafeInfo {
 
 export interface PendingTransaction {
   safeTxHash: string;
+  safeAddress: string;
   to: string;
   value: string;
   data: string;
-  confirmations: number;
-  confirmationsRequired: number;
+  transactionType: string;
+  currentConfirmations: number;
+  requiredConfirmations: number;
+  status: string;
+  safeUILink: string;
   submissionDate: string;
 }
