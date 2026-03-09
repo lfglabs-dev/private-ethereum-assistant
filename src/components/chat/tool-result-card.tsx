@@ -39,15 +39,22 @@ function BalanceResult({ data }: { data: Record<string, unknown> }) {
 
 function TransactionProposalResult({ data }: { data: Record<string, unknown> }) {
   const tx = data.transaction as Record<string, string>
+  const status = String(data.status ?? "")
+  const isProposed = status === "proposed"
+  const title = isProposed ? "Transaction Proposed" : "Manual Safe Action Required"
+  const ctaLabel = isProposed ? "Open Safe Queue" : "Open Safe to Create"
   return (
     <Card size="sm" className="border-amber-500/20 bg-amber-500/5">
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
           <ArrowUpRight className="size-4 text-amber-500" />
-          <CardTitle className="text-sm text-amber-500">Transaction Prepared</CardTitle>
+          <CardTitle className="text-sm text-amber-500">{title}</CardTitle>
         </div>
       </CardHeader>
       <CardContent className="space-y-2">
+        {"message" in data && (
+          <p className="text-sm text-muted-foreground">{String(data.message)}</p>
+        )}
         <div className="space-y-1 text-sm">
           <div className="flex gap-2">
             <span className="text-muted-foreground">To:</span>
@@ -57,7 +64,7 @@ function TransactionProposalResult({ data }: { data: Record<string, unknown> }) 
             <span className="text-muted-foreground">Value:</span>
             <span>{tx.value}</span>
           </div>
-          {tx.data && tx.data !== "0x (simple transfer)" && (
+          {tx.data && tx.data !== "0x" && (
             <div className="flex gap-2">
               <span className="text-muted-foreground">Data:</span>
               <span className="truncate font-mono text-xs">{tx.data}</span>
@@ -70,7 +77,7 @@ function TransactionProposalResult({ data }: { data: Record<string, unknown> }) 
           rel="noopener noreferrer"
           className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-400"
         >
-          Open Safe to Approve
+          {ctaLabel}
           <ExternalLink className="size-3" />
         </a>
       </CardContent>

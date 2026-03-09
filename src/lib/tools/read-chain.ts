@@ -31,7 +31,12 @@ export const getBalance = tool({
   execute: async ({ address, tokenAddress }) => {
     const addr = address as `0x${string}`;
 
-    if (tokenAddress) {
+    // Treat zero address or empty string as native ETH
+    const isErc20 =
+      tokenAddress &&
+      tokenAddress !== "0x0000000000000000000000000000000000000000";
+
+    if (isErc20) {
       const tokenAddr = tokenAddress as `0x${string}`;
       const [balance, decimals, symbol] = await Promise.all([
         client.readContract({
