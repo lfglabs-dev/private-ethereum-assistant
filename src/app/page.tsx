@@ -46,7 +46,7 @@ export default function Home() {
           <div>
             <h1 className="font-serif text-sm font-semibold">Private Ethereum Assistant</h1>
             <p className="text-xs text-muted-foreground">
-              Local LLM &middot; Base Network &middot; Safe
+              Local LLM &middot; Base Safe &middot; Arbitrum Railgun
             </p>
           </div>
         </div>

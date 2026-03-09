@@ -33,6 +33,21 @@ function getTextContent(parts: Part[] | undefined): string {
     .join("\n")
 }
 
+function getToolLabel(toolName: string): string {
+  switch (toolName) {
+    case "railgun_balance":
+      return "Scanning Railgun balances on Arbitrum"
+    case "railgun_shield":
+      return "Preparing Railgun shield on Arbitrum"
+    case "railgun_transfer":
+      return "Generating Railgun transfer proof"
+    case "railgun_unshield":
+      return "Generating Railgun unshield proof"
+    default:
+      return `Using ${toolName}`
+  }
+}
+
 interface ChatMessageProps {
   message: UIMessage
   isStreaming?: boolean
@@ -103,9 +118,7 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
                     ) : (
                       <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">
                         <Loader2 className="size-3.5 animate-spin" />
-                        <span>
-                          Using <span className="font-mono text-xs">{toolInfo.toolName}</span>
-                        </span>
+                        <span>{getToolLabel(toolInfo.toolName)}</span>
                       </div>
                     )}
                   </motion.div>

@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button"
 
 const SUGGESTIONS = [
   "What's the ETH balance of our Safe?",
+  "What are my private balances?",
+  "Shield 0.01 ETH into Railgun",
   "Show pending transactions",
-  "Resolve vitalik.eth",
-  "Get Safe info",
+  "Send 0.005 ETH privately to a 0zk address",
 ]
 
 interface ChatWelcomeProps {
@@ -45,7 +46,7 @@ export function ChatWelcome({ onSuggestionClick }: ChatWelcomeProps) {
         transition={{ duration: 0.4, delay: 0.2 }}
         className="mt-2 max-w-sm text-sm text-muted-foreground"
       >
-        Ask about Ethereum balances, transactions, or propose Safe transactions.
+        Ask about Base Safe transactions or test private Railgun flows on Arbitrum.
         Everything runs locally.
       </motion.p>
 
