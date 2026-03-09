@@ -1,7 +1,7 @@
 import { streamText, stepCountIs, convertToModelMessages } from "ai";
 import { model } from "@/lib/llm";
 import { systemPrompt } from "@/lib/system-prompt";
-import { tools } from "@/lib/tools";
+import { createTools } from "@/lib/tools";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -14,8 +14,8 @@ export async function POST(req: Request) {
       model,
       system: systemPrompt,
       messages: await convertToModelMessages(messages),
-      tools,
-      stopWhen: stepCountIs(5),
+      tools: createTools(),
+      stopWhen: stepCountIs(8),
     });
 
     return result.toUIMessageStreamResponse();
