@@ -1,24 +1,17 @@
 import { tool } from "ai";
 import { z } from "zod";
 import {
-  createPublicClient,
   erc20Abi,
   formatEther,
   formatUnits,
   getAddress,
   hexToString,
-  http,
   parseAbi,
   type Address,
 } from "viem";
 import { base, mainnet } from "viem/chains";
 import { createEnsService } from "../ens";
-import { config } from "../config";
-
-const client = createPublicClient({
-  chain: base,
-  transport: http(config.ethereum.rpcUrl),
-});
+import { createEthereumContext, type NetworkConfig } from "../ethereum";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const symbolBytes32Abi = parseAbi(["function symbol() view returns (bytes32)"]);
@@ -59,7 +52,7 @@ const wellKnownTokenSymbolMap = new Map(
 );
 
 export interface NativeBalanceResult {
-  symbol: "ETH";
+  symbol: string;
   decimals: 18;
   rawBalance: string;
   formattedBalance: string;
@@ -191,268 +184,6 @@ async function withRetry<T>(operation: () => Promise<T>, attempts = 3) {
     : new Error("RPC request failed after retrying.");
 }
 
-async function readTokenSymbol(tokenAddress: Address, blockNumber: bigint) {
-  const wellKnownToken = wellKnownTokenMap.get(tokenAddress.toLowerCase());
-  if (wellKnownToken) return wellKnownToken.symbol;
-
-  try {
-    return await withRetry(() =>
-      client.readContract({
-        address: tokenAddress,
-        abi: erc20Abi,
-        functionName: "symbol",
-        blockNumber,
-      })
-    );
-  } catch {
-    try {
-      const symbol = await withRetry(() =>
-        client.readContract({
-          address: tokenAddress,
-          abi: symbolBytes32Abi,
-          functionName: "symbol",
-          blockNumber,
-        })
-      );
-      return hexToString(symbol, { size: 32 }).replace(/\0/g, "") || tokenAddress;
-    } catch {
-      return tokenAddress;
-    }
-  }
-}
-
-async function readTokenDecimals(tokenAddress: Address, blockNumber: bigint) {
-  const wellKnownToken = wellKnownTokenMap.get(tokenAddress.toLowerCase());
-  if (wellKnownToken) return wellKnownToken.decimals;
-
-  try {
-    return await withRetry(() =>
-      client.readContract({
-        address: tokenAddress,
-        abi: erc20Abi,
-        functionName: "decimals",
-        blockNumber,
-      })
-    );
-  } catch {
-    return null;
-  }
-}
-
-async function readTokenBalance(
-  ownerAddress: Address,
-  tokenAddressInput: string,
-  blockNumber: bigint
-): Promise<TokenBalanceResult> {
-  let tokenAddress: Address;
-
-  try {
-    tokenAddress = normalizeAddressInput(tokenAddressInput, "token address");
-  } catch (error) {
-    return {
-      address: tokenAddressInput,
-      symbol: tokenAddressInput,
-      decimals: null,
-      rawBalance: null,
-      formattedBalance: null,
-      error: error instanceof Error ? error.message : "Invalid token address.",
-    };
-  }
-
-  if (tokenAddress === ZERO_ADDRESS) {
-    return {
-      address: tokenAddress,
-      symbol: tokenAddress,
-      decimals: null,
-      rawBalance: null,
-      formattedBalance: null,
-      error:
-        "Token address 0x0000000000000000000000000000000000000000 is not a valid ERC-20 contract.",
-    };
-  }
-
-  const bytecode = await withRetry(() =>
-    client.getBytecode({ address: tokenAddress, blockNumber })
-  );
-  if (!bytecode || bytecode === "0x") {
-    return {
-      address: tokenAddress,
-      symbol: tokenAddress,
-      decimals: null,
-      rawBalance: null,
-      formattedBalance: null,
-      error: `No contract was found at ${tokenAddress} on Base.`,
-    };
-  }
-
-  try {
-    const balance = await withRetry(() =>
-      client.readContract({
-        address: tokenAddress,
-        abi: erc20Abi,
-        functionName: "balanceOf",
-        args: [ownerAddress],
-        blockNumber,
-      })
-    );
-    const [symbol, decimals] = await Promise.all([
-      readTokenSymbol(tokenAddress, blockNumber),
-      readTokenDecimals(tokenAddress, blockNumber),
-    ]);
-
-    return {
-      address: tokenAddress,
-      symbol,
-      decimals,
-      rawBalance: balance.toString(),
-      formattedBalance: formatTokenAmount(balance, decimals),
-    };
-  } catch {
-    return {
-      address: tokenAddress,
-      symbol: tokenAddress,
-      decimals: null,
-      rawBalance: null,
-      formattedBalance: null,
-      error: `Unable to read an ERC-20 balance from ${tokenAddress} on Base.`,
-    };
-  }
-}
-
-export async function fetchBalanceSnapshot({
-  address,
-  tokenAddress,
-  tokenAddresses,
-  tokenSymbol,
-  tokenSymbols,
-}: {
-  address: string;
-  tokenAddress?: string;
-  tokenAddresses?: string[];
-  tokenSymbol?: string;
-  tokenSymbols?: string[];
-}): Promise<BalanceSnapshot> {
-  let ownerAddress: Address;
-
-  try {
-    ownerAddress = normalizeAddressInput(address, "wallet address");
-  } catch (error) {
-    return buildErrorResult(
-      address,
-      error instanceof Error ? error.message : "Invalid wallet address."
-    );
-  }
-
-  const blockNumber = await withRetry(() => client.getBlockNumber());
-  const nativeBalance = await withRetry(() =>
-    client.getBalance({
-      address: ownerAddress,
-      blockNumber,
-    })
-  );
-  const resolvedSymbols = resolveRequestedTokenSymbols(tokenSymbol, tokenSymbols);
-  const requestedTokenAddresses = resolveRequestedTokenAddresses(tokenAddress, [
-    ...(tokenAddresses ?? []),
-    ...resolvedSymbols.resolved,
-  ]);
-  const tokens = await Promise.all(
-    requestedTokenAddresses.map((requestedTokenAddress) =>
-      readTokenBalance(ownerAddress, requestedTokenAddress, blockNumber)
-    )
-  );
-
-  return {
-    address: ownerAddress,
-    blockNumber: Number(blockNumber),
-    nativeBalance: {
-      symbol: "ETH",
-      decimals: 18,
-      rawBalance: nativeBalance.toString(),
-      formattedBalance: formatWithGrouping(formatEther(nativeBalance)),
-    },
-    tokens,
-    errors: [
-      ...resolvedSymbols.errors,
-      ...tokens.flatMap((token) => (token.error ? [token.error] : [])),
-    ],
-  };
-}
-
-export const getBalance = tool({
-  description:
-    "Get the ETH balance and optional ERC-20 token balances for an Ethereum address on Base. Supports one token address, an array of token addresses, or well-known Base token symbols such as USDC, USDT, DAI, WETH, and cbETH.",
-  inputSchema: z.object({
-    address: z.string().describe("The Ethereum address (0x...)"),
-    tokenAddress: z
-      .string()
-      .optional()
-      .describe("Optional ERC-20 token contract address."),
-    tokenAddresses: z
-      .array(z.string())
-      .optional()
-      .describe("Optional list of ERC-20 token contract addresses to query."),
-    tokenSymbol: z
-      .string()
-      .optional()
-      .describe("Optional well-known Base token symbol such as USDC, USDT, DAI, WETH, or cbETH."),
-    tokenSymbols: z
-      .array(z.string())
-      .optional()
-      .describe("Optional list of well-known Base token symbols to query."),
-  }),
-  execute: async ({
-    address,
-    tokenAddress,
-    tokenAddresses,
-    tokenSymbol,
-    tokenSymbols,
-  }) =>
-    fetchBalanceSnapshot({
-      address,
-      tokenAddress,
-      tokenAddresses,
-      tokenSymbol,
-      tokenSymbols,
-    }),
-});
-
-export const getPortfolio = tool({
-  description:
-    "Get the ETH balance plus a curated set of popular Base token balances for an Ethereum address.",
-  inputSchema: z.object({
-    address: z.string().describe("The Ethereum address (0x...)"),
-  }),
-  execute: async ({ address }) =>
-    fetchBalanceSnapshot({
-      address,
-      tokenAddresses: BASE_WELL_KNOWN_TOKENS.map((token) => token.address),
-    }),
-});
-
-export const getTransaction = tool({
-  description: "Look up a transaction by its hash on Base.",
-  inputSchema: z.object({
-    hash: z.string().describe("The transaction hash (0x...)"),
-  }),
-  execute: async ({ hash }) => {
-    const tx = await client.getTransaction({
-      hash: hash as `0x${string}`,
-    });
-    const receipt = await client.getTransactionReceipt({
-      hash: hash as `0x${string}`,
-    });
-    return {
-      hash: tx.hash,
-      from: tx.from,
-      to: tx.to,
-      value: formatEther(tx.value),
-      status: receipt.status === "success" ? "Success" : "Failed",
-      blockNumber: Number(tx.blockNumber),
-      gasUsed: Number(receipt.gasUsed),
-    };
-  },
-});
-
 const resolveEnsInputSchema = z
   .object({
     name: z
@@ -477,8 +208,311 @@ const resolveEnsInputSchema = z
     message: "Provide either name or names, not both.",
   });
 
-export function createReadChainTools() {
+export function createReadChainTools(networkConfig: NetworkConfig) {
+  const { publicClient, chainMetadata } = createEthereumContext(networkConfig);
   const ensService = createEnsService();
+  const supportsBasePresets = chainMetadata.id === base.id;
+
+  function resolveSelectedNetworkTokenSymbols(
+    tokenSymbol?: string,
+    tokenSymbols?: string[]
+  ) {
+    const requested = [tokenSymbol, ...(tokenSymbols ?? [])].filter(
+      (value): value is string => Boolean(value?.trim())
+    );
+    const errors: string[] = [];
+
+    if (!supportsBasePresets && requested.length > 0) {
+      errors.push(
+        `Token symbol shortcuts are only configured for Base. On ${chainMetadata.name}, provide token contract addresses instead.`
+      );
+      return { resolved: [] as string[], errors };
+    }
+
+    const resolved = resolveRequestedTokenSymbols(tokenSymbol, tokenSymbols);
+    return {
+      resolved: resolved.resolved,
+      errors: [...errors, ...resolved.errors],
+    };
+  }
+
+  async function readTokenSymbol(tokenAddress: Address, blockNumber: bigint) {
+    const wellKnownToken =
+      supportsBasePresets && chainMetadata.id === base.id
+        ? wellKnownTokenMap.get(tokenAddress.toLowerCase())
+        : undefined;
+    if (wellKnownToken) return wellKnownToken.symbol;
+
+    try {
+      return await withRetry(() =>
+        publicClient.readContract({
+          address: tokenAddress,
+          abi: erc20Abi,
+          functionName: "symbol",
+          blockNumber,
+        })
+      );
+    } catch {
+      try {
+        const symbol = await withRetry(() =>
+          publicClient.readContract({
+            address: tokenAddress,
+            abi: symbolBytes32Abi,
+            functionName: "symbol",
+            blockNumber,
+          })
+        );
+        return hexToString(symbol, { size: 32 }).replace(/\0/g, "") || tokenAddress;
+      } catch {
+        return tokenAddress;
+      }
+    }
+  }
+
+  async function readTokenDecimals(tokenAddress: Address, blockNumber: bigint) {
+    const wellKnownToken =
+      supportsBasePresets && chainMetadata.id === base.id
+        ? wellKnownTokenMap.get(tokenAddress.toLowerCase())
+        : undefined;
+    if (wellKnownToken) return wellKnownToken.decimals;
+
+    try {
+      return await withRetry(() =>
+        publicClient.readContract({
+          address: tokenAddress,
+          abi: erc20Abi,
+          functionName: "decimals",
+          blockNumber,
+        })
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  async function readTokenBalance(
+    ownerAddress: Address,
+    tokenAddressInput: string,
+    blockNumber: bigint
+  ): Promise<TokenBalanceResult> {
+    let tokenAddress: Address;
+
+    try {
+      tokenAddress = normalizeAddressInput(tokenAddressInput, "token address");
+    } catch (error) {
+      return {
+        address: tokenAddressInput,
+        symbol: tokenAddressInput,
+        decimals: null,
+        rawBalance: null,
+        formattedBalance: null,
+        error: error instanceof Error ? error.message : "Invalid token address.",
+      };
+    }
+
+    if (tokenAddress === ZERO_ADDRESS) {
+      return {
+        address: tokenAddress,
+        symbol: tokenAddress,
+        decimals: null,
+        rawBalance: null,
+        formattedBalance: null,
+        error:
+          "Token address 0x0000000000000000000000000000000000000000 is not a valid ERC-20 contract.",
+      };
+    }
+
+    const bytecode = await withRetry(() =>
+      publicClient.getBytecode({ address: tokenAddress, blockNumber })
+    );
+    if (!bytecode || bytecode === "0x") {
+      return {
+        address: tokenAddress,
+        symbol: tokenAddress,
+        decimals: null,
+        rawBalance: null,
+        formattedBalance: null,
+        error: `No contract was found at ${tokenAddress} on ${chainMetadata.name}.`,
+      };
+    }
+
+    try {
+      const balance = await withRetry(() =>
+        publicClient.readContract({
+          address: tokenAddress,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [ownerAddress],
+          blockNumber,
+        })
+      );
+      const [symbol, decimals] = await Promise.all([
+        readTokenSymbol(tokenAddress, blockNumber),
+        readTokenDecimals(tokenAddress, blockNumber),
+      ]);
+
+      return {
+        address: tokenAddress,
+        symbol,
+        decimals,
+        rawBalance: balance.toString(),
+        formattedBalance: formatTokenAmount(balance, decimals),
+      };
+    } catch {
+      return {
+        address: tokenAddress,
+        symbol: tokenAddress,
+        decimals: null,
+        rawBalance: null,
+        formattedBalance: null,
+        error: `Unable to read an ERC-20 balance from ${tokenAddress} on ${chainMetadata.name}.`,
+      };
+    }
+  }
+
+  async function fetchBalanceSnapshot({
+    address,
+    tokenAddress,
+    tokenAddresses,
+    tokenSymbol,
+    tokenSymbols,
+  }: {
+    address: string;
+    tokenAddress?: string;
+    tokenAddresses?: string[];
+    tokenSymbol?: string;
+    tokenSymbols?: string[];
+  }): Promise<BalanceSnapshot> {
+    let ownerAddress: Address;
+
+    try {
+      ownerAddress = normalizeAddressInput(address, "wallet address");
+    } catch (error) {
+      return buildErrorResult(
+        address,
+        error instanceof Error ? error.message : "Invalid wallet address."
+      );
+    }
+
+    const blockNumber = await withRetry(() => publicClient.getBlockNumber());
+    const nativeBalance = await withRetry(() =>
+      publicClient.getBalance({
+        address: ownerAddress,
+        blockNumber,
+      })
+    );
+    const resolvedSymbols = resolveSelectedNetworkTokenSymbols(
+      tokenSymbol,
+      tokenSymbols
+    );
+    const requestedTokenAddresses = resolveRequestedTokenAddresses(tokenAddress, [
+      ...(tokenAddresses ?? []),
+      ...resolvedSymbols.resolved,
+    ]);
+    const tokens = await Promise.all(
+      requestedTokenAddresses.map((requestedTokenAddress) =>
+        readTokenBalance(ownerAddress, requestedTokenAddress, blockNumber)
+      )
+    );
+
+    return {
+      address: ownerAddress,
+      blockNumber: Number(blockNumber),
+      nativeBalance: {
+        symbol: chainMetadata.nativeSymbol,
+        decimals: 18,
+        rawBalance: nativeBalance.toString(),
+        formattedBalance: formatWithGrouping(formatEther(nativeBalance)),
+      },
+      tokens,
+      errors: [
+        ...resolvedSymbols.errors,
+        ...tokens.flatMap((token) => (token.error ? [token.error] : [])),
+      ],
+    };
+  }
+
+  const getBalance = tool({
+    description: `Get the ${chainMetadata.nativeSymbol} balance and optional ERC-20 token balances for an address on ${chainMetadata.name}.`,
+    inputSchema: z.object({
+      address: z.string().describe("The Ethereum address (0x...)"),
+      tokenAddress: z
+        .string()
+        .optional()
+        .describe("Optional ERC-20 token contract address."),
+      tokenAddresses: z
+        .array(z.string())
+        .optional()
+        .describe("Optional list of ERC-20 token contract addresses to query."),
+      tokenSymbol: z
+        .string()
+        .optional()
+        .describe("Optional well-known Base token symbol. Only supported on Base."),
+      tokenSymbols: z
+        .array(z.string())
+        .optional()
+        .describe("Optional list of well-known Base token symbols. Only supported on Base."),
+    }),
+    execute: async ({
+      address,
+      tokenAddress,
+      tokenAddresses,
+      tokenSymbol,
+      tokenSymbols,
+    }) =>
+      fetchBalanceSnapshot({
+        address,
+        tokenAddress,
+        tokenAddresses,
+        tokenSymbol,
+        tokenSymbols,
+      }),
+  });
+
+  const getPortfolio = tool({
+    description:
+      "Get the native balance plus a curated set of popular Base token balances for an Ethereum address. This is only configured for Base.",
+    inputSchema: z.object({
+      address: z.string().describe("The Ethereum address (0x...)"),
+    }),
+    execute: async ({ address }) => {
+      if (!supportsBasePresets) {
+        return buildErrorResult(
+          address,
+          `Portfolio token presets are only configured for Base. On ${chainMetadata.name}, use get_balance with tokenAddresses instead.`
+        );
+      }
+
+      return fetchBalanceSnapshot({
+        address,
+        tokenAddresses: BASE_WELL_KNOWN_TOKENS.map((token) => token.address),
+      });
+    },
+  });
+
+  const getTransaction = tool({
+    description: `Look up a transaction by its hash on ${chainMetadata.name}.`,
+    inputSchema: z.object({
+      hash: z.string().describe("The transaction hash (0x...)"),
+    }),
+    execute: async ({ hash }) => {
+      const tx = await publicClient.getTransaction({
+        hash: hash as `0x${string}`,
+      });
+      const receipt = await publicClient.getTransactionReceipt({
+        hash: hash as `0x${string}`,
+      });
+      return {
+        hash: tx.hash,
+        from: tx.from,
+        to: tx.to,
+        value: formatEther(tx.value),
+        status: receipt.status === "success" ? "Success" : "Failed",
+        blockNumber: Number(tx.blockNumber),
+        gasUsed: Number(receipt.gasUsed),
+      };
+    },
+  });
 
   const resolveEns = tool({
     description:

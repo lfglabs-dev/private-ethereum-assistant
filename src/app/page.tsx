@@ -1,10 +1,12 @@
 "use client"
 
 import { useChat } from "@ai-sdk/react"
-import { useState } from "react"
+import { useSyncExternalStore, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { ArrowDown } from "lucide-react"
+import { DEFAULT_NETWORK_CONFIG, NETWORK_PRESETS } from "@/lib/ethereum"
 import { EthereumIcon } from "@/components/icons/ethereum-icon"
+import { NetworkSettings, type NetworkFormState } from "@/components/chat/network-settings"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
@@ -15,29 +17,118 @@ import { ChatError } from "@/components/chat/chat-error"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useScrollToBottom } from "@/hooks/use-scroll-to-bottom"
 
+const NETWORK_STORAGE_KEY = "private-ethereum-assistant.network.v1"
+const NETWORK_STORAGE_EVENT = "private-ethereum-assistant.network.changed"
+
+const DEFAULT_NETWORK_FORM_STATE: NetworkFormState = {
+  chainId: String(DEFAULT_NETWORK_CONFIG.chainId),
+  rpcUrl: DEFAULT_NETWORK_CONFIG.rpcUrl,
+}
+
+function loadInitialNetworkSettings(): NetworkFormState {
+  if (typeof window === "undefined") {
+    return DEFAULT_NETWORK_FORM_STATE
+  }
+
+  const raw = window.localStorage.getItem(NETWORK_STORAGE_KEY)
+  if (!raw) {
+    return DEFAULT_NETWORK_FORM_STATE
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<NetworkFormState>
+    if (typeof parsed.chainId === "string" && typeof parsed.rpcUrl === "string") {
+      return {
+        chainId: parsed.chainId,
+        rpcUrl: parsed.rpcUrl,
+      }
+    }
+  } catch {
+    window.localStorage.removeItem(NETWORK_STORAGE_KEY)
+  }
+
+  return DEFAULT_NETWORK_FORM_STATE
+}
+
+function subscribeToNetworkSettings(onStoreChange: () => void) {
+  if (typeof window === "undefined") {
+    return () => undefined
+  }
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === null || event.key === NETWORK_STORAGE_KEY) {
+      onStoreChange()
+    }
+  }
+
+  window.addEventListener("storage", handleStorage)
+  window.addEventListener(NETWORK_STORAGE_EVENT, onStoreChange)
+
+  return () => {
+    window.removeEventListener("storage", handleStorage)
+    window.removeEventListener(NETWORK_STORAGE_EVENT, onStoreChange)
+  }
+}
+
+function updateNetworkSettings(value: NetworkFormState) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  window.localStorage.setItem(NETWORK_STORAGE_KEY, JSON.stringify(value))
+  window.dispatchEvent(new Event(NETWORK_STORAGE_EVENT))
+}
+
+function getNetworkLabel(value: NetworkFormState) {
+  return (
+    NETWORK_PRESETS.find((preset) => String(preset.chainId) === value.chainId)?.name ??
+    "Custom Network"
+  )
+}
+
 export default function Home() {
   const { messages, sendMessage, stop, status, error, clearError } = useChat()
   const [input, setInput] = useState("")
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const networkSettings = useSyncExternalStore(
+    subscribeToNetworkSettings,
+    loadInitialNetworkSettings,
+    () => DEFAULT_NETWORK_FORM_STATE,
+  )
   const { containerRef, endRef, isAtBottom, scrollToBottom } = useScrollToBottom()
 
   const isLoading = status === "submitted" || status === "streaming"
   const isSubmitted = status === "submitted"
+  const activeNetworkLabel = getNetworkLabel(networkSettings)
+
+  const sendChatMessage = (text: string) => {
+    sendMessage(
+      { text },
+      {
+        body: {
+          networkConfig: {
+            chainId: networkSettings.chainId,
+            rpcUrl: networkSettings.rpcUrl.trim(),
+          },
+        },
+      },
+    )
+  }
 
   const handleSubmit = () => {
     if (!input.trim() || isLoading) return
     clearError()
-    sendMessage({ text: input })
+    sendChatMessage(input)
     setInput("")
   }
 
   const handleSuggestion = (suggestion: string) => {
     clearError()
-    sendMessage({ text: suggestion })
+    sendChatMessage(suggestion)
   }
 
   return (
     <div className="flex h-dvh flex-col bg-background">
-      {/* Header */}
       <header className="flex items-center justify-between border-b px-6 py-3">
         <div className="flex items-center gap-3">
           <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
@@ -46,11 +137,17 @@ export default function Home() {
           <div>
             <h1 className="font-serif text-sm font-semibold">Private Ethereum Assistant</h1>
             <p className="text-xs text-muted-foreground">
-              Local LLM &middot; Base Safe &middot; Arbitrum Railgun
+              Local LLM &middot; {activeNetworkLabel} &middot; Safe + Railgun + Local Signing
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <NetworkSettings
+            value={networkSettings}
+            onChange={updateNetworkSettings}
+            isOpen={settingsOpen}
+            onToggle={() => setSettingsOpen((open) => !open)}
+          />
           <div className="flex items-center gap-2">
             <span className="size-2 rounded-full bg-green-500" />
             <span className="text-xs text-muted-foreground">Local</span>
@@ -59,7 +156,6 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Messages */}
       <div ref={containerRef} className="relative flex-1 overflow-y-auto">
         <div ref={endRef} className="mx-auto max-w-3xl space-y-6 px-4 py-6">
           {messages.length === 0 && !error && (
@@ -74,7 +170,6 @@ export default function Home() {
             />
           ))}
 
-          {/* Thinking state - shows when submitted but no assistant message yet */}
           {isSubmitted && (messages.length === 0 || messages[messages.length - 1].role === "user") && (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
@@ -95,7 +190,6 @@ export default function Home() {
           {error && <ChatError error={error} onDismiss={clearError} />}
         </div>
 
-        {/* Scroll to bottom button */}
         <AnimatePresence>
           {!isAtBottom && (
             <motion.div
@@ -118,7 +212,6 @@ export default function Home() {
         </AnimatePresence>
       </div>
 
-      {/* Input */}
       <ChatInput
         value={input}
         onChange={setInput}

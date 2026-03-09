@@ -12,7 +12,7 @@ import { MessageActions } from "@/components/chat/message-actions"
 
 type Part = { type: string; [key: string]: unknown }
 
-function getToolOutput(part: Part): { state: string; output?: unknown; toolName: string } | null {
+function getToolOutput(part: Part) {
   if (!part.type.startsWith("tool-") && part.type !== "dynamic-tool") return null
   const toolName =
     part.type === "dynamic-tool"
@@ -22,6 +22,8 @@ function getToolOutput(part: Part): { state: string; output?: unknown; toolName:
     state: String(part.state || ""),
     output: part.output,
     toolName,
+    preliminary: Boolean(part.preliminary),
+    errorText: typeof part.errorText === "string" ? part.errorText : undefined,
   }
 }
 
@@ -44,7 +46,7 @@ function getToolLabel(toolName: string): string {
     case "railgun_unshield":
       return "Generating Railgun unshield proof"
     default:
-      return `Using ${toolName}`
+      return `Running ${toolName}`
   }
 }
 
@@ -113,8 +115,20 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ duration: 0.2 }}
                   >
-                    {toolInfo.state === "output" ? (
-                      <ToolResultCard result={toolInfo.output} />
+                    {toolInfo.state === "output-available" ? (
+                      <ToolResultCard
+                        result={toolInfo.output}
+                        preliminary={toolInfo.preliminary}
+                      />
+                    ) : toolInfo.state === "output-error" ? (
+                      <ToolResultCard
+                        result={{
+                          kind: "tool_error",
+                          summary: `Tool failed: ${toolInfo.toolName}`,
+                          error: toolInfo.errorText || "Tool execution failed.",
+                          toolName: toolInfo.toolName,
+                        }}
+                      />
                     ) : (
                       <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">
                         <Loader2 className="size-3.5 animate-spin" />
