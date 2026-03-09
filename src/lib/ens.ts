@@ -157,6 +157,20 @@ export function createEnsService(client: EnsClient = mainnetEnsClient) {
     normalizedName: string
   ): Promise<CachedForwardResolution> {
     try {
+      const address = await client.getEnsAddress({
+        name: normalizedName,
+      });
+
+      if (address) {
+        return {
+          normalizedName,
+          address,
+          error: null,
+          errorCode: null,
+          resolutionChainId: mainnet.id,
+        };
+      }
+
       const { owner, resolver } = await resolveExactRegistryRecord(
         normalizedName
       );
@@ -181,25 +195,11 @@ export function createEnsService(client: EnsClient = mainnetEnsClient) {
         };
       }
 
-      const address = await client.getEnsAddress({
-        name: normalizedName,
-      });
-
-      if (!address) {
-        return {
-          normalizedName,
-          address: null,
-          error: "ENS name exists but no address is set",
-          errorCode: "no_address",
-          resolutionChainId: mainnet.id,
-        };
-      }
-
       return {
         normalizedName,
-        address,
-        error: null,
-        errorCode: null,
+        address: null,
+        error: "ENS name exists but no address is set",
+        errorCode: "no_address",
         resolutionChainId: mainnet.id,
       };
     } catch (error) {

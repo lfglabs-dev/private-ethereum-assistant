@@ -97,6 +97,23 @@ describe("createEnsService", () => {
     expect(noAddressResult.error).toBe("ENS name exists but no address is set");
   });
 
+  test("allows names that resolve through wildcard or inherited resolvers", async () => {
+    const { client, calls } = createMockClient({
+      owner: zeroAddress,
+      resolver: zeroAddress,
+      ensAddress: "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+    });
+    const service = createEnsService(client);
+
+    const result = await service.resolveName("sub.domain.eth");
+
+    expect(result.errorCode).toBeNull();
+    expect(result.address).toBe("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
+    expect(calls.getEnsAddress).toBe(1);
+    expect(calls.owner).toBe(0);
+    expect(calls.resolver).toBe(0);
+  });
+
   test("batch resolution reuses the same cache entry for duplicate names", async () => {
     const { client, calls } = createMockClient({
       owner: "0x0000000000000000000000000000000000000001",
@@ -110,9 +127,9 @@ describe("createEnsService", () => {
     expect(results).toHaveLength(2);
     expect(results[0]?.address).toBe("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
     expect(results[1]?.address).toBe("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
-    expect(calls.owner).toBe(1);
-    expect(calls.resolver).toBe(1);
     expect(calls.getEnsAddress).toBe(1);
+    expect(calls.owner).toBe(0);
+    expect(calls.resolver).toBe(0);
   });
 
   test("reverse resolution validates the primary name with a forward lookup", async () => {
