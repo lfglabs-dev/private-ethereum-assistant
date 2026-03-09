@@ -1,8 +1,14 @@
-import { getBalance, getTransaction, resolveEns } from "./read-chain";
+import {
+  getBalance,
+  getPortfolio,
+  getTransaction,
+  resolveEns,
+} from "./read-chain";
 import { getSafeInfo, getPendingTransactions, proposeTransaction } from "./safe";
 
 export const tools = {
   get_balance: getBalance,
+  get_portfolio: getPortfolio,
   get_transaction: getTransaction,
   resolve_ens: resolveEns,
   get_safe_info: getSafeInfo,

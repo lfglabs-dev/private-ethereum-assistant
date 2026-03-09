@@ -14,22 +14,83 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+}
+
 function BalanceResult({ data }: { data: Record<string, unknown> }) {
+  const nativeBalance = isRecord(data.nativeBalance) ? data.nativeBalance : null
+  const tokens = Array.isArray(data.tokens)
+    ? data.tokens.filter(isRecord)
+    : []
+  const errors = Array.isArray(data.errors) ? data.errors.map(String) : []
+
   return (
     <Card size="sm" className="border-0 bg-secondary/50">
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
           <Wallet className="size-4 text-muted-foreground" />
-          <CardTitle className="text-xs font-normal text-muted-foreground">Balance</CardTitle>
+          <CardTitle className="text-xs font-normal text-muted-foreground">Balances</CardTitle>
         </div>
       </CardHeader>
-      <CardContent>
-        <p className="text-lg font-semibold">
-          {String(data.balance)} {String(data.token)}
-        </p>
+      <CardContent className="space-y-3">
+        {nativeBalance && (
+          <div className="rounded-md bg-background/70 p-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Native
+            </p>
+            <p className="text-lg font-semibold">
+              {String(nativeBalance.formattedBalance)} {String(nativeBalance.symbol)}
+            </p>
+          </div>
+        )}
+        {tokens.length > 0 && (
+          <div className="space-y-2">
+            {tokens.map((token) => (
+              <div
+                key={`${String(token.address)}-${String(token.symbol)}`}
+                className="rounded-md bg-background/70 p-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium">{String(token.symbol)}</p>
+                    <p className="truncate font-mono text-[11px] text-muted-foreground">
+                      {String(token.address)}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    {token.error ? (
+                      <p className="max-w-40 text-xs text-destructive">
+                        {String(token.error)}
+                      </p>
+                    ) : (
+                      <p className="font-semibold">
+                        {String(token.formattedBalance)} {String(token.symbol)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {errors.length > 0 && (
+          <div className="space-y-1 rounded-md border border-destructive/20 bg-destructive/5 p-3">
+            {errors.map((error) => (
+              <p key={error} className="text-xs text-destructive">
+                {error}
+              </p>
+            ))}
+          </div>
+        )}
         {"address" in data && (
           <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
             {String(data.address)}
+          </p>
+        )}
+        {typeof data.blockNumber === "number" && (
+          <p className="text-[11px] text-muted-foreground">
+            Block {String(data.blockNumber)}
           </p>
         )}
       </CardContent>
@@ -227,7 +288,7 @@ export function ToolResultCard({ result }: { result: unknown }) {
   if (!result || typeof result !== "object") return null
   const data = result as Record<string, unknown>
 
-  if ("balance" in data && "token" in data) return <BalanceResult data={data} />
+  if ("nativeBalance" in data && "tokens" in data) return <BalanceResult data={data} />
   if ("safeUrl" in data && "transaction" in data) return <TransactionProposalResult data={data} />
   if ("owners" in data && "threshold" in data) return <SafeInfoResult data={data} />
   if ("transactions" in data) return <PendingTransactionsResult data={data} />
