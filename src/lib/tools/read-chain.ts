@@ -2,18 +2,12 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createPublicClient, http, formatEther, formatUnits, erc20Abi } from "viem";
 import { base, mainnet } from "viem/chains";
-import { normalize } from "viem/ens";
 import { config } from "../config";
+import { createEnsService } from "../ens";
 
 const client = createPublicClient({
   chain: base,
   transport: http(config.ethereum.rpcUrl),
-});
-
-// Separate mainnet client for ENS resolution (ENS lives on mainnet)
-const mainnetClient = createPublicClient({
-  chain: mainnet,
-  transport: http("https://cloudflare-eth.com"),
 });
 
 export const getBalance = tool({
@@ -96,19 +90,65 @@ export const getTransaction = tool({
   },
 });
 
-export const resolveEns = tool({
-  description:
-    "Resolve an ENS name (like vitalik.eth) to an Ethereum address.",
-  inputSchema: z.object({
-    name: z.string().describe("The ENS name to resolve (e.g. vitalik.eth)"),
-  }),
-  execute: async ({ name }) => {
-    const address = await mainnetClient.getEnsAddress({
-      name: normalize(name),
-    });
-    if (!address) {
-      return { name, address: null, error: "ENS name not found" };
-    }
-    return { name, address };
-  },
-});
+const resolveEnsInputSchema = z
+  .object({
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe("A single ENS name to resolve (e.g. vitalik.eth)"),
+    names: z
+      .array(z.string().trim().min(1))
+      .min(1)
+      .max(20)
+      .optional()
+      .describe(
+        "Optional batch of ENS names to resolve in one call, preserving input order."
+      ),
+  })
+  .refine(({ name, names }) => Boolean(name || names?.length), {
+    message: "Provide either name or names.",
+  })
+  .refine(({ name, names }) => !(name && names?.length), {
+    message: "Provide either name or names, not both.",
+  });
+
+export function createReadChainTools() {
+  const ensService = createEnsService();
+
+  const resolveEns = tool({
+    description:
+      "Resolve one or more ENS names on Ethereum mainnet to Ethereum addresses. Returns clear validation, not-found, no-address, or network errors without throwing.",
+    inputSchema: resolveEnsInputSchema,
+    execute: async ({ name, names }) => {
+      const requestedNames = names ?? (name ? [name] : []);
+      const results = await ensService.resolveNames(requestedNames);
+
+      if (requestedNames.length === 1) {
+        return results[0];
+      }
+
+      return {
+        results,
+        resolutionChainId: mainnet.id,
+      };
+    },
+  });
+
+  const reverseResolveEns = tool({
+    description:
+      "Reverse-resolve an Ethereum address on Ethereum mainnet to its primary ENS name, if one is configured and forward-confirmed.",
+    inputSchema: z.object({
+      address: z.string().describe("The Ethereum address (0x...)"),
+    }),
+    execute: async ({ address }) => ensService.reverseResolveAddress(address),
+  });
+
+  return {
+    getBalance,
+    getTransaction,
+    resolveEns,
+    reverseResolveEns,
+  };
+}
