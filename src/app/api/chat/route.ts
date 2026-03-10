@@ -3,13 +3,46 @@ import { model } from "@/lib/llm";
 import { networkConfigSchema, DEFAULT_NETWORK_CONFIG } from "@/lib/ethereum";
 import { getSystemPrompt } from "@/lib/system-prompt";
 import { createTools } from "@/lib/tools";
+import {
+  buildE2EChatMockSseBody,
+  isE2EChatMockScenario,
+} from "@/lib/testing/e2e-chat-mocks";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
   try {
-    const { messages, networkConfig } = await req.json();
+    const mockScenario = req.headers.get("x-e2e-mock-scenario");
+    if (
+      process.env.NODE_ENV !== "production" &&
+      mockScenario &&
+      isE2EChatMockScenario(mockScenario)
+    ) {
+      return new Response(buildE2EChatMockSseBody(mockScenario), {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+        },
+      });
+    }
+
+    const { messages, networkConfig, e2eMockScenario } = await req.json();
+
+    if (
+      process.env.NODE_ENV !== "production" &&
+      typeof e2eMockScenario === "string" &&
+      isE2EChatMockScenario(e2eMockScenario)
+    ) {
+      return new Response(buildE2EChatMockSseBody(e2eMockScenario), {
+        headers: {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+        },
+      });
+    }
     const parsedNetworkConfig = networkConfigSchema.safeParse(networkConfig);
 
     if (networkConfig != null && !parsedNetworkConfig.success) {

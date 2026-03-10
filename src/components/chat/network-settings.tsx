@@ -44,7 +44,13 @@ export function NetworkSettings({
 
   return (
     <div className="relative">
-      <Button variant="outline" size="sm" className="gap-2" onClick={onToggle}>
+      <Button
+        data-testid="network-settings-trigger"
+        variant="outline"
+        size="sm"
+        className="gap-2"
+        onClick={onToggle}
+      >
         <Globe className="size-3.5" />
         <span className="hidden sm:inline">{networkLabel}</span>
         <span className="font-mono text-[11px] text-muted-foreground">
@@ -54,7 +60,10 @@ export function NetworkSettings({
       </Button>
 
       {isOpen ? (
-        <div className="absolute right-0 z-20 mt-2 w-[min(24rem,calc(100vw-2rem))] rounded-xl border bg-background p-4 shadow-lg">
+        <div
+          data-testid="network-settings-panel"
+          className="absolute right-0 z-20 mt-2 w-[min(24rem,calc(100vw-2rem))] rounded-xl border bg-background p-4 shadow-lg"
+        >
           <div className="space-y-3">
             <div>
               <p className="text-sm font-medium">Network Settings</p>
@@ -66,6 +75,7 @@ export function NetworkSettings({
             <label className="block space-y-1">
               <span className="text-xs text-muted-foreground">Preset</span>
               <select
+                data-testid="network-settings-preset"
                 className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none"
                 value={presetId}
                 onChange={(event) => {
@@ -90,6 +100,7 @@ export function NetworkSettings({
             <label className="block space-y-1">
               <span className="text-xs text-muted-foreground">RPC URL</span>
               <Input
+                data-testid="network-settings-rpc-url"
                 value={value.rpcUrl}
                 onChange={(event) =>
                   onChange({ ...value, rpcUrl: event.target.value })
@@ -101,6 +112,7 @@ export function NetworkSettings({
             <label className="block space-y-1">
               <span className="text-xs text-muted-foreground">Chain ID</span>
               <Input
+                data-testid="network-settings-chain-id"
                 value={value.chainId}
                 onChange={(event) =>
                   onChange({ ...value, chainId: event.target.value })
