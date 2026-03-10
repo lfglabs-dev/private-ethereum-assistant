@@ -153,6 +153,34 @@ const E2E_CHAT_MOCK_SCENARIOS = {
       chain: { id: 42161, name: "Arbitrum One", nativeSymbol: "ETH" },
     }
   ),
+  timeoutError: [
+    {
+      type: "data-debug",
+      data: {
+        timestamp: "2026-03-10T00:00:00.000Z",
+        level: "info",
+        stage: "request",
+        message: "Dispatching request to qwen3:8b",
+        detail: "timeout=180s",
+      },
+      transient: true,
+    },
+    {
+      type: "data-debug",
+      data: {
+        timestamp: "2026-03-10T00:00:01.000Z",
+        level: "error",
+        stage: "error",
+        message: "Streaming failed",
+        detail: "The request timed out after 180 seconds.",
+      },
+      transient: true,
+    },
+    {
+      type: "error",
+      errorText: "The request timed out after 180 seconds.",
+    },
+  ],
 } satisfies Record<string, UIMessageChunk[]>
 
 export type E2EChatMockScenario = keyof typeof E2E_CHAT_MOCK_SCENARIOS

@@ -319,6 +319,27 @@ async function main() {
     ])
   })
 
+  await runTest(
+    "Timeout error keeps model trace visible",
+    async () => {
+      await openHome()
+      await setMockScenario("timeoutError")
+      await submitMessage("trigger timeout")
+      await runAgentBrowser(["wait", '[data-testid="chat-error"]'])
+      await runAgentBrowser(["wait", '[data-testid="chat-debug-panel"]'])
+      await expectText('[data-testid="chat-error"]', [
+        "Request Timed Out",
+        "timed out",
+      ])
+      await expectText('[data-testid="chat-debug-panel"]', [
+        "Model Trace",
+        "Streaming failed",
+        "180 seconds",
+      ])
+    },
+    "timeout-error-trace.png"
+  )
+
   if (SHOULD_SKIP_LLM_SMOKE) {
     results.push({
       name: 'Full LLM smoke test: "Resolve vitalik.eth"',

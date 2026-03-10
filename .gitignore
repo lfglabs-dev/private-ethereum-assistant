@@ -35,6 +35,7 @@ yarn-error.log*
 .env*
 # Allow encrypted env file to be committed (keys file must never be committed)
 !.env.tianjin
+!.env.local.example
 
 # vercel
 .vercel
