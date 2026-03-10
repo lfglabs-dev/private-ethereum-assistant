@@ -123,19 +123,19 @@ ollama serve
 3. Pull a model:
 
 ```bash
-ollama pull qwen3:4b
+ollama pull qwen3:8b
 ```
 
 4. Use this in `.env.local`:
 
 ```bash
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL=qwen3:4b
+LLM_MODEL=qwen3:8b
 LLM_TIMEOUT_MS=180000
 ```
 
 Notes:
-- `qwen3:4b` is the current default in the app
+- `qwen3:8b` is the current default in the app
 - you can swap in larger models if your machine can handle them
 - if the model name in `.env.local` does not exactly match the model installed in Ollama, requests will fail
 
@@ -237,7 +237,7 @@ If you only want to run the chat UI and query chain data:
 
 ```bash
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL=qwen3:4b
+LLM_MODEL=qwen3:8b
 LLM_TIMEOUT_MS=180000
 
 RPC_URL=https://mainnet.base.org
@@ -305,7 +305,7 @@ RAILGUN_POLLING_INTERVAL_MS=15000
 
 ```bash
 LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL=qwen3:4b
+LLM_MODEL=qwen3:8b
 LLM_TIMEOUT_MS=180000
 
 # Default network for reads and normal transactions.

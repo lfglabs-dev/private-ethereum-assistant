@@ -243,7 +243,23 @@ export async function POST(req: Request) {
           },
         });
 
-        writer.merge(result.toUIMessageStream());
+        writer.merge(
+          result.toUIMessageStream({
+            onError: (error) => {
+              const detail =
+                error instanceof Error ? error.message : String(error);
+
+              writeDebugLog({
+                level: "error",
+                stage: "error",
+                message: "Streaming failed",
+                detail,
+              });
+
+              return detail;
+            },
+          })
+        );
       },
     });
 

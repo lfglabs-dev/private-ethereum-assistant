@@ -21,6 +21,7 @@ import {
   assistantDataPartSchemas,
   type AssistantUIMessage,
   type DebugLogEntry,
+  createDebugLog,
 } from "@/lib/chat-stream"
 
 const NETWORK_STORAGE_KEY = "private-ethereum-assistant.network.v1"
@@ -121,12 +122,29 @@ function getNetworkLabel(value: NetworkFormState) {
 export default function Home() {
   const [debugEntries, setDebugEntries] = useState<DebugLogEntry[]>([])
   const [showDebugTrace, setShowDebugTrace] = useState(false)
+  const appendDebugEntry = (entry: DebugLogEntry) => {
+    setDebugEntries((entries) => [...entries.slice(-23), entry])
+  }
   const { messages, sendMessage, stop, status, error, clearError } = useChat<AssistantUIMessage>({
     dataPartSchemas: assistantDataPartSchemas,
     onData: (part) => {
       if (part.type !== "data-debug") return
 
-      setDebugEntries((entries) => [...entries.slice(-23), part.data])
+      appendDebugEntry(part.data)
+      if (part.data.level === "error") {
+        setShowDebugTrace(true)
+      }
+    },
+    onError: (nextError) => {
+      appendDebugEntry(
+        createDebugLog({
+          level: "error",
+          stage: "error",
+          message: "Chat request failed",
+          detail: nextError.message || "Unknown chat error",
+        })
+      )
+      setShowDebugTrace(true)
     },
   })
   const [input, setInput] = useState("")
@@ -248,7 +266,14 @@ export default function Home() {
             </motion.div>
           )}
 
-          {error && <ChatError error={error} onDismiss={clearError} />}
+          {error && (
+            <div className="mx-auto max-w-3xl space-y-3">
+              <ChatError error={error} onDismiss={clearError} />
+              {debugEntries.length > 0 && (
+                <ChatDebugPanel entries={debugEntries} isStreaming={false} />
+              )}
+            </div>
+          )}
         </div>
 
         <AnimatePresence>

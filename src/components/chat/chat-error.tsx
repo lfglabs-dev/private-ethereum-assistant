@@ -11,6 +11,7 @@ interface ChatErrorProps {
 export function ChatError({ error, onDismiss }: ChatErrorProps) {
   const isFetchError = error.message.includes("fetch")
   const isTimeout = error.name === "TimeoutError" || error.message.includes("timed out") || error.message.includes("timeout")
+  const timeoutDetail = error.message.trim()
   return (
     <div
       data-testid="chat-error"
@@ -20,13 +21,24 @@ export function ChatError({ error, onDismiss }: ChatErrorProps) {
         <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
         <div className="flex-1 text-sm">
           <p className="font-medium text-destructive">{isTimeout ? "Request Timed Out" : "Connection Error"}</p>
-          <p className="mt-1 text-destructive/80">
-            {isTimeout
-              ? "The LLM did not respond within 3 minutes. It may be overloaded or unresponsive. Try again or restart Ollama."
-              : isFetchError
-              ? "Could not connect to the LLM. Is Ollama running? Try: ollama serve"
-              : error.message || "An unexpected error occurred."}
-          </p>
+          {isTimeout ? (
+            <>
+              <p className="mt-1 text-destructive/80">
+                The LLM did not respond before the configured timeout. It may be overloaded or unresponsive.
+              </p>
+              {timeoutDetail ? (
+                <p className="mt-2 font-mono text-xs text-destructive/70">
+                  {timeoutDetail}
+                </p>
+              ) : null}
+            </>
+          ) : (
+            <p className="mt-1 text-destructive/80">
+              {isFetchError
+                ? "Could not connect to the LLM. Is Ollama running? Try: ollama serve"
+                : error.message || "An unexpected error occurred."}
+            </p>
+          )}
         </div>
         <Button
           variant="ghost"

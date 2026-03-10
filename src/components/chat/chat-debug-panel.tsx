@@ -30,7 +30,10 @@ function getLevelClass(level: DebugLogEntry["level"]) {
 
 export function ChatDebugPanel({ entries, isStreaming }: ChatDebugPanelProps) {
   return (
-    <div className="rounded-2xl border border-border/60 bg-card/70 backdrop-blur-sm">
+    <div
+      data-testid="chat-debug-panel"
+      className="rounded-2xl border border-border/60 bg-card/70 backdrop-blur-sm"
+    >
       <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
         <div className="flex items-center gap-2">
           <ScrollText className="size-4 text-muted-foreground" />

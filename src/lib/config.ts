@@ -11,7 +11,7 @@ function getNumberEnv(name: string, fallback: number) {
 export const config = {
   llm: {
     baseURL: process.env.LLM_BASE_URL || "http://localhost:11434/v1",
-    model: process.env.LLM_MODEL || "qwen3:4b",
+    model: process.env.LLM_MODEL || "qwen3:8b",
     timeoutMs: getNumberEnv("LLM_TIMEOUT_MS", 180000),
   },
   ethereum: {
