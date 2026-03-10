@@ -9,7 +9,6 @@ const SUGGESTIONS = [
   "What are my private balances?",
   "Shield 0.01 ETH into Railgun",
   "Show pending transactions",
-  "Send 0.005 ETH privately to a 0zk address",
 ]
 
 interface ChatWelcomeProps {

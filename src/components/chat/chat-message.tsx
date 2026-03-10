@@ -3,12 +3,14 @@
 import type { UIMessage } from "ai"
 import { motion } from "framer-motion"
 import { Loader2, User } from "lucide-react"
+import { ChatDebugPanel } from "@/components/chat/chat-debug-panel"
 import { EthereumIcon } from "@/components/icons/ethereum-icon"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer"
 import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
 import { ToolResultCard } from "@/components/chat/tool-result-card"
 import { MessageActions } from "@/components/chat/message-actions"
+import type { DebugLogEntry } from "@/lib/chat-stream"
 
 type Part = { type: string; [key: string]: unknown }
 
@@ -53,14 +55,33 @@ function getToolLabel(toolName: string): string {
 interface ChatMessageProps {
   message: UIMessage
   isStreaming?: boolean
+  traceEntries?: DebugLogEntry[]
+  showTrace?: boolean
+  canToggleTrace?: boolean
+  onToggleTrace?: () => void
 }
 
-export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
+export function ChatMessage({
+  message,
+  isStreaming,
+  traceEntries = [],
+  showTrace = false,
+  canToggleTrace = false,
+  onToggleTrace,
+}: ChatMessageProps) {
   const isUser = message.role === "user"
   const parts = message.parts as Part[] | undefined
 
   const hasContent = parts?.some(
     (p) => (p.type === "text" && String(p.text || "").trim()) || getToolOutput(p),
+  )
+  const showTracePanel = !isUser && showTrace
+  const assistantAvatar = (
+    <Avatar size="sm" className="mt-0.5 shrink-0">
+      <AvatarFallback className="bg-secondary">
+        <EthereumIcon className="size-3.5" />
+      </AvatarFallback>
+    </Avatar>
   )
 
   return (
@@ -71,11 +92,25 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
       transition={{ duration: 0.3, ease: "easeOut" }}
       className={`group flex gap-3 ${isUser ? "flex-row-reverse" : ""}`}
     >
-      <Avatar size="sm" className="mt-0.5 shrink-0">
-        <AvatarFallback className={isUser ? "bg-primary text-primary-foreground" : "bg-secondary"}>
-          {isUser ? <User className="size-3.5" /> : <EthereumIcon className="size-3.5" />}
-        </AvatarFallback>
-      </Avatar>
+      {isUser ? (
+        <Avatar size="sm" className="mt-0.5 shrink-0">
+          <AvatarFallback className="bg-primary text-primary-foreground">
+            <User className="size-3.5" />
+          </AvatarFallback>
+        </Avatar>
+      ) : canToggleTrace ? (
+        <button
+          type="button"
+          onClick={onToggleTrace}
+          className="rounded-full transition-transform hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          aria-label={showTracePanel ? "Hide model trace" : "Show model trace"}
+          title={showTracePanel ? "Hide model trace" : "Show model trace"}
+        >
+          {assistantAvatar}
+        </button>
+      ) : (
+        assistantAvatar
+      )}
 
       <div className={`max-w-[80%] space-y-2 ${isUser ? "items-end" : ""}`}>
         {isUser ? (
@@ -146,6 +181,10 @@ export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
 
             {!isStreaming && hasContent && (
               <MessageActions content={getTextContent(parts)} />
+            )}
+
+            {showTracePanel && (
+              <ChatDebugPanel entries={traceEntries} isStreaming={Boolean(isStreaming)} />
             )}
           </>
         )}

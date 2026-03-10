@@ -1,7 +1,18 @@
+function getNumberEnv(name: string, fallback: number) {
+  const value = process.env[name];
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export const config = {
   llm: {
     baseURL: process.env.LLM_BASE_URL || "http://localhost:11434/v1",
-    model: process.env.LLM_MODEL || "qwen3:8b",
+    model: process.env.LLM_MODEL || "qwen3:4b",
+    timeoutMs: getNumberEnv("LLM_TIMEOUT_MS", 180000),
   },
   ethereum: {
     safeAddress: process.env.SAFE_ADDRESS || "0x4581812Df7500277e3fC72CF93f766DBBd32d371",

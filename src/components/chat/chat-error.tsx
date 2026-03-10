@@ -10,6 +10,7 @@ interface ChatErrorProps {
 
 export function ChatError({ error, onDismiss }: ChatErrorProps) {
   const isFetchError = error.message.includes("fetch")
+  const isTimeout = error.name === "TimeoutError" || error.message.includes("timed out") || error.message.includes("timeout")
   return (
     <div
       data-testid="chat-error"
@@ -18,9 +19,11 @@ export function ChatError({ error, onDismiss }: ChatErrorProps) {
       <div className="flex items-start gap-3">
         <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
         <div className="flex-1 text-sm">
-          <p className="font-medium text-destructive">Connection Error</p>
+          <p className="font-medium text-destructive">{isTimeout ? "Request Timed Out" : "Connection Error"}</p>
           <p className="mt-1 text-destructive/80">
-            {isFetchError
+            {isTimeout
+              ? "The LLM did not respond within 3 minutes. It may be overloaded or unresponsive. Try again or restart Ollama."
+              : isFetchError
               ? "Could not connect to the LLM. Is Ollama running? Try: ollama serve"
               : error.message || "An unexpected error occurred."}
           </p>
