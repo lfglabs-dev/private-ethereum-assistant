@@ -16,33 +16,148 @@ const tools = createTools(ARBITRUM_CONFIG)
 const walletAddress = getWalletAddress()
 const TEST_AMOUNT = "0.000001"
 
+async function prepareEoaTransfer(input: {
+  to: string
+  amount: string
+  tokenAddress?: string
+  gasLimit?: string
+}): Promise<unknown> {
+  return executeTool(tools.prepare_eoa_transfer, input)
+}
+
+async function collectSendEoaTransferUpdates(
+  confirmationId: string
+): Promise<unknown[]> {
+  return collectAsyncIterable(
+    executeToolStream(tools.send_eoa_transfer, {
+      confirmationId,
+    })
+  )
+}
+
+type TransactionPreviewResult = {
+  kind: "transaction_preview"
+  confirmationId?: string
+  status: "awaiting_confirmation"
+  asset?: { type?: string }
+  amount?: string
+  sender?: string
+  recipient?: string
+  resolvedEnsName?: string
+  chain: { id: number }
+  gasEstimate?: {
+    gasLimit?: string
+    maxFeePerGasGwei?: string
+    gasCostNative?: string
+  }
+}
+
+type TransactionErrorResult = {
+  kind: "transaction_error"
+  error: string
+  message?: string
+}
+
+type TransactionProgressUpdate = {
+  kind: "transaction_progress"
+  status: string
+  txHash?: `0x${string}`
+  receipt?: {
+    status?: string
+    blockNumber?: number
+  }
+  explorerUrl?: string
+}
+
+type ConfirmedTransactionProgressUpdate = TransactionProgressUpdate & {
+  status: "confirmed"
+  txHash: `0x${string}`
+  receipt: {
+    status?: string
+    blockNumber: number
+  }
+  explorerUrl: string
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function expectTransactionPreview(
+  result: unknown
+): asserts result is TransactionPreviewResult {
+  if (!isRecord(result) || result.kind !== "transaction_preview" || !isRecord(result.chain)) {
+    throw new Error("Expected a transaction preview result.")
+  }
+}
+
+function expectTransactionError(
+  result: unknown
+): asserts result is TransactionErrorResult {
+  if (
+    !isRecord(result) ||
+    result.kind !== "transaction_error" ||
+    typeof result.error !== "string"
+  ) {
+    throw new Error("Expected a transaction error result.")
+  }
+}
+
+function expectTransactionProgress(
+  result: unknown
+): asserts result is TransactionProgressUpdate {
+  if (!isRecord(result) || result.kind !== "transaction_progress") {
+    throw new Error("Expected a transaction progress update.")
+  }
+}
+
+function expectConfirmedTransactionProgress(
+  result: unknown
+): asserts result is ConfirmedTransactionProgressUpdate {
+  if (
+    !isRecord(result) ||
+    result.kind !== "transaction_progress" ||
+    result.status !== "confirmed" ||
+    typeof result.txHash !== "string" ||
+    typeof result.explorerUrl !== "string" ||
+    !isRecord(result.receipt) ||
+    typeof result.receipt.blockNumber !== "number"
+  ) {
+    throw new Error("Expected a confirmed transaction progress update.")
+  }
+}
+
+function getTransactionStatuses(results: unknown[]) {
+  return results.map((result) => {
+    expectTransactionProgress(result)
+    return result.status
+  })
+}
+
 describe("EOA transfer E2E", () => {
-  let preview: any
-  let updates: Array<any> = []
+  let preview: unknown = null
+  let updates: unknown[] = []
   let balanceBefore = BigInt(0)
   let balanceAfter = BigInt(0)
 
   beforeAll(async () => {
-    preview = await executeTool(tools.prepare_eoa_transfer, {
+    preview = await prepareEoaTransfer({
       to: walletAddress,
       amount: TEST_AMOUNT,
     })
 
-    expect(preview.kind).toBe("transaction_preview")
+    expectTransactionPreview(preview)
     if (!preview.confirmationId) {
       throw new Error("prepare_eoa_transfer did not return a confirmationId.")
     }
 
     balanceBefore = await verificationClient.getBalance({ address: walletAddress })
-    updates = await collectAsyncIterable(
-      executeToolStream(tools.send_eoa_transfer, {
-        confirmationId: preview.confirmationId,
-      })
-    )
+    updates = await collectSendEoaTransferUpdates(preview.confirmationId)
     balanceAfter = await verificationClient.getBalance({ address: walletAddress })
   })
 
   test("prepare_eoa_transfer builds an ETH transfer preview to self", () => {
+    expectTransactionPreview(preview)
     expect(preview.kind).toBe("transaction_preview")
     expect(preview.status).toBe("awaiting_confirmation")
     expect(preview.confirmationId?.length).toBeGreaterThan(0)
@@ -58,12 +173,16 @@ describe("EOA transfer E2E", () => {
 
   test("prepare_eoa_transfer and send_eoa_transfer complete a self-transfer on Arbitrum", async () => {
     const finalUpdate = updates.at(-1)
+    expectConfirmedTransactionProgress(finalUpdate)
 
-    expect(finalUpdate?.status).toBe("confirmed")
-    expect(finalUpdate?.txHash).toMatch(/^0x[a-fA-F0-9]{64}$/)
-    expect(finalUpdate?.receipt?.status).toBe("success")
-    expect(finalUpdate?.receipt?.blockNumber).toBeGreaterThan(0)
-    expect(finalUpdate?.explorerUrl).toContain("arbiscan.io")
+    expect(finalUpdate.status).toBe("confirmed")
+    expect(finalUpdate.txHash).toMatch(/^0x[a-fA-F0-9]{64}$/)
+    expect(finalUpdate.receipt?.status).toBe("success")
+    expect(finalUpdate.receipt?.blockNumber).toBeGreaterThan(0)
+    expect(finalUpdate.explorerUrl).toContain("arbiscan.io")
+    if (!finalUpdate.txHash) {
+      throw new Error("Expected the confirmed update to include a txHash.")
+    }
 
     const receipt = await verificationClient.getTransactionReceipt({
       hash: finalUpdate.txHash,
@@ -75,7 +194,7 @@ describe("EOA transfer E2E", () => {
   })
 
   test("send_eoa_transfer yields the full transaction lifecycle", () => {
-    expect(updates.map((update) => update.status)).toEqual([
+    expect(getTransactionStatuses(updates)).toEqual([
       "estimating_gas",
       "building",
       "signing",
@@ -86,38 +205,34 @@ describe("EOA transfer E2E", () => {
   })
 
   test("prepare_eoa_transfer resolves ENS recipients", async () => {
-    const result = await executeTool(tools.prepare_eoa_transfer, {
+    const result = await prepareEoaTransfer({
       to: "vitalik.eth",
       amount: TEST_AMOUNT,
     })
 
-    expect(result.kind).toBe("transaction_preview")
+    expectTransactionPreview(result)
     expect(result.resolvedEnsName).toBe("vitalik.eth")
     expect(result.recipient).toBe("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
   })
 
   test("prepare_eoa_transfer returns an insufficient balance error", async () => {
-    const result = await executeTool(tools.prepare_eoa_transfer, {
+    const result = await prepareEoaTransfer({
       to: walletAddress,
       amount: "999999",
     })
 
-    expect(result.kind).toBe("transaction_error")
-    if (!("error" in result) || typeof result.error !== "string") {
-      throw new Error("Expected a transaction error payload.")
-    }
-    expect(result.error.toLowerCase()).toMatch(/insufficient|exceeds the balance/)
+    expectTransactionError(result)
+    expect((result.error ?? result.message ?? "").toLowerCase()).toMatch(
+      /insufficient|exceeds the balance/
+    )
   })
 
   test("send_eoa_transfer returns a clear error for unknown confirmation IDs", async () => {
-    const updates = await collectAsyncIterable(
-      executeToolStream(tools.send_eoa_transfer, {
-        confirmationId: "nonexistent-uuid",
-      })
-    )
+    const updates = await collectSendEoaTransferUpdates("nonexistent-uuid")
+    const firstUpdate = updates[0]
 
     expect(updates).toHaveLength(1)
-    expect(updates[0]?.kind).toBe("transaction_error")
-    expect(updates[0]?.message).toContain("expired or was not found")
+    expectTransactionError(firstUpdate)
+    expect(firstUpdate.message).toContain("expired or was not found")
   })
 })
