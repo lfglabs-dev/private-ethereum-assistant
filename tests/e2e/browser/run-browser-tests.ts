@@ -16,6 +16,8 @@ const SESSION = `private-ethereum-assistant-e2e-${Date.now()}`
 const SCREENSHOT_DIR = join(process.cwd(), "tests/e2e/browser/screenshots")
 const SHOULD_SKIP_LLM_SMOKE = process.env.E2E_SKIP_LLM_SMOKE === "1"
 const E2E_CHAT_MOCK_STORAGE_KEY = "private-ethereum-assistant.e2e-chat-mock-scenario"
+const E2E_LLM_BASE_URL = process.env.LLM_BASE_URL ?? "http://127.0.0.1:11434/v1"
+const E2E_LLM_MODEL = process.env.LLM_MODEL ?? "llama3.1:latest"
 
 let devServer: Bun.Subprocess | undefined
 let startedDevServer = false
@@ -85,17 +87,20 @@ async function ensureServer() {
 
   devServer = Bun.spawn({
     cmd: [
-      "bun",
-      "run",
+      "bunx",
+      "next",
       "dev",
-      "--",
       "--hostname",
       "127.0.0.1",
       "--port",
       DEV_PORT,
     ],
     cwd: process.cwd(),
-    env: process.env,
+    env: {
+      ...process.env,
+      LLM_BASE_URL: E2E_LLM_BASE_URL,
+      LLM_MODEL: E2E_LLM_MODEL,
+    },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -321,13 +326,15 @@ async function main() {
       details: "Skipped because E2E_SKIP_LLM_SMOKE=1.",
     })
   } else {
+    const liveSmokeTimeoutMs = 180_000
+
     await runTest(
       'Full LLM smoke test: "Resolve vitalik.eth"',
       async () => {
         await openHome()
         await submitMessage("Resolve vitalik.eth")
 
-        const deadline = Date.now() + 90_000
+        const deadline = Date.now() + liveSmokeTimeoutMs
         while (Date.now() < deadline) {
           const text = await getText("body")
           if (text.includes("vitalik.eth") && text.includes("0xd8dA6BF")) {
@@ -338,7 +345,9 @@ async function main() {
         }
 
         const text = await getText("body")
-        throw new Error(`Smoke test did not render the ENS answer within 90s.\n${text}`)
+        throw new Error(
+          `Smoke test did not render the ENS answer within ${liveSmokeTimeoutMs / 1000}s.\n${text}`
+        )
       },
       "smoke-ens.png"
     )
