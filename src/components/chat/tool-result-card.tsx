@@ -105,7 +105,7 @@ function BalanceResult({ data }: { data: Record<string, unknown> }) {
   const errors = Array.isArray(data.errors) ? data.errors.map(String) : []
 
   return (
-    <Card size="sm" className="border-0 bg-secondary/50">
+    <Card data-testid="result-balance" size="sm" className="border-0 bg-secondary/50">
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
           <Wallet className="size-4 text-muted-foreground" />
@@ -317,7 +317,7 @@ function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
 function SafeInfoResult({ data }: { data: Record<string, unknown> }) {
   const owners = data.owners as string[]
   return (
-    <Card size="sm" className="border-0 bg-secondary/50">
+    <Card data-testid="result-safe-info" size="sm" className="border-0 bg-secondary/50">
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
           <Shield className="size-4 text-muted-foreground" />
@@ -361,7 +361,11 @@ function PendingTransactionsResult({ data }: { data: Record<string, unknown> }) 
   const safeAddress = data.safeAddress ? String(data.safeAddress) : null
   if (txs.length === 0) {
     return (
-      <Card size="sm" className="border-0 bg-secondary/50">
+      <Card
+        data-testid="result-pending-transactions"
+        size="sm"
+        className="border-0 bg-secondary/50"
+      >
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>No pending transactions.</p>
           {safeAddress && <p className="font-mono text-xs">{shortenAddress(safeAddress)}</p>}
@@ -370,7 +374,7 @@ function PendingTransactionsResult({ data }: { data: Record<string, unknown> }) 
     )
   }
   return (
-    <div className="space-y-2">
+    <div data-testid="result-pending-transactions" className="space-y-2">
       {txs.map((tx) => (
         <Card key={String(tx.safeTxHash)} size="sm" className="border-0 bg-secondary/50">
           <CardHeader className="pb-0">
@@ -429,7 +433,7 @@ function PendingTransactionsResult({ data }: { data: Record<string, unknown> }) 
 
 function EnsResult({ data }: { data: Record<string, unknown> }) {
   return (
-    <Card size="sm" className="border-0 bg-secondary/50">
+    <Card data-testid="result-ens" size="sm" className="border-0 bg-secondary/50">
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
           <Hash className="size-4 text-muted-foreground" />
@@ -450,7 +454,7 @@ function EnsResult({ data }: { data: Record<string, unknown> }) {
 function TransactionResult({ data }: { data: Record<string, unknown> }) {
   const isSuccess = data.status === "Success"
   return (
-    <Card size="sm" className="border-0 bg-secondary/50">
+    <Card data-testid="result-transaction" size="sm" className="border-0 bg-secondary/50">
       <CardHeader className="pb-0">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm">Transaction</CardTitle>
@@ -484,7 +488,11 @@ function TransactionResult({ data }: { data: Record<string, unknown> }) {
 
 function TransactionErrorResult({ data }: { data: TransactionErrorData }) {
   return (
-    <Card size="sm" className="border-destructive/20 bg-destructive/5">
+    <Card
+      data-testid="result-transaction-error"
+      size="sm"
+      className="border-destructive/20 bg-destructive/5"
+    >
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
           <AlertCircle className="size-4 text-destructive" />
@@ -505,7 +513,11 @@ function TransactionErrorResult({ data }: { data: TransactionErrorData }) {
 
 function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
   return (
-    <Card size="sm" className="border-amber-500/20 bg-amber-500/5">
+    <Card
+      data-testid="result-transaction-preview"
+      size="sm"
+      className="border-amber-500/20 bg-amber-500/5"
+    >
       <CardHeader className="pb-0">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -611,6 +623,7 @@ function TransactionProgressResult({
 
   return (
     <Card
+      data-testid="result-transaction-progress"
       size="sm"
       className={
         isSuccess

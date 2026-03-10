@@ -11,9 +11,17 @@ interface ChatInputProps {
   onSubmit: () => void
   onStop: () => void
   isLoading: boolean
+  networkLabel: string
 }
 
-export function ChatInput({ value, onChange, onSubmit, onStop, isLoading }: ChatInputProps) {
+export function ChatInput({
+  value,
+  onChange,
+  onSubmit,
+  onStop,
+  isLoading,
+  networkLabel,
+}: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -79,7 +87,7 @@ export function ChatInput({ value, onChange, onSubmit, onStop, isLoading }: Chat
           )}
         </div>
         <p className="mt-2 text-center text-xs text-muted-foreground">
-          Local LLM &middot; Base Network &middot; Your data never leaves this machine
+          Local LLM &middot; {networkLabel} &middot; Your data never leaves this machine
         </p>
       </div>
     </div>

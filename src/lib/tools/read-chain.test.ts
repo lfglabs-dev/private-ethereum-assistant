@@ -14,9 +14,9 @@ describe("read-chain helpers", () => {
   });
 
   test("formats raw token amounts using token decimals", () => {
-    expect(formatTokenAmount(123456789n, 6)).toBe("123.456789");
-    expect(formatTokenAmount(1234500000000000000n, 18)).toBe("1.2345");
-    expect(formatTokenAmount(123456789n, null)).toBe("123,456,789");
+    expect(formatTokenAmount(BigInt("123456789"), 6)).toBe("123.456789");
+    expect(formatTokenAmount(BigInt("1234500000000000000"), 18)).toBe("1.2345");
+    expect(formatTokenAmount(BigInt("123456789"), null)).toBe("123,456,789");
   });
 
   test("normalizes valid addresses and rejects invalid ones", () => {

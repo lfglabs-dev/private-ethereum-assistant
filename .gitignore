@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/tests/e2e/browser/screenshots/
 
 # next.js
 /.next/

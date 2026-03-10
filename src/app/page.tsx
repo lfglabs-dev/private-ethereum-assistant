@@ -19,11 +19,15 @@ import { useScrollToBottom } from "@/hooks/use-scroll-to-bottom"
 
 const NETWORK_STORAGE_KEY = "private-ethereum-assistant.network.v1"
 const NETWORK_STORAGE_EVENT = "private-ethereum-assistant.network.changed"
+const E2E_CHAT_MOCK_STORAGE_KEY = "private-ethereum-assistant.e2e-chat-mock-scenario"
 
 const DEFAULT_NETWORK_FORM_STATE: NetworkFormState = {
   chainId: String(DEFAULT_NETWORK_CONFIG.chainId),
   rpcUrl: DEFAULT_NETWORK_CONFIG.rpcUrl,
 }
+
+let cachedNetworkSettingsRaw: string | null = null
+let cachedNetworkSettingsValue = DEFAULT_NETWORK_FORM_STATE
 
 function loadInitialNetworkSettings(): NetworkFormState {
   if (typeof window === "undefined") {
@@ -32,21 +36,31 @@ function loadInitialNetworkSettings(): NetworkFormState {
 
   const raw = window.localStorage.getItem(NETWORK_STORAGE_KEY)
   if (!raw) {
+    cachedNetworkSettingsRaw = null
+    cachedNetworkSettingsValue = DEFAULT_NETWORK_FORM_STATE
     return DEFAULT_NETWORK_FORM_STATE
+  }
+
+  if (raw === cachedNetworkSettingsRaw) {
+    return cachedNetworkSettingsValue
   }
 
   try {
     const parsed = JSON.parse(raw) as Partial<NetworkFormState>
     if (typeof parsed.chainId === "string" && typeof parsed.rpcUrl === "string") {
-      return {
+      cachedNetworkSettingsRaw = raw
+      cachedNetworkSettingsValue = {
         chainId: parsed.chainId,
         rpcUrl: parsed.rpcUrl,
       }
+      return cachedNetworkSettingsValue
     }
   } catch {
     window.localStorage.removeItem(NETWORK_STORAGE_KEY)
   }
 
+  cachedNetworkSettingsRaw = null
+  cachedNetworkSettingsValue = DEFAULT_NETWORK_FORM_STATE
   return DEFAULT_NETWORK_FORM_STATE
 }
 
@@ -75,8 +89,20 @@ function updateNetworkSettings(value: NetworkFormState) {
     return
   }
 
-  window.localStorage.setItem(NETWORK_STORAGE_KEY, JSON.stringify(value))
+  const serialized = JSON.stringify(value)
+  cachedNetworkSettingsRaw = serialized
+  cachedNetworkSettingsValue = value
+  window.localStorage.setItem(NETWORK_STORAGE_KEY, serialized)
   window.dispatchEvent(new Event(NETWORK_STORAGE_EVENT))
+}
+
+function loadE2EChatMockScenario() {
+  if (typeof window === "undefined") {
+    return undefined
+  }
+
+  const value = window.localStorage.getItem(E2E_CHAT_MOCK_STORAGE_KEY)
+  return value?.trim() || undefined
 }
 
 function getNetworkLabel(value: NetworkFormState) {
@@ -110,6 +136,7 @@ export default function Home() {
             chainId: networkSettings.chainId,
             rpcUrl: networkSettings.rpcUrl.trim(),
           },
+          e2eMockScenario: loadE2EChatMockScenario(),
         },
       },
     )
@@ -218,6 +245,7 @@ export default function Home() {
         onSubmit={handleSubmit}
         onStop={stop}
         isLoading={isLoading}
+        networkLabel={activeNetworkLabel}
       />
     </div>
   )
