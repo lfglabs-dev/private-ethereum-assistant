@@ -16,6 +16,10 @@ import {
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS)
 
 const tools = createTools(ARBITRUM_CONFIG)
+const baseTools = createTools({
+  chainId: 8453,
+  rpcUrl: "https://mainnet.base.org",
+})
 const walletAddress = getWalletAddress()
 
 describe("read-chain E2E", () => {
@@ -71,10 +75,53 @@ describe("read-chain E2E", () => {
     const result = await executeTool(tools.get_transaction, { hash })
     const receipt = await verificationClient.getTransactionReceipt({ hash })
 
+    if (result.status === "error") {
+      throw new Error(result.message)
+    }
+    if (typeof result.from !== "string") {
+      throw new Error("Expected get_transaction to return a sender address.")
+    }
+
     expect(result.hash).toBe(hash)
     expect(result.from.startsWith("0x")).toBe(true)
     expect(result.to?.startsWith("0x")).toBe(true)
     expect(result.status).toBe(receipt.status === "success" ? "Success" : "Failed")
     expect(result.blockNumber).toBeGreaterThan(0)
+  })
+
+  test("get_portfolio returns Base balances for the configured wallet", async () => {
+    const result = await executeTool(baseTools.get_portfolio, {
+      address: walletAddress,
+    })
+
+    expect(result.address).toBe(walletAddress)
+    expect(result.nativeBalance?.symbol).toBe("ETH")
+    expect(Array.isArray(result.tokens)).toBe(true)
+    expect(result.tokens.length).toBeGreaterThan(0)
+  })
+
+  test("get_transaction returns a graceful error for an unknown hash", async () => {
+    const hash =
+      "0x0000000000000000000000000000000000000000000000000000000000000000"
+    const result = await executeTool(tools.get_transaction, { hash })
+
+    expect(result.hash).toBe(hash)
+    expect(result.status).toBe("error")
+    expect(String(result.message).toLowerCase()).toMatch(/not found|missing|unknown|transaction/)
+  })
+
+  test("get_balance handles multiple token addresses with an invalid entry", async () => {
+    const result = await executeTool(tools.get_balance, {
+      address: walletAddress,
+      tokenAddresses: [
+        ARBITRUM_USDC_ADDRESS,
+        "0x0000000000000000000000000000000000000001",
+      ],
+    })
+
+    expect(result.tokens).toHaveLength(2)
+    expect(result.tokens[0]?.symbol).toBe("USDC")
+    expect(result.tokens[1]?.error).toBeTruthy()
+    expect(result.errors.length).toBeGreaterThan(0)
   })
 })

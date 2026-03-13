@@ -236,18 +236,36 @@ async function getTokenInfo(
   }
 
   const address = getAddress(tokenAddress);
-  const [decimals, symbol] = await Promise.all([
-    publicClient.readContract({
-      address,
-      abi: erc20Abi,
-      functionName: "decimals",
-    }),
-    publicClient.readContract({
-      address,
-      abi: erc20Abi,
-      functionName: "symbol",
-    }),
-  ]);
+  const bytecode = await publicClient.getBytecode({ address });
+  if (!bytecode || bytecode === "0x") {
+    return {
+      error: `No ERC-20 contract was found at ${address}.`,
+    };
+  }
+
+  let decimals: number;
+  let symbol: string;
+  try {
+    [decimals, symbol] = await Promise.all([
+      publicClient.readContract({
+        address,
+        abi: erc20Abi,
+        functionName: "decimals",
+      }),
+      publicClient.readContract({
+        address,
+        abi: erc20Abi,
+        functionName: "symbol",
+      }),
+    ]);
+  } catch (error) {
+    return {
+      error:
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : `Could not read ERC-20 metadata from ${address}.`,
+    };
+  }
 
   return {
     address,

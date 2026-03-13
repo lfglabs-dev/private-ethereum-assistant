@@ -390,7 +390,7 @@ const createFallbackProviderConfig = () => ({
     {
       provider: currentConfig.rpcUrl,
       priority: 1,
-      weight: 1,
+      weight: 2,
       maxLogsPerBatch: 32,
       stallTimeout: 5_000,
     },

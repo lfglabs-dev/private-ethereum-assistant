@@ -24,18 +24,55 @@ import {
   createDebugLog,
 } from "@/lib/chat-stream";
 import {
+  createDeveloperDisplayRuntimeConfig,
   clearStoredRuntimeConfig,
   createDefaultRuntimeConfig,
   createRuntimeConfigDraft,
+  getAppMode,
   getProviderLabel,
   loadStoredRuntimeConfig,
   parseRuntimeConfigDraft,
   saveStoredRuntimeConfig,
   subscribeToStoredRuntimeConfig,
+  type AppMode,
   type RuntimeConfig,
   type RuntimeConfigDraft,
 } from "@/lib/runtime-config";
 import { getNetworkLabel } from "@/lib/ethereum";
+
+const STANDARD_ONBOARDING_STEPS = [
+  {
+    title: "Local model",
+    description: "Point the app at your own local OpenAI-compatible model endpoint.",
+    sections: ["warning", "model"] as const,
+  },
+  {
+    title: "Network",
+    description: "Choose the read/send network for normal wallet activity.",
+    sections: ["network"] as const,
+  },
+  {
+    title: "Wallet",
+    description: "Add the low-value EOA you want to use for normal transfers.",
+    sections: ["wallet"] as const,
+  },
+  {
+    title: "Safe and Railgun",
+    description: "Finish the Safe and Railgun settings used by the specialized tools.",
+    sections: ["safe", "railgun"] as const,
+  },
+];
+
+function createStandardRuntimeConfigDraft() {
+  const runtimeConfig = createDefaultRuntimeConfig();
+  return createRuntimeConfigDraft({
+    ...runtimeConfig,
+    llm: {
+      ...runtimeConfig.llm,
+      provider: "local",
+    },
+  });
+}
 
 function getValidationMessage(error: unknown) {
   if (error instanceof ZodError) {
@@ -51,12 +88,14 @@ function getValidationMessage(error: unknown) {
 
 type ConfiguredAssistantProps = {
   runtimeConfig: RuntimeConfig;
+  appMode: AppMode;
   onSaveRuntimeConfig: (runtimeConfig: RuntimeConfig) => void;
   onDeleteAllSettings: () => void;
 };
 
 function ConfiguredAssistant({
   runtimeConfig,
+  appMode,
   onSaveRuntimeConfig,
   onDeleteAllSettings,
 }: ConfiguredAssistantProps) {
@@ -102,6 +141,7 @@ function ConfiguredAssistant({
   const isSubmitted = status === "submitted";
   const providerLabel = getProviderLabel(runtimeConfig.llm.provider);
   const activeNetworkLabel = getNetworkLabel(runtimeConfig.network);
+  const settingsEnabled = appMode !== "developer";
 
   const sendChatMessage = (text: string) => {
     setDebugEntries([]);
@@ -177,20 +217,22 @@ function ConfiguredAssistant({
             />
             <span data-testid="runtime-provider-label">{providerLabel}</span>
           </div>
-          <Button
-            data-testid="runtime-settings-trigger"
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={() => {
-              setSettingsDraft(createRuntimeConfigDraft(runtimeConfig));
-              setSettingsError(null);
-              setSettingsOpen(true);
-            }}
-          >
-            <Settings2 className="size-3.5" />
-            Settings
-          </Button>
+          {settingsEnabled ? (
+            <Button
+              data-testid="runtime-settings-trigger"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                setSettingsDraft(createRuntimeConfigDraft(runtimeConfig));
+                setSettingsError(null);
+                setSettingsOpen(true);
+              }}
+            >
+              <Settings2 className="size-3.5" />
+              Settings
+            </Button>
+          ) : null}
           <ThemeToggle />
         </div>
       </header>
@@ -334,6 +376,7 @@ function ConfiguredAssistant({
                   onChange={setSettingsDraft}
                   mode="settings"
                   validationMessage={settingsError}
+                  providerOptions={["local"]}
                 />
               </div>
 
@@ -383,16 +426,18 @@ function ConfiguredAssistant({
 }
 
 export default function Home() {
+  const appMode = getAppMode();
   const runtimeConfig = useSyncExternalStore(
     subscribeToStoredRuntimeConfig,
     loadStoredRuntimeConfig,
     () => null,
   );
   const [sessionKey, setSessionKey] = useState(0);
-  const [onboardingDraft, setOnboardingDraft] = useState<RuntimeConfigDraft>(() =>
-    createRuntimeConfigDraft(createDefaultRuntimeConfig()),
+  const [onboardingDraft, setOnboardingDraft] = useState<RuntimeConfigDraft>(
+    createStandardRuntimeConfigDraft,
   );
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
+  const [onboardingStep, setOnboardingStep] = useState(0);
 
   const handleSaveRuntimeConfig = (nextRuntimeConfig: RuntimeConfig) => {
     saveStoredRuntimeConfig(nextRuntimeConfig);
@@ -400,8 +445,9 @@ export default function Home() {
 
   const handleDeleteAllSettings = () => {
     clearStoredRuntimeConfig();
-    setOnboardingDraft(createRuntimeConfigDraft(createDefaultRuntimeConfig()));
+    setOnboardingDraft(createStandardRuntimeConfigDraft());
     setOnboardingError(null);
+    setOnboardingStep(0);
     setSessionKey((value) => value + 1);
   };
 
@@ -410,13 +456,29 @@ export default function Home() {
       const nextRuntimeConfig = parseRuntimeConfigDraft(onboardingDraft);
       saveStoredRuntimeConfig(nextRuntimeConfig);
       setOnboardingError(null);
+      setOnboardingStep(0);
       setSessionKey((value) => value + 1);
     } catch (error) {
       setOnboardingError(getValidationMessage(error));
     }
   };
 
+  if (appMode === "developer") {
+    return (
+      <ConfiguredAssistant
+        key="developer-mode"
+        runtimeConfig={createDeveloperDisplayRuntimeConfig()}
+        appMode={appMode}
+        onSaveRuntimeConfig={() => undefined}
+        onDeleteAllSettings={() => undefined}
+      />
+    );
+  }
+
   if (runtimeConfig === null) {
+    const step = STANDARD_ONBOARDING_STEPS[onboardingStep];
+    const isLastStep = onboardingStep === STANDARD_ONBOARDING_STEPS.length - 1;
+
     return (
       <main
         data-testid="runtime-onboarding-screen"
@@ -430,10 +492,10 @@ export default function Home() {
               </div>
               <div>
                 <h1 className="font-serif text-2xl font-semibold tracking-tight">
-                  First-run onboarding
+                  Normal mode setup
                 </h1>
                 <p className="text-sm text-muted-foreground">
-                  Configure the runtime once in the browser. No `.env.local` is required.
+                  Local-only onboarding. OpenRouter is available only in developer mode.
                 </p>
               </div>
             </div>
@@ -441,8 +503,8 @@ export default function Home() {
           </div>
 
           <div className="rounded-2xl border bg-background/80 p-4 text-sm text-muted-foreground shadow-sm backdrop-blur">
-            Recommended default: OpenRouter with `qwen/qwen3.5-27b`. You can switch to
-            Local later without redoing onboarding.
+            Step {onboardingStep + 1} of {STANDARD_ONBOARDING_STEPS.length}:{" "}
+            <span className="font-medium text-foreground">{step.title}</span>. {step.description}
           </div>
 
           <RuntimeConfigForm
@@ -450,16 +512,40 @@ export default function Home() {
             onChange={setOnboardingDraft}
             mode="onboarding"
             validationMessage={onboardingError}
+            providerOptions={["local"]}
+            sections={step.sections}
           />
 
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              disabled={onboardingStep === 0}
+              onClick={() => {
+                setOnboardingError(null);
+                setOnboardingStep((value) => Math.max(0, value - 1));
+              }}
+            >
+              Back
+            </Button>
             <Button
               data-testid="runtime-onboarding-submit"
               type="button"
               size="lg"
-              onClick={handleCompleteOnboarding}
+              onClick={() => {
+                if (isLastStep) {
+                  handleCompleteOnboarding();
+                  return;
+                }
+
+                setOnboardingError(null);
+                setOnboardingStep((value) =>
+                  Math.min(STANDARD_ONBOARDING_STEPS.length - 1, value + 1),
+                );
+              }}
             >
-              Save and continue
+              {isLastStep ? "Save and continue" : "Continue"}
             </Button>
           </div>
         </div>
@@ -471,6 +557,7 @@ export default function Home() {
     <ConfiguredAssistant
       key={sessionKey}
       runtimeConfig={runtimeConfig}
+      appMode={appMode}
       onSaveRuntimeConfig={handleSaveRuntimeConfig}
       onDeleteAllSettings={handleDeleteAllSettings}
     />

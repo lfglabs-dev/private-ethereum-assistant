@@ -496,21 +496,34 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
       hash: z.string().describe("The transaction hash (0x...)"),
     }),
     execute: async ({ hash }) => {
-      const tx = await publicClient.getTransaction({
-        hash: hash as `0x${string}`,
-      });
-      const receipt = await publicClient.getTransactionReceipt({
-        hash: hash as `0x${string}`,
-      });
-      return {
-        hash: tx.hash,
-        from: tx.from,
-        to: tx.to,
-        value: formatEther(tx.value),
-        status: receipt.status === "success" ? "Success" : "Failed",
-        blockNumber: Number(tx.blockNumber),
-        gasUsed: Number(receipt.gasUsed),
-      };
+      try {
+        const tx = await publicClient.getTransaction({
+          hash: hash as `0x${string}`,
+        });
+        const receipt = await publicClient.getTransactionReceipt({
+          hash: hash as `0x${string}`,
+        });
+        return {
+          hash: tx.hash,
+          from: tx.from,
+          to: tx.to,
+          value: formatEther(tx.value),
+          status: receipt.status === "success" ? "Success" : "Failed",
+          blockNumber: Number(tx.blockNumber),
+          gasUsed: Number(receipt.gasUsed),
+        };
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : `Could not find transaction ${hash} on ${chainMetadata.name}.`;
+
+        return {
+          hash,
+          status: "error",
+          message,
+        };
+      }
     },
   });
 
