@@ -30,6 +30,7 @@ const E2E_WALLET_ADDRESS = E2E_WALLET_PRIVATE_KEY
 
 let devServer: Bun.Subprocess | undefined;
 let startedDevServer = false;
+const RAILGUN_APPROVAL_TEST_THRESHOLD = "0.0000005";
 const results: TestResult[] = [];
 const pageErrors = new Map<string, string>();
 
@@ -109,6 +110,9 @@ async function ensureServer() {
       ...process.env,
       APP_MODE: "developer",
       NEXT_PUBLIC_APP_MODE: "developer",
+      RAILGUN_SHIELD_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
+      RAILGUN_TRANSFER_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
+      RAILGUN_UNSHIELD_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -340,6 +344,54 @@ async function main() {
       }
     },
     "railgun-balance.png",
+  );
+
+  await runTest(
+    "High-value Railgun shields require local approval and can be approved",
+    async () => {
+      await ensureDeveloperModeReady();
+      await submitMessage(
+        "I understand the Railgun deposit is public. Shield 0.000001 ETH into Railgun now.",
+      );
+      await waitForText('[data-testid="result-railgun-approval"]', [
+        "Shield 0.000001 ETH",
+        "Privacy impact",
+        "Approve locally",
+      ]);
+      await runAgentBrowser(["click", '[data-testid="railgun-approval-approve"]']);
+      await waitForBodyCondition(
+        (text) =>
+          text.includes("Shield transaction confirmed") &&
+          text.includes("View on Arbiscan"),
+        180_000,
+      );
+    },
+    "railgun-approval-approve.png",
+  );
+
+  await runTest(
+    "High-value Railgun unshields can be rejected locally without submission",
+    async () => {
+      await ensureDeveloperModeReady();
+      await submitMessage(
+        `I understand this exits the privacy pool. Unshield 0.0000001 ETH to ${E2E_WALLET_ADDRESS}.`,
+      );
+      await waitForText('[data-testid="result-railgun-approval"]', [
+        "Unshield 0.0000001 ETH",
+        "Privacy impact",
+        "Reject",
+      ]);
+      await runAgentBrowser(["click", '[data-testid="railgun-approval-reject"]']);
+      await waitForText('[data-testid="railgun-approval-cancelled"]', [
+        "Local approval was rejected",
+      ]);
+      await waitForBodyCondition(
+        (text) =>
+          text.includes("No Railgun transaction was signed or submitted.") ||
+          text.includes("Local approval was rejected"),
+      );
+    },
+    "railgun-approval-reject.png",
   );
 
   await runTest(

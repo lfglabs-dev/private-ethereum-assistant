@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import {
   AlertCircle,
   ArrowUpRight,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 
 type ToolResultCardProps = {
   result: unknown
@@ -743,6 +745,13 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
     unshield: "Railgun Unshield",
   }
 
+  if (
+    data.status === "awaiting_local_approval" ||
+    data.status === "cancelled"
+  ) {
+    return <RailgunApprovalResult data={data} />
+  }
+
   if (isError) {
     const setup = Array.isArray(data.setup) ? (data.setup as string[]) : []
     return (
@@ -881,6 +890,182 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
             View on Arbiscan
             <ExternalLink className="size-3" />
           </a>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function RailgunApprovalResult({ data }: { data: Record<string, unknown> }) {
+  const [currentData, setCurrentData] = useState(data)
+  const [decision, setDecision] = useState<"approve" | "reject" | null>(null)
+  const [requestError, setRequestError] = useState<string | null>(null)
+
+  if (
+    currentData.status !== "awaiting_local_approval" &&
+    currentData.status !== "cancelled"
+  ) {
+    return <RailgunResult data={currentData} />
+  }
+
+  const approval = isRecord(currentData.approval) ? currentData.approval : null
+  const isAwaiting = currentData.status === "awaiting_local_approval"
+  const operation = String(currentData.operation ?? "")
+  const titleByOperation: Record<string, string> = {
+    shield: "Railgun Shield Approval",
+    transfer: "Railgun Transfer Approval",
+    unshield: "Railgun Unshield Approval",
+  }
+
+  const submitDecision = async (nextDecision: "approve" | "reject") => {
+    if (!approval || typeof approval.id !== "string") {
+      setRequestError("Missing Railgun approval ID.")
+      return
+    }
+
+    setDecision(nextDecision)
+    setRequestError(null)
+
+    try {
+      const response = await fetch("/api/railgun-approval", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          approvalId: approval.id,
+          decision: nextDecision,
+        }),
+      })
+
+      const payload = (await response.json()) as unknown
+      if (!response.ok) {
+        throw new Error(
+          isRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : "Railgun approval request failed.",
+        )
+      }
+
+      if (!isRecord(payload)) {
+        throw new Error("Railgun approval request returned an invalid response.")
+      }
+
+      setCurrentData(payload)
+    } catch (error) {
+      setRequestError(
+        error instanceof Error ? error.message : "Railgun approval request failed.",
+      )
+    } finally {
+      setDecision(null)
+    }
+  }
+
+  return (
+    <Card
+      data-testid="result-railgun-approval"
+      size="sm"
+      className={
+        isAwaiting ? "border-amber-500/20 bg-amber-500/5" : "border-muted bg-muted/40"
+      }
+    >
+      <CardHeader className="pb-0">
+        <div className="flex items-center gap-2">
+          {isAwaiting ? (
+            <Shield className="size-4 text-amber-500" />
+          ) : (
+            <X className="size-4 text-muted-foreground" />
+          )}
+          <CardTitle className={isAwaiting ? "text-sm text-amber-500" : "text-sm"}>
+            {titleByOperation[operation] ?? "Railgun Approval"}
+          </CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {"summary" in currentData && (
+          <p className="font-medium">{String(currentData.summary)}</p>
+        )}
+        {"message" in currentData && (
+          <p className="text-muted-foreground">{String(currentData.message)}</p>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          {"amount" in currentData && "token" in currentData && (
+            <Badge variant="secondary">
+              {String(currentData.amount)} {String(currentData.token)}
+            </Badge>
+          )}
+          {approval && typeof approval.threshold === "string" && (
+            <Badge variant="outline">
+              Threshold {approval.threshold} {String(currentData.token ?? "")}
+            </Badge>
+          )}
+        </div>
+
+        {"recipient" in currentData && Boolean(currentData.recipient) && (
+          <div className="rounded-md bg-background/60 p-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Recipient
+            </p>
+            <p className="break-all font-mono text-xs">
+              {String(currentData.recipient)}
+            </p>
+          </div>
+        )}
+
+        {("privacyImpact" in currentData || "privacyNote" in currentData) && (
+          <div className="rounded-md bg-background/60 p-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Privacy impact
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {String(currentData.privacyImpact ?? currentData.privacyNote)}
+            </p>
+          </div>
+        )}
+
+        {requestError ? (
+          <p className="text-sm text-destructive">{requestError}</p>
+        ) : null}
+
+        {isAwaiting ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              data-testid="railgun-approval-approve"
+              size="sm"
+              onClick={() => submitDecision("approve")}
+              disabled={decision !== null}
+            >
+              {decision === "approve" ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Approving
+                </>
+              ) : (
+                "Approve locally"
+              )}
+            </Button>
+            <Button
+              data-testid="railgun-approval-reject"
+              size="sm"
+              variant="outline"
+              onClick={() => submitDecision("reject")}
+              disabled={decision !== null}
+            >
+              {decision === "reject" ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Cancelling
+                </>
+              ) : (
+                "Reject"
+              )}
+            </Button>
+          </div>
+        ) : (
+          <p data-testid="railgun-approval-cancelled" className="text-sm text-muted-foreground">
+            Local approval was rejected on this device.
+          </p>
         )}
       </CardContent>
     </Card>

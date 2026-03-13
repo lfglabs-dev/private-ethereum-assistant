@@ -25,7 +25,7 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
 
   const railgunShieldTokens = tool({
     description:
-      "Shield tokens into Railgun on the configured Railgun network. Use ETH, USDC, or an explicit token contract address. Explain the privacy tradeoff before calling this tool.",
+      "Shield tokens into Railgun on the configured Railgun network. Use ETH, USDC, or an explicit token contract address. Explain the privacy tradeoff before calling this tool. Higher-value actions may return a local approval requirement before anything is signed.",
     inputSchema: z.object({
       token: z
         .string()
@@ -38,7 +38,7 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
 
   const railgunPrivateTransfer = tool({
     description:
-      "Send a private Railgun transfer on the configured Railgun network to a Railgun address that starts with 0zk.",
+      "Send a private Railgun transfer on the configured Railgun network to a Railgun address that starts with 0zk. Higher-value actions may return a local approval requirement before anything is signed.",
     inputSchema: z.object({
       recipient: z
         .string()
@@ -54,7 +54,7 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
 
   const railgunWithdraw = tool({
     description:
-      "Unshield tokens from Railgun to a public 0x address on the configured Railgun network.",
+      "Unshield tokens from Railgun to a public 0x address on the configured Railgun network. Higher-value actions may return a local approval requirement before anything is signed.",
     inputSchema: z.object({
       recipient: z
         .string()

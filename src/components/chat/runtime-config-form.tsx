@@ -569,6 +569,68 @@ export function RuntimeConfigForm({
               />
             </label>
           </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">
+                Shield approval threshold
+              </span>
+              <Input
+                data-testid="runtime-railgun-shield-approval-threshold"
+                value={draft.railgun.shieldApprovalThreshold}
+                onChange={(event) =>
+                  onChange(
+                    updateDraftSection(draft, "railgun", {
+                      ...draft.railgun,
+                      shieldApprovalThreshold: event.target.value,
+                    }),
+                  )
+                }
+                inputMode="decimal"
+                placeholder="1"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">
+                Private transfer threshold
+              </span>
+              <Input
+                data-testid="runtime-railgun-transfer-approval-threshold"
+                value={draft.railgun.transferApprovalThreshold}
+                onChange={(event) =>
+                  onChange(
+                    updateDraftSection(draft, "railgun", {
+                      ...draft.railgun,
+                      transferApprovalThreshold: event.target.value,
+                    }),
+                  )
+                }
+                inputMode="decimal"
+                placeholder="1"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">
+                Unshield approval threshold
+              </span>
+              <Input
+                data-testid="runtime-railgun-unshield-approval-threshold"
+                value={draft.railgun.unshieldApprovalThreshold}
+                onChange={(event) =>
+                  onChange(
+                    updateDraftSection(draft, "railgun", {
+                      ...draft.railgun,
+                      unshieldApprovalThreshold: event.target.value,
+                    }),
+                  )
+                }
+                inputMode="decimal"
+                placeholder="1"
+              />
+            </label>
+          </div>
         </CardContent>
       </Card>
       ) : null}

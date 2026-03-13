@@ -186,32 +186,28 @@ describe("LLM tool routing E2E", () => {
     }
   })
 
-  test("LLM routes confirmed Railgun shielding prompts to railgun_shield", async () => {
+  test("LLM returns local approval-required Railgun shielding responses before signing", async () => {
     const result = await sendChatPrompt({
       prompt:
-        "I understand the Railgun deposit is public. Shield 0.0001 ETH into Railgun now.",
+        "I understand the Railgun deposit is public. Shield 0.000001 ETH into Railgun now.",
       runtimeConfig,
     })
 
     const toolCall = findToolCall(result.toolCalls, "railgun_shield")
     expect(isRecord(toolCall.input) ? toolCall.input.token : undefined).toBe("ETH")
-    expect(isRecord(toolCall.input) ? toolCall.input.amount : undefined).toBe("0.0001")
+    expect(isRecord(toolCall.input) ? toolCall.input.amount : undefined).toBe("0.000001")
 
     if (!isRecord(toolCall.output)) {
       return
     }
 
     expect(toolCall.output.railgun).toBe(true)
-
-    if (toolCall.output.status === "success") {
-      expect(toolCall.output.operation).toBe("shield")
-      expect(typeof toolCall.output.txHash).toBe("string")
-      expect(typeof toolCall.output.privacyNote).toBe("string")
-      return
-    }
-
-    expect(toolCall.output.status).toBe("error")
-    expect(typeof toolCall.output.message).toBe("string")
+    expect(toolCall.output.status).toBe("awaiting_local_approval")
+    expect(toolCall.output.operation).toBe("shield")
+    expect(typeof toolCall.output.summary).toBe("string")
+    expect(typeof toolCall.output.privacyImpact).toBe("string")
+    expect(result.text.toLowerCase()).toMatch(/approve|local approval/)
+    expect(result.text.toLowerCase()).toMatch(/privacy|public/)
   })
 
   test("LLM keeps routing context across turns for ENS then balance", async () => {

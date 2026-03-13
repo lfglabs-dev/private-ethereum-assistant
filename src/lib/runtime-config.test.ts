@@ -33,6 +33,9 @@ describe("runtime-config helpers", () => {
       "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     );
     expect(runtimeConfig.railgun.poiNodeUrls.length).toBeGreaterThan(0);
+    expect(runtimeConfig.railgun.shieldApprovalThreshold).toBe("1");
+    expect(runtimeConfig.railgun.transferApprovalThreshold).toBe("1");
+    expect(runtimeConfig.railgun.unshieldApprovalThreshold).toBe("1");
     expect(getActiveModel(runtimeConfig)).toBe("qwen/qwen3.5-27b");
   });
 
@@ -62,4 +65,3 @@ describe("runtime-config helpers", () => {
     expect(getActiveModel(localConfig)).toBe("qwen3:8b");
   });
 });
-
