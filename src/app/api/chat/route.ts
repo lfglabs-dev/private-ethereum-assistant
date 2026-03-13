@@ -15,7 +15,9 @@ import {
   createDebugLog,
 } from "@/lib/chat-stream";
 import {
+  createDeveloperRuntimeConfig,
   getActiveModel,
+  getAppMode,
   getProviderLabel,
   runtimeConfigSchema,
 } from "@/lib/runtime-config";
@@ -65,42 +67,50 @@ function summarizeChunk(chunk: TextStreamPart<Record<string, never>>) {
 
 export async function POST(req: Request) {
   try {
+    const appMode = getAppMode();
     const { messages, networkConfig, runtimeConfig } = await req.json();
+    let selectedNetworkConfig = DEFAULT_NETWORK_CONFIG;
+    let selectedRuntimeConfig;
 
-    const parsedNetworkConfig = networkConfigSchema.safeParse(networkConfig);
-    const parsedRuntimeConfig = runtimeConfigSchema.safeParse(runtimeConfig);
+    if (appMode === "developer") {
+      selectedRuntimeConfig = createDeveloperRuntimeConfig();
+      selectedNetworkConfig = selectedRuntimeConfig.network;
+    } else {
+      const parsedNetworkConfig = networkConfigSchema.safeParse(networkConfig);
+      const parsedRuntimeConfig = runtimeConfigSchema.safeParse(runtimeConfig);
 
-    if (networkConfig != null && !parsedNetworkConfig.success) {
-      return new Response(
-        JSON.stringify({
-          error: "Invalid network config. Provide a valid RPC_URL and CHAIN_ID.",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      if (networkConfig != null && !parsedNetworkConfig.success) {
+        return new Response(
+          JSON.stringify({
+            error: "Invalid network config. Provide a valid RPC_URL and CHAIN_ID.",
+          }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      if (!parsedRuntimeConfig.success) {
+        return new Response(
+          JSON.stringify({
+            error: parsedRuntimeConfig.error.issues[0]?.message ?? "Invalid runtime config.",
+          }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      selectedNetworkConfig = parsedNetworkConfig.success
+        ? parsedNetworkConfig.data
+        : DEFAULT_NETWORK_CONFIG;
+      selectedRuntimeConfig = {
+        ...parsedRuntimeConfig.data,
+        network: selectedNetworkConfig,
+      };
     }
-
-    if (!parsedRuntimeConfig.success) {
-      return new Response(
-        JSON.stringify({
-          error: parsedRuntimeConfig.error.issues[0]?.message ?? "Invalid runtime config.",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    const selectedNetworkConfig = parsedNetworkConfig.success
-      ? parsedNetworkConfig.data
-      : DEFAULT_NETWORK_CONFIG;
-    const selectedRuntimeConfig = {
-      ...parsedRuntimeConfig.data,
-      network: selectedNetworkConfig,
-    };
     const activeModel = getActiveModel(selectedRuntimeConfig);
     const providerLabel = getProviderLabel(selectedRuntimeConfig.llm.provider);
     const model = createRuntimeModel(selectedRuntimeConfig, {

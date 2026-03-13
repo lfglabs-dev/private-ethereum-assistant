@@ -23,7 +23,7 @@ const SAFE_CHAIN_SHORT_NAMES: Record<number, string> = {
   11155111: "sep",
 };
 
-function getApiKit(safeConfig: SafeToolConfig) {
+function getTxServiceUrl(safeConfig: SafeToolConfig) {
   const shortName = SAFE_CHAIN_SHORT_NAMES[safeConfig.chainId];
   if (!shortName) {
     throw new Error(
@@ -31,10 +31,21 @@ function getApiKit(safeConfig: SafeToolConfig) {
     );
   }
 
+  return `https://api.safe.global/tx-service/${shortName}/api`;
+}
+
+function getApiKit(safeConfig: SafeToolConfig) {
+  const apiKey = process.env.SAFE_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "SAFE_API_KEY is required for authenticated Safe write operations.",
+    );
+  }
+
   return new SafeApiKit({
     chainId: BigInt(safeConfig.chainId),
-    txServiceUrl: `https://api.safe.global/tx-service/${shortName}/api`,
-    apiKey: process.env.SAFE_API_KEY,
+    txServiceUrl: getTxServiceUrl(safeConfig),
+    apiKey,
   });
 }
 
@@ -47,6 +58,61 @@ function getPublicClient(safeConfig: SafeToolConfig) {
   return createPublicClient({
     transport: http(safeConfig.rpcUrl),
   });
+}
+
+async function txServiceGet<T>(safeConfig: SafeToolConfig, path: string): Promise<T> {
+  const response = await fetch(`${getTxServiceUrl(safeConfig)}${path}`, {
+    headers: {
+      ...(process.env.SAFE_API_KEY
+        ? { Authorization: `Bearer ${process.env.SAFE_API_KEY}` }
+        : {}),
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Safe service request failed (${response.status} ${response.statusText}).`,
+    );
+  }
+
+  return (await response.json()) as T;
+}
+
+async function fetchSafeInfo(safeConfig: SafeToolConfig) {
+  const response = await txServiceGet<{
+    address: string;
+    owners: string[];
+    threshold: number;
+    nonce: number;
+    singleton?: string;
+    masterCopy?: string;
+  }>(safeConfig, `/v1/safes/${safeConfig.address}/`);
+
+  if (!response.singleton && response.masterCopy) {
+    const { masterCopy, ...rest } = response;
+    return { ...rest, singleton: masterCopy };
+  }
+
+  return response;
+}
+
+async function fetchPendingTransactions(safeConfig: SafeToolConfig) {
+  const info = await fetchSafeInfo(safeConfig);
+  return txServiceGet<{
+    results: Array<{
+      safeTxHash: string;
+      to: string;
+      value: string;
+      data?: string | null;
+      confirmations?: unknown[];
+      confirmationsRequired: number;
+      submissionDate: string;
+      isExecuted?: boolean;
+    }>;
+  }>(
+    safeConfig,
+    `/v2/safes/${safeConfig.address}/multisig-transactions/?executed=false&nonce__gte=${info.nonce}`,
+  );
 }
 
 function getTransactionType(data?: string) {
@@ -145,9 +211,8 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
       "Get information about the configured Safe: owners, threshold, nonce, and ETH balance.",
     inputSchema: z.object({}),
     execute: async () => {
-      const apiKit = getApiKit(safeConfig);
       const client = getPublicClient(safeConfig);
-      const info = await apiKit.getSafeInfo(safeAddress);
+      const info = await fetchSafeInfo(safeConfig);
       const balance = await client.getBalance({
         address: safeAddress as `0x${string}`,
       });
@@ -168,8 +233,7 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
     inputSchema: z.object({}),
     execute: async () => {
       try {
-        const apiKit = getApiKit(safeConfig);
-        const response = await apiKit.getPendingTransactions(safeAddress);
+        const response = await fetchPendingTransactions(safeConfig);
 
         if (response.results.length === 0) {
           return {
@@ -271,9 +335,8 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
           );
         }
 
-        const apiKit = getApiKit(safeConfig);
         const client = getPublicClient(safeConfig);
-        const info = await apiKit.getSafeInfo(safeAddress);
+        const info = await fetchSafeInfo(safeConfig);
         const resolvedValue = value ?? "0";
         const valueInWei = parseEther(resolvedValue).toString();
 
@@ -342,6 +405,36 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
           };
         }
 
+        if (!process.env.SAFE_API_KEY) {
+          return {
+            status: "manual_creation_required",
+            message:
+              "SAFE_API_KEY is not configured for automated Safe proposals in this environment. Open the Safe UI below to create and sign this transaction manually.",
+            summary: transactionSummary,
+            safeAddress,
+            safeUILink,
+            threshold: info.threshold,
+            signers: info.owners,
+            currentConfirmations: 0,
+            requiredConfirmations: info.threshold,
+            statusLabel: "Manual creation required",
+            pendingTransactionsHint:
+              "After proposing it in Safe, ask me 'what are the pending Safe transactions?' to check status.",
+            transaction: {
+              to,
+              value: `${resolvedValue} ETH`,
+              valueWei: valueInWei,
+              data: transactionData,
+              type: transactionType,
+              spender,
+              tokenAmount:
+                tokenAmount && tokenSymbol ? `${tokenAmount} ${tokenSymbol}` : tokenAmount,
+              nonce: info.nonce,
+            },
+          };
+        }
+
+        const apiKit = getApiKit(safeConfig);
         const protocolKit = await Safe.init({
           provider: safeConfig.rpcUrl,
           signer: signerKey,

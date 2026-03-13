@@ -2,8 +2,10 @@ import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
 import { createTools } from "@/lib/tools"
 import {
   ARBITRUM_CONFIG,
+  ARBITRUM_USDC_ADDRESS,
   E2E_TEST_TIMEOUT_MS,
   collectAsyncIterable,
+  createE2ERuntimeConfig,
   executeTool,
   executeToolStream,
   getWalletAddress,
@@ -12,7 +14,7 @@ import { verificationClient } from "../helpers/verification-client"
 
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS)
 
-const tools = createTools(ARBITRUM_CONFIG)
+const tools = createTools(ARBITRUM_CONFIG, createE2ERuntimeConfig(ARBITRUM_CONFIG))
 const walletAddress = getWalletAddress()
 const TEST_AMOUNT = "0.000001"
 
@@ -39,7 +41,7 @@ type TransactionPreviewResult = {
   kind: "transaction_preview"
   confirmationId?: string
   status: "awaiting_confirmation"
-  asset?: { type?: string }
+  asset?: { type?: string; symbol?: string }
   amount?: string
   sender?: string
   recipient?: string
@@ -213,6 +215,42 @@ describe("EOA transfer E2E", () => {
     expectTransactionPreview(result)
     expect(result.resolvedEnsName).toBe("vitalik.eth")
     expect(result.recipient).toBe("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
+  })
+
+  test("prepare_eoa_transfer handles an ERC-20 transfer request", async () => {
+    const result = await prepareEoaTransfer({
+      to: walletAddress,
+      amount: "0.001",
+      tokenAddress: ARBITRUM_USDC_ADDRESS,
+    })
+
+    if (isRecord(result) && result.kind === "transaction_preview") {
+      expectTransactionPreview(result)
+      expect(result.asset?.type).toBe("ERC20")
+      expect(result.asset?.symbol).toBe("USDC")
+      expect(result.amount).toBe("0.001")
+      expect(result.recipient).toBe(walletAddress)
+      expect(Number(result.gasEstimate?.gasLimit ?? "0")).toBeGreaterThan(0)
+      return
+    }
+
+    expectTransactionError(result)
+    expect((result.error ?? result.message ?? "").toLowerCase()).toMatch(
+      /insufficient usdc balance/
+    )
+  })
+
+  test("prepare_eoa_transfer rejects a token address with no ERC-20 contract", async () => {
+    const result = await prepareEoaTransfer({
+      to: walletAddress,
+      amount: "1",
+      tokenAddress: "0x0000000000000000000000000000000000000001",
+    })
+
+    expectTransactionError(result)
+    expect((result.error ?? result.message ?? "").toLowerCase()).toMatch(
+      /invalid|contract|erc-20/
+    )
   })
 
   test("prepare_eoa_transfer returns an insufficient balance error", async () => {

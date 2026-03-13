@@ -1,5 +1,6 @@
 import type { Tool, ToolExecutionOptions } from "ai"
 import type { NetworkConfig } from "@/lib/ethereum"
+import { createDefaultRuntimeConfig } from "@/lib/runtime-config"
 import type { Address, Hex } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 
@@ -31,6 +32,25 @@ export function getWalletPrivateKey(): Hex {
 
 export function getWalletAddress() {
   return privateKeyToAccount(getWalletPrivateKey()).address
+}
+
+export function createE2ERuntimeConfig(
+  networkConfig: NetworkConfig = ARBITRUM_CONFIG
+) {
+  const runtimeConfig = createDefaultRuntimeConfig()
+  const eoaPrivateKey = getWalletPrivateKey()
+
+  return {
+    ...runtimeConfig,
+    network: networkConfig,
+    wallet: {
+      eoaPrivateKey,
+    },
+    railgun: {
+      ...runtimeConfig.railgun,
+      signerPrivateKey: eoaPrivateKey,
+    },
+  }
 }
 
 export function createToolExecutionOptions(): ToolExecutionOptions {

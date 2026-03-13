@@ -32,4 +32,35 @@ describe("Safe E2E", () => {
     expect(result.safeAddress.startsWith("0x")).toBe(true)
     expect(result.safeUILink).toContain("app.safe.global")
   })
+
+  test("propose_transaction creates an ETH transfer proposal or a manual Safe action", async () => {
+    const info = await retry(() => executeTool(tools.get_safe_info, {}))
+    const recipient = info.owners[0]
+
+    const result = await retry(() =>
+      executeTool(tools.propose_transaction, {
+        to: recipient,
+        value: "0.0001",
+      })
+    )
+
+    expect(["proposed", "manual_creation_required"]).toContain(result.status)
+    expect(result.safeUILink).toContain("app.safe.global")
+    expect(result.transaction?.to).toBe(recipient)
+    expect(result.transaction?.value).toBe("0.0001 ETH")
+  })
+
+  test("propose_transaction rejects unresolved ENS names", async () => {
+    const result = await retry(() =>
+      executeTool(tools.propose_transaction, {
+        to: "vitalik.eth",
+        value: "0.001",
+      })
+    )
+
+    expect(result.status).toBe("error")
+    expect(String(result.message).toLowerCase()).toMatch(
+      /resolve ens|resolved 0x|valid 0x/
+    )
+  })
 })

@@ -12,15 +12,26 @@ import {
   getProviderLabel,
   getSuggestedModels,
   setActiveModelDraftValue,
+  type LlmProvider,
   type RuntimeConfigDraft,
 } from "@/lib/runtime-config";
 import { NETWORK_PRESETS } from "@/lib/ethereum";
+
+type RuntimeConfigSection =
+  | "warning"
+  | "model"
+  | "network"
+  | "safe"
+  | "wallet"
+  | "railgun";
 
 type RuntimeConfigFormProps = {
   draft: RuntimeConfigDraft;
   onChange: (nextValue: RuntimeConfigDraft) => void;
   mode: "onboarding" | "settings";
   validationMessage?: string | null;
+  providerOptions?: LlmProvider[];
+  sections?: readonly RuntimeConfigSection[];
 };
 
 function updateDraftSection<K extends keyof RuntimeConfigDraft>(
@@ -46,7 +57,12 @@ export function RuntimeConfigForm({
   onChange,
   mode,
   validationMessage,
+  providerOptions = ["openrouter", "local"],
+  sections = ["warning", "model", "network", "safe", "wallet", "railgun"],
 }: RuntimeConfigFormProps) {
+  const visibleSections = new Set(sections);
+  const allowedProviders: LlmProvider[] =
+    providerOptions.length > 0 ? [...providerOptions] : ["local"];
   const selectedProviderLabel = getProviderLabel(draft.llm.provider);
   const selectedPresetId = getSelectedPresetId(draft);
   const activeModel = getActiveModelDraftValue(draft);
@@ -54,139 +70,152 @@ export function RuntimeConfigForm({
 
   return (
     <div className="space-y-4">
-      <Card className="border-destructive/30 bg-destructive/5">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <ShieldAlert className="size-4" />
-            Browser Storage Warning
-          </CardTitle>
-          <CardDescription>
-            EOA and Safe signer keys are stored in this browser profile on this machine.
-            Use dedicated low-value wallets. Delete all settings if this device is shared.
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      {visibleSections.has("warning") ? (
+        <Card className="border-destructive/30 bg-destructive/5">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ShieldAlert className="size-4" />
+              Browser Storage Warning
+            </CardTitle>
+            <CardDescription>
+              EOA and Safe signer keys are stored in this browser profile on this machine.
+              Use dedicated low-value wallets. Delete all settings if this device is shared.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Sparkles className="size-4" />
-            Model Runtime
-          </CardTitle>
-          <CardDescription>
-            Choose the provider first. The same chat UI works with either backend.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2 sm:grid-cols-2">
-            {(["openrouter", "local"] as const).map((provider) => {
-              const isActive = draft.llm.provider === provider;
-              return (
-                <button
-                  key={provider}
+      {visibleSections.has("model") ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Sparkles className="size-4" />
+              Model Runtime
+            </CardTitle>
+            <CardDescription>
+              {allowedProviders.length > 1
+                ? "Choose the provider first. The same chat UI works with either backend."
+                : "Normal mode uses your own local model endpoint. OpenRouter is reserved for developer mode."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {allowedProviders.length > 1 ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {allowedProviders.map((provider) => {
+                  const isActive = draft.llm.provider === provider;
+                  return (
+                    <button
+                      key={provider}
+                      type="button"
+                      data-testid={`runtime-provider-${provider}`}
+                      onClick={() =>
+                        onChange(
+                          updateDraftSection(draft, "llm", {
+                            ...draft.llm,
+                            provider,
+                          }),
+                        )
+                      }
+                      className={`rounded-xl border px-4 py-3 text-left transition-colors ${
+                        isActive
+                          ? "border-primary bg-primary/10"
+                          : "border-border bg-background hover:bg-muted"
+                      }`}
+                    >
+                      <div className="text-sm font-medium">{getProviderLabel(provider)}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {provider === "openrouter"
+                          ? "Uses the developer-only OpenRouter key from dotenvx for local development and E2E."
+                          : "Uses your own local OpenAI-compatible endpoint such as Ollama or LM Studio."}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-xl border bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">
+                Provider: <span className="font-medium text-foreground">Local</span>
+              </div>
+            )}
+
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">
+                {selectedProviderLabel} model
+              </span>
+              <Input
+                data-testid="runtime-active-model"
+                value={activeModel}
+                onChange={(event) =>
+                  onChange(setActiveModelDraftValue(draft, event.target.value))
+                }
+                placeholder={
+                  draft.llm.provider === "openrouter"
+                    ? "qwen/qwen3.5-27b"
+                    : "qwen3:8b"
+                }
+              />
+            </label>
+
+            <div className="flex flex-wrap gap-2">
+              {suggestedModels.map((model) => (
+                <Button
+                  key={model}
                   type="button"
-                  data-testid={`runtime-provider-${provider}`}
-                  onClick={() =>
-                    onChange(
-                      updateDraftSection(draft, "llm", {
-                        ...draft.llm,
-                        provider,
-                      }),
-                    )
-                  }
-                  className={`rounded-xl border px-4 py-3 text-left transition-colors ${
-                    isActive
-                      ? "border-primary bg-primary/10"
-                      : "border-border bg-background hover:bg-muted"
-                  }`}
+                  size="xs"
+                  variant="outline"
+                  onClick={() => onChange(setActiveModelDraftValue(draft, model))}
                 >
-                  <div className="text-sm font-medium">{getProviderLabel(provider)}</div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {provider === "openrouter"
-                      ? "Uses the developer-only OpenRouter key from dotenvx for local development and E2E."
-                      : "Uses your own local OpenAI-compatible endpoint such as Ollama or LM Studio."}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                  {model}
+                </Button>
+              ))}
+            </div>
 
-          <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">
-              {selectedProviderLabel} model
-            </span>
-            <Input
-              data-testid="runtime-active-model"
-              value={activeModel}
-              onChange={(event) =>
-                onChange(setActiveModelDraftValue(draft, event.target.value))
-              }
-              placeholder={
-                draft.llm.provider === "openrouter"
-                  ? "qwen/qwen3.5-27b"
-                  : "qwen3:8b"
-              }
-            />
-          </label>
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">
+                Local provider base URL
+              </span>
+              <Input
+                data-testid="runtime-local-base-url"
+                value={draft.llm.localBaseUrl}
+                onChange={(event) =>
+                  onChange(
+                    updateDraftSection(draft, "llm", {
+                      ...draft.llm,
+                      localBaseUrl: event.target.value,
+                    }),
+                  )
+                }
+                placeholder="http://127.0.0.1:11434/v1"
+              />
+            </label>
 
-          <div className="flex flex-wrap gap-2">
-            {suggestedModels.map((model) => (
-              <Button
-                key={model}
-                type="button"
-                size="xs"
-                variant="outline"
-                onClick={() => onChange(setActiveModelDraftValue(draft, model))}
-              >
-                {model}
-              </Button>
-            ))}
-          </div>
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">Timeout (ms)</span>
+              <Input
+                data-testid="runtime-timeout-ms"
+                value={draft.llm.timeoutMs}
+                onChange={(event) =>
+                  onChange(
+                    updateDraftSection(draft, "llm", {
+                      ...draft.llm,
+                      timeoutMs: event.target.value,
+                    }),
+                  )
+                }
+                inputMode="numeric"
+              />
+            </label>
 
-          <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">
-              Local provider base URL
-            </span>
-            <Input
-              data-testid="runtime-local-base-url"
-              value={draft.llm.localBaseUrl}
-              onChange={(event) =>
-                onChange(
-                  updateDraftSection(draft, "llm", {
-                    ...draft.llm,
-                    localBaseUrl: event.target.value,
-                  }),
-                )
-              }
-              placeholder="http://127.0.0.1:11434/v1"
-            />
-          </label>
+            <div className="rounded-xl bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+              {draft.llm.provider === "openrouter"
+                ? "OpenRouter handles chat completions. Your prompts and tool outputs leave the machine for inference."
+                : "Local mode talks only to the base URL above. A working local model server is required to send messages."}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
-          <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">Timeout (ms)</span>
-            <Input
-              data-testid="runtime-timeout-ms"
-              value={draft.llm.timeoutMs}
-              onChange={(event) =>
-                onChange(
-                  updateDraftSection(draft, "llm", {
-                    ...draft.llm,
-                    timeoutMs: event.target.value,
-                  }),
-                )
-              }
-              inputMode="numeric"
-            />
-          </label>
-
-          <div className="rounded-xl bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
-            {draft.llm.provider === "openrouter"
-              ? "OpenRouter handles chat completions. Your prompts and tool outputs leave the machine for inference."
-              : "Local mode talks only to the base URL above. A working local model server is required to send messages."}
-          </div>
-        </CardContent>
-      </Card>
-
+      {visibleSections.has("network") ? (
       <Card>
         <CardHeader>
           <CardTitle>Selected Network</CardTitle>
@@ -252,7 +281,9 @@ export function RuntimeConfigForm({
           </label>
         </CardContent>
       </Card>
+      ) : null}
 
+      {visibleSections.has("safe") ? (
       <Card>
         <CardHeader>
           <CardTitle>Safe Settings</CardTitle>
@@ -333,7 +364,9 @@ export function RuntimeConfigForm({
           </label>
         </CardContent>
       </Card>
+      ) : null}
 
+      {visibleSections.has("wallet") ? (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -363,7 +396,9 @@ export function RuntimeConfigForm({
           </label>
         </CardContent>
       </Card>
+      ) : null}
 
+      {visibleSections.has("railgun") ? (
       <Card>
         <CardHeader>
           <CardTitle>Railgun Settings</CardTitle>
@@ -536,6 +571,7 @@ export function RuntimeConfigForm({
           </div>
         </CardContent>
       </Card>
+      ) : null}
 
       {validationMessage ? (
         <div
@@ -555,4 +591,3 @@ export function RuntimeConfigForm({
     </div>
   );
 }
-

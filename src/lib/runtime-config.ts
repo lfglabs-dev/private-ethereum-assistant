@@ -11,11 +11,14 @@ export const RUNTIME_CONFIG_STORAGE_EVENT =
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 export const OPENROUTER_DEFAULT_MODEL = "qwen/qwen3.5-27b";
 export const LOCAL_DEFAULT_MODEL = config.llm.model;
+export const DEVELOPER_MODE_PLACEHOLDER_PRIVATE_KEY =
+  `0x${"0".repeat(64)}` as const;
 
 let cachedRuntimeConfigRaw: string | null = null;
 let cachedRuntimeConfigValue: RuntimeConfig | null = null;
 
 export const llmProviderSchema = z.enum(["openrouter", "local"]);
+export const appModeSchema = z.enum(["standard", "developer"]);
 
 const positiveIntegerSchema = z.coerce.number().int().positive();
 const nonNegativeIntegerSchema = z.coerce.number().int().nonnegative();
@@ -91,6 +94,7 @@ export const runtimeConfigSchema = z.object({
 
 export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
 export type LlmProvider = z.infer<typeof llmProviderSchema>;
+export type AppMode = z.infer<typeof appModeSchema>;
 
 export type RuntimeConfigDraft = {
   llm: {
@@ -125,6 +129,41 @@ export type RuntimeConfigDraft = {
     pollingIntervalMs: string;
   };
 };
+
+function getArbitrumNetworkConfig(): NetworkConfig {
+  const arbitrumPreset = NETWORK_PRESETS.find((preset) => preset.id === "arbitrum");
+  if (!arbitrumPreset) {
+    return DEFAULT_NETWORK_CONFIG;
+  }
+
+  return {
+    chainId: arbitrumPreset.chainId,
+    rpcUrl: arbitrumPreset.rpcUrl,
+  };
+}
+
+function getDeveloperWalletPrivateKey() {
+  const value = process.env.EOA_PRIVATE_KEY ?? process.env.WALLET_PRIVATE_KEY;
+  if (!value) {
+    throw new Error(
+      "Developer mode requires EOA_PRIVATE_KEY or WALLET_PRIVATE_KEY in the environment.",
+    );
+  }
+
+  const normalized = value.startsWith("0x") ? value : `0x${value}`;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(normalized)) {
+    throw new Error("Developer mode wallet private key is not a valid 32-byte hex value.");
+  }
+
+  return normalized;
+}
+
+export function getAppMode(): AppMode {
+  return process.env.APP_MODE === "developer" ||
+    process.env.NEXT_PUBLIC_APP_MODE === "developer"
+    ? "developer"
+    : "standard";
+}
 
 export function createDefaultRuntimeConfig(): RuntimeConfig {
   return {
@@ -161,6 +200,32 @@ export function createDefaultRuntimeConfig(): RuntimeConfig {
       pollingIntervalMs: config.railgun.pollingIntervalMs,
     },
   } as RuntimeConfig;
+}
+
+export function createDeveloperDisplayRuntimeConfig(): RuntimeConfig {
+  const runtimeConfig = createDefaultRuntimeConfig();
+
+  return {
+    ...runtimeConfig,
+    llm: {
+      ...runtimeConfig.llm,
+      provider: "openrouter",
+      openRouterModel: OPENROUTER_DEFAULT_MODEL,
+    },
+    network: getArbitrumNetworkConfig(),
+    wallet: {
+      eoaPrivateKey: DEVELOPER_MODE_PLACEHOLDER_PRIVATE_KEY,
+    },
+  };
+}
+
+export function createDeveloperRuntimeConfig(): RuntimeConfig {
+  return {
+    ...createDeveloperDisplayRuntimeConfig(),
+    wallet: {
+      eoaPrivateKey: getDeveloperWalletPrivateKey(),
+    },
+  };
 }
 
 export function getRuntimeConfigForNetwork(
@@ -346,6 +411,12 @@ export function loadStoredRuntimeConfig() {
 
   try {
     const parsed = runtimeConfigSchema.parse(JSON.parse(rawValue));
+    if (getAppMode() !== "developer" && parsed.llm.provider === "openrouter") {
+      window.localStorage.removeItem(RUNTIME_CONFIG_STORAGE_KEY);
+      cachedRuntimeConfigRaw = null;
+      cachedRuntimeConfigValue = null;
+      return null;
+    }
     cachedRuntimeConfigRaw = rawValue;
     cachedRuntimeConfigValue = parsed;
     return parsed;
