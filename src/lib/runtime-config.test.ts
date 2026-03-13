@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  applyLegacyRuntimeConfigDefaults,
   createDefaultRuntimeConfig,
   createRuntimeConfigDraft,
   getActiveModel,
@@ -33,6 +34,7 @@ describe("runtime-config helpers", () => {
       "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     );
     expect(runtimeConfig.railgun.poiNodeUrls.length).toBeGreaterThan(0);
+    expect(runtimeConfig.railgun.privacyGuidanceText.length).toBeGreaterThan(0);
     expect(getActiveModel(runtimeConfig)).toBe("qwen/qwen3.5-27b");
   });
 
@@ -61,5 +63,21 @@ describe("runtime-config helpers", () => {
     expect(getActiveModel(openRouterConfig)).toBe("qwen/qwen3.5-27b");
     expect(getActiveModel(localConfig)).toBe("qwen3:8b");
   });
-});
 
+  test("fills legacy Railgun privacy guidance defaults for stored configs", () => {
+    const runtimeConfig = createDefaultRuntimeConfig();
+    const legacyConfig = {
+      ...runtimeConfig,
+      railgun: {
+        ...runtimeConfig.railgun,
+      },
+    } as Record<string, unknown>;
+
+    delete (legacyConfig.railgun as Record<string, unknown>).privacyGuidanceText;
+
+    const normalized = applyLegacyRuntimeConfigDefaults(legacyConfig) as typeof runtimeConfig;
+    expect(normalized.railgun.privacyGuidanceText).toBe(
+      runtimeConfig.railgun.privacyGuidanceText,
+    );
+  });
+});

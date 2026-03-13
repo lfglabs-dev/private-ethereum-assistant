@@ -20,12 +20,17 @@ import {
   ensureChatServer,
   sendChatPrompt,
 } from "../helpers/chat-client"
+import {
+  BALANCE_ROUTING_PRIVACY_GUIDANCE,
+  createBalanceRoutingRuntimeConfig,
+} from "../helpers/railgun-balance-routing"
 
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 2)
 
 const VITALIK_ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 const walletAddress = getWalletAddress()
 const runtimeConfig = createOpenRouterRuntimeConfig(ARBITRUM_CONFIG)
+const balanceRoutingRuntimeConfig = createBalanceRoutingRuntimeConfig(ARBITRUM_CONFIG)
 
 type ToolCallSnapshot = {
   toolName: string
@@ -212,6 +217,37 @@ describe("LLM tool routing E2E", () => {
 
     expect(toolCall.output.status).toBe("error")
     expect(typeof toolCall.output.message).toBe("string")
+  })
+
+  test("LLM recommends shielding instead of attempting a private spend with insufficient private balance", async () => {
+    const result = await sendChatPrompt({
+      prompt: "Send 0.0001 ETH to vitalik.eth from my private balance.",
+      runtimeConfig: balanceRoutingRuntimeConfig,
+    })
+
+    findToolCall(result.toolCalls, "resolve_ens")
+    const routeCall = findToolCall(result.toolCalls, "railgun_balance_route")
+    expect(["transfer", "unshield"]).toContain(
+      String(isRecord(routeCall.input) ? routeCall.input.action : ""),
+    )
+    expect(isRecord(routeCall.input) ? routeCall.input.token : undefined).toBe("ETH")
+    expect(isRecord(routeCall.input) ? routeCall.input.amount : undefined).toBe("0.0001")
+    expect(result.toolCalls.some((entry) => entry.toolName === "railgun_transfer")).toBe(
+      false,
+    )
+    expect(result.toolCalls.some((entry) => entry.toolName === "railgun_unshield")).toBe(
+      false,
+    )
+
+    if (!isRecord(routeCall.output) || !isRecord(routeCall.output.balanceRouting)) {
+      throw new Error("Expected railgun_balance_route to return balance routing details.")
+    }
+
+    expect(routeCall.output.balanceRouting.route).toBe("shield_then_retry")
+    expect(result.text.toLowerCase()).toContain("private")
+    expect(result.text.toLowerCase()).toContain("public")
+    expect(result.text.toLowerCase()).toContain("shield")
+    expect(result.text).toContain(BALANCE_ROUTING_PRIVACY_GUIDANCE)
   })
 
   test("LLM keeps routing context across turns for ENS then balance", async () => {
