@@ -99,10 +99,119 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
 
+function getTokenAvatarStyles(seed: string) {
+  let hash = 0
+  for (const char of seed) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 360
+  }
+
+  return {
+    backgroundColor: `hsl(${hash} 72% 92%)`,
+    color: `hsl(${hash} 55% 28%)`,
+  }
+}
+
+function getSourceLabel(source: unknown) {
+  return source === "verified" ? "verified" : "on-chain"
+}
+
+function TokenAvatar({
+  symbol,
+  address,
+  iconUrl,
+}: {
+  symbol: string
+  address: string
+  iconUrl?: string
+}) {
+  const [showFallback, setShowFallback] = useState(false)
+  const initials = symbol.slice(0, 2).toUpperCase() || "??"
+
+  if (iconUrl && !showFallback) {
+    return (
+      <div className="size-10 overflow-hidden rounded-full border border-border/60 bg-background">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={iconUrl}
+          alt={`${symbol} token icon`}
+          className="size-full object-cover"
+          loading="lazy"
+          onError={() => setShowFallback(true)}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      aria-label={`${symbol} fallback icon`}
+      className="flex size-10 items-center justify-center rounded-full border border-border/60 text-[11px] font-semibold uppercase"
+      style={getTokenAvatarStyles(address || symbol)}
+    >
+      {initials}
+    </div>
+  )
+}
+
+function TokenRow({
+  token,
+  showBalance = true,
+}: {
+  token: Record<string, unknown>
+  showBalance?: boolean
+}) {
+  const address = String(token.address ?? "")
+  const symbol = String(token.symbol ?? address ?? "Unknown")
+  const name = typeof token.name === "string" ? token.name : undefined
+  const chainName = typeof token.chainName === "string" ? token.chainName : undefined
+  const iconUrl = typeof token.iconUrl === "string" ? token.iconUrl : undefined
+  const sourceLabel = getSourceLabel(token.source)
+  const balance = token.error
+    ? null
+    : `${String(token.formattedBalance ?? "0")} ${symbol}`.trim()
+
+  return (
+    <div className="rounded-xl bg-background/70 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 gap-3">
+          <TokenAvatar symbol={symbol} address={address} iconUrl={iconUrl} />
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-medium">{symbol}</p>
+              <Badge variant={sourceLabel === "verified" ? "secondary" : "outline"}>
+                {sourceLabel}
+              </Badge>
+              {chainName && <Badge variant="outline">{chainName}</Badge>}
+            </div>
+            <p className="truncate text-sm text-muted-foreground">
+              {name ?? "Token metadata unavailable"}
+            </p>
+            <p className="truncate font-mono text-[11px] text-muted-foreground" title={address}>
+              {shortenAddress(address)}
+            </p>
+          </div>
+        </div>
+        {showBalance && (
+          <div className="text-right">
+            {token.error ? (
+              <p className="max-w-40 text-xs text-destructive">{String(token.error)}</p>
+            ) : (
+              <p className="font-semibold">{balance}</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function BalanceResult({ data }: { data: Record<string, unknown> }) {
   const nativeBalance = isRecord(data.nativeBalance) ? data.nativeBalance : null
   const tokens = Array.isArray(data.tokens)
     ? data.tokens.filter(isRecord)
+    : []
+  const tokenCandidates = Array.isArray(data.tokenCandidates)
+    ? data.tokenCandidates.filter(isRecord)
     : []
   const errors = Array.isArray(data.errors) ? data.errors.map(String) : []
 
@@ -128,31 +237,28 @@ function BalanceResult({ data }: { data: Record<string, unknown> }) {
         {tokens.length > 0 && (
           <div className="space-y-2">
             {tokens.map((token) => (
-              <div
+              <TokenRow
                 key={`${String(token.address)}-${String(token.symbol)}`}
-                className="rounded-md bg-background/70 p-3"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-medium">{String(token.symbol)}</p>
-                    <p className="truncate font-mono text-[11px] text-muted-foreground">
-                      {String(token.address)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    {token.error ? (
-                      <p className="max-w-40 text-xs text-destructive">
-                        {String(token.error)}
-                      </p>
-                    ) : (
-                      <p className="font-semibold">
-                        {String(token.formattedBalance)} {String(token.symbol)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
+                token={token}
+              />
             ))}
+          </div>
+        )}
+        {tokenCandidates.length > 0 && (
+          <div className="space-y-2 rounded-xl border border-border/60 bg-background/40 p-3">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Info className="size-3.5" />
+              <p>Multiple verified matches found. Confirm the contract address.</p>
+            </div>
+            <div className="space-y-2">
+              {tokenCandidates.map((token) => (
+                <TokenRow
+                  key={`candidate-${String(token.address)}-${String(token.symbol)}`}
+                  token={token}
+                  showBalance={false}
+                />
+              ))}
+            </div>
           </div>
         )}
         {errors.length > 0 && (
