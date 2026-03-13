@@ -12,44 +12,30 @@ import {
 import { base, mainnet } from "viem/chains";
 import { createEnsService } from "../ens";
 import { createEthereumContext, type NetworkConfig } from "../ethereum";
+import { resolveTokenMetadata, resolveTokenQuery } from "../token-metadata";
+import { getTrustWalletChainSlug } from "../trustwallet-assets";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const symbolBytes32Abi = parseAbi(["function symbol() view returns (bytes32)"]);
+const nameBytes32Abi = parseAbi(["function name() view returns (bytes32)"]);
 
-export const BASE_WELL_KNOWN_TOKENS = [
+export const BASE_PORTFOLIO_TOKEN_ADDRESSES = [
   {
     address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-    symbol: "USDC",
-    decimals: 6,
   },
   {
     address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",
-    symbol: "USDT",
-    decimals: 6,
   },
   {
     address: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
-    symbol: "DAI",
-    decimals: 18,
   },
   {
     address: "0x4200000000000000000000000000000000000006",
-    symbol: "WETH",
-    decimals: 18,
   },
   {
     address: "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
-    symbol: "cbETH",
-    decimals: 18,
   },
 ] as const;
-
-const wellKnownTokenMap = new Map(
-  BASE_WELL_KNOWN_TOKENS.map((token) => [token.address.toLowerCase(), token])
-);
-const wellKnownTokenSymbolMap = new Map(
-  BASE_WELL_KNOWN_TOKENS.map((token) => [token.symbol.toUpperCase(), token])
-);
 
 export interface NativeBalanceResult {
   symbol: string;
@@ -59,19 +45,38 @@ export interface NativeBalanceResult {
 }
 
 export interface TokenBalanceResult {
+  chainId: number;
+  chainName: string;
   address: string;
   symbol: string;
+  name?: string;
   decimals: number | null;
   rawBalance: string | null;
   formattedBalance: string | null;
+  iconUrl?: string;
+  metadataUrl?: string;
+  source: "verified" | "onchain";
   error?: string;
 }
 
+export interface TokenCandidateResult {
+  chainId: number;
+  chainName: string;
+  address: string;
+  symbol: string;
+  name?: string;
+  iconUrl?: string;
+  source: "verified" | "onchain";
+}
+
 export interface BalanceSnapshot {
+  chainId: number;
+  chainName: string;
   address: string;
   blockNumber: number | null;
   nativeBalance: NativeBalanceResult | null;
   tokens: TokenBalanceResult[];
+  tokenCandidates: TokenCandidateResult[];
   errors: string[];
 }
 
@@ -126,38 +131,15 @@ export function resolveRequestedTokenAddresses(
   });
 }
 
-export function resolveRequestedTokenSymbols(
-  tokenSymbol?: string,
-  tokenSymbols?: string[]
-) {
-  const requested = [tokenSymbol, ...(tokenSymbols ?? [])].filter(
-    (value): value is string => Boolean(value?.trim())
-  );
-  const errors: string[] = [];
-
-  const resolved = requested.flatMap((value) => {
-    const symbol = value.trim().toUpperCase();
-    const token = wellKnownTokenSymbolMap.get(symbol);
-
-    if (!token) {
-      errors.push(
-        `Unknown Base token symbol "${value}". Supported symbols: ${BASE_WELL_KNOWN_TOKENS.map((knownToken) => knownToken.symbol).join(", ")}.`
-      );
-      return [];
-    }
-
-    return [token.address];
-  });
-
-  return { resolved, errors };
-}
-
 function buildErrorResult(address: string, error: string): BalanceSnapshot {
   return {
+    chainId: 0,
+    chainName: "Unknown",
     address,
     blockNumber: null,
     nativeBalance: null,
     tokens: [],
+    tokenCandidates: [],
     errors: [error],
   };
 }
@@ -212,8 +194,11 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
   const { publicClient, chainMetadata } = createEthereumContext(networkConfig);
   const ensService = createEnsService();
   const supportsBasePresets = chainMetadata.id === base.id;
+  const supportsTrustWalletTokenSearch = Boolean(
+    getTrustWalletChainSlug(chainMetadata.id)
+  );
 
-  function resolveSelectedNetworkTokenSymbols(
+  async function resolveSelectedNetworkTokenQueries(
     tokenSymbol?: string,
     tokenSymbols?: string[]
   ) {
@@ -222,27 +207,66 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
     );
     const errors: string[] = [];
 
-    if (!supportsBasePresets && requested.length > 0) {
+    if (!supportsTrustWalletTokenSearch && requested.length > 0) {
       errors.push(
-        `Token symbol shortcuts are only configured for Base. On ${chainMetadata.name}, provide token contract addresses instead.`
+        `Verified token search is not configured for ${chainMetadata.name}. Provide token contract addresses instead.`
       );
-      return { resolved: [] as string[], errors };
+      return {
+        resolved: [] as string[],
+        candidates: [] as TokenCandidateResult[],
+        errors,
+      };
     }
 
-    const resolved = resolveRequestedTokenSymbols(tokenSymbol, tokenSymbols);
+    const resolved: string[] = [];
+    const candidates: TokenCandidateResult[] = [];
+    const seenCandidates = new Set<string>();
+
+    for (const value of requested) {
+      try {
+        const resolution = await resolveTokenQuery({
+          chainId: chainMetadata.id,
+          query: value,
+        });
+
+        if (resolution.status === "resolved") {
+          resolved.push(resolution.token.address);
+          continue;
+        }
+
+        errors.push(resolution.message);
+
+        if (resolution.status === "ambiguous") {
+          resolution.candidates.forEach((candidate) => {
+            const key = `${candidate.chainId}:${candidate.address.toLowerCase()}`;
+            if (seenCandidates.has(key)) return;
+            seenCandidates.add(key);
+            candidates.push({
+              chainId: candidate.chainId,
+              chainName: candidate.chainName,
+              address: candidate.address,
+              symbol: candidate.symbol,
+              name: candidate.name,
+              iconUrl: candidate.iconUrl,
+              source: candidate.verified ? "verified" : "onchain",
+            });
+          });
+        }
+      } catch {
+        errors.push(
+          `Unable to load the verified token index for "${value}" on ${chainMetadata.name}. Provide a token contract address instead.`
+        );
+      }
+    }
+
     return {
-      resolved: resolved.resolved,
-      errors: [...errors, ...resolved.errors],
+      resolved,
+      candidates,
+      errors,
     };
   }
 
   async function readTokenSymbol(tokenAddress: Address, blockNumber: bigint) {
-    const wellKnownToken =
-      supportsBasePresets && chainMetadata.id === base.id
-        ? wellKnownTokenMap.get(tokenAddress.toLowerCase())
-        : undefined;
-    if (wellKnownToken) return wellKnownToken.symbol;
-
     try {
       return await withRetry(() =>
         publicClient.readContract({
@@ -269,13 +293,34 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
     }
   }
 
-  async function readTokenDecimals(tokenAddress: Address, blockNumber: bigint) {
-    const wellKnownToken =
-      supportsBasePresets && chainMetadata.id === base.id
-        ? wellKnownTokenMap.get(tokenAddress.toLowerCase())
-        : undefined;
-    if (wellKnownToken) return wellKnownToken.decimals;
+  async function readTokenName(tokenAddress: Address, blockNumber: bigint) {
+    try {
+      return await withRetry(() =>
+        publicClient.readContract({
+          address: tokenAddress,
+          abi: erc20Abi,
+          functionName: "name",
+          blockNumber,
+        })
+      );
+    } catch {
+      try {
+        const name = await withRetry(() =>
+          publicClient.readContract({
+            address: tokenAddress,
+            abi: nameBytes32Abi,
+            functionName: "name",
+            blockNumber,
+          })
+        );
+        return hexToString(name, { size: 32 }).replace(/\0/g, "") || undefined;
+      } catch {
+        return undefined;
+      }
+    }
+  }
 
+  async function readTokenDecimals(tokenAddress: Address, blockNumber: bigint) {
     try {
       return await withRetry(() =>
         publicClient.readContract({
@@ -301,22 +346,28 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
       tokenAddress = normalizeAddressInput(tokenAddressInput, "token address");
     } catch (error) {
       return {
+        chainId: chainMetadata.id,
+        chainName: chainMetadata.name,
         address: tokenAddressInput,
         symbol: tokenAddressInput,
         decimals: null,
         rawBalance: null,
         formattedBalance: null,
+        source: "onchain",
         error: error instanceof Error ? error.message : "Invalid token address.",
       };
     }
 
     if (tokenAddress === ZERO_ADDRESS) {
       return {
+        chainId: chainMetadata.id,
+        chainName: chainMetadata.name,
         address: tokenAddress,
         symbol: tokenAddress,
         decimals: null,
         rawBalance: null,
         formattedBalance: null,
+        source: "onchain",
         error:
           "Token address 0x0000000000000000000000000000000000000000 is not a valid ERC-20 contract.",
       };
@@ -327,11 +378,14 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
     );
     if (!bytecode || bytecode === "0x") {
       return {
+        chainId: chainMetadata.id,
+        chainName: chainMetadata.name,
         address: tokenAddress,
         symbol: tokenAddress,
         decimals: null,
         rawBalance: null,
         formattedBalance: null,
+        source: "onchain",
         error: `No contract was found at ${tokenAddress} on ${chainMetadata.name}.`,
       };
     }
@@ -346,25 +400,47 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
           blockNumber,
         })
       );
-      const [symbol, decimals] = await Promise.all([
-        readTokenSymbol(tokenAddress, blockNumber),
-        readTokenDecimals(tokenAddress, blockNumber),
-      ]);
+      const metadata = await resolveTokenMetadata({
+        chainId: chainMetadata.id,
+        address: tokenAddress,
+        readOnchainMetadata: async (resolvedAddress) => {
+          const [symbol, name, decimals] = await Promise.all([
+            readTokenSymbol(resolvedAddress, blockNumber),
+            readTokenName(resolvedAddress, blockNumber),
+            readTokenDecimals(resolvedAddress, blockNumber),
+          ]);
+
+          return {
+            symbol,
+            name,
+            decimals,
+          };
+        },
+      });
 
       return {
+        chainId: chainMetadata.id,
+        chainName: chainMetadata.name,
         address: tokenAddress,
-        symbol,
-        decimals,
+        symbol: metadata.symbol,
+        name: metadata.name,
+        decimals: metadata.decimals ?? null,
         rawBalance: balance.toString(),
-        formattedBalance: formatTokenAmount(balance, decimals),
+        formattedBalance: formatTokenAmount(balance, metadata.decimals ?? null),
+        iconUrl: metadata.iconUrl,
+        metadataUrl: metadata.metadataUrl,
+        source: metadata.verified ? "verified" : "onchain",
       };
     } catch {
       return {
+        chainId: chainMetadata.id,
+        chainName: chainMetadata.name,
         address: tokenAddress,
         symbol: tokenAddress,
         decimals: null,
         rawBalance: null,
         formattedBalance: null,
+        source: "onchain",
         error: `Unable to read an ERC-20 balance from ${tokenAddress} on ${chainMetadata.name}.`,
       };
     }
@@ -394,20 +470,19 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
       );
     }
 
-    const blockNumber = await withRetry(() => publicClient.getBlockNumber());
+    const [blockNumber, resolvedQueries] = await Promise.all([
+      withRetry(() => publicClient.getBlockNumber()),
+      resolveSelectedNetworkTokenQueries(tokenSymbol, tokenSymbols),
+    ]);
     const nativeBalance = await withRetry(() =>
       publicClient.getBalance({
         address: ownerAddress,
         blockNumber,
       })
     );
-    const resolvedSymbols = resolveSelectedNetworkTokenSymbols(
-      tokenSymbol,
-      tokenSymbols
-    );
     const requestedTokenAddresses = resolveRequestedTokenAddresses(tokenAddress, [
       ...(tokenAddresses ?? []),
-      ...resolvedSymbols.resolved,
+      ...resolvedQueries.resolved,
     ]);
     const tokens = await Promise.all(
       requestedTokenAddresses.map((requestedTokenAddress) =>
@@ -416,6 +491,8 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
     );
 
     return {
+      chainId: chainMetadata.id,
+      chainName: chainMetadata.name,
       address: ownerAddress,
       blockNumber: Number(blockNumber),
       nativeBalance: {
@@ -425,8 +502,9 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
         formattedBalance: formatWithGrouping(formatEther(nativeBalance)),
       },
       tokens,
+      tokenCandidates: resolvedQueries.candidates,
       errors: [
-        ...resolvedSymbols.errors,
+        ...resolvedQueries.errors,
         ...tokens.flatMap((token) => (token.error ? [token.error] : [])),
       ],
     };
@@ -447,11 +525,15 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
       tokenSymbol: z
         .string()
         .optional()
-        .describe("Optional well-known Base token symbol. Only supported on Base."),
+        .describe(
+          "Optional verified token symbol or name for the active network when Trust Wallet indexing is available."
+        ),
       tokenSymbols: z
         .array(z.string())
         .optional()
-        .describe("Optional list of well-known Base token symbols. Only supported on Base."),
+        .describe(
+          "Optional list of verified token symbols or names for the active network when Trust Wallet indexing is available."
+        ),
     }),
     execute: async ({
       address,
@@ -485,7 +567,7 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
 
       return fetchBalanceSnapshot({
         address,
-        tokenAddresses: BASE_WELL_KNOWN_TOKENS.map((token) => token.address),
+        tokenAddresses: BASE_PORTFOLIO_TOKEN_ADDRESSES.map((token) => token.address),
       });
     },
   });

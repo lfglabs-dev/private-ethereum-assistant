@@ -4,7 +4,6 @@ import {
   formatWithGrouping,
   normalizeAddressInput,
   resolveRequestedTokenAddresses,
-  resolveRequestedTokenSymbols,
 } from "./read-chain";
 
 describe("read-chain helpers", () => {
@@ -49,15 +48,4 @@ describe("read-chain helpers", () => {
     ]);
   });
 
-  test("resolves well-known Base token symbols", () => {
-    expect(resolveRequestedTokenSymbols("USDC", ["weth", "nope"])).toEqual({
-      resolved: [
-        "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-        "0x4200000000000000000000000000000000000006",
-      ],
-      errors: [
-        'Unknown Base token symbol "nope". Supported symbols: USDC, USDT, DAI, WETH, cbETH.',
-      ],
-    });
-  });
 });
