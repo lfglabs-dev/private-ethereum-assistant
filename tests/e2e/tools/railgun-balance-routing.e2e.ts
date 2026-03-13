@@ -6,6 +6,7 @@ import {
   executeTool,
 } from "../helpers/config"
 import {
+  BALANCE_ROUTING_ETH_AMOUNT,
   BALANCE_ROUTING_PRIVACY_GUIDANCE,
   createBalanceRoutingRuntimeConfig,
 } from "../helpers/railgun-balance-routing"
@@ -46,7 +47,7 @@ describe("Railgun balance routing E2E", () => {
     const result = await executeTool(tools.railgun_balance_route, {
       action: "unshield",
       token: "ETH",
-      amount: "0.0001",
+      amount: BALANCE_ROUTING_ETH_AMOUNT,
     } satisfies RailgunBalanceRouteInput)
 
     const balanceRouting = expectBalanceRoutingResult(result)

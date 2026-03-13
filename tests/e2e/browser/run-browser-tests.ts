@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { privateKeyToAccount } from "viem/accounts";
 import {
+  BALANCE_ROUTING_ETH_AMOUNT,
   BALANCE_ROUTING_PRIVACY_GUIDANCE,
 } from "../helpers/railgun-balance-routing";
 
@@ -351,7 +352,9 @@ async function main() {
     "Railgun private shortfalls recommend shielding in chat",
     async () => {
       await ensureDeveloperModeReady();
-      await submitMessage("Send 0.0001 ETH to vitalik.eth from my private balance.");
+      await submitMessage(
+        `Send ${BALANCE_ROUTING_ETH_AMOUNT} ETH to vitalik.eth from my private balance.`,
+      );
       await waitForBodyCondition(
         (text) =>
           text.includes("Checking Railgun private/public balance routing") ||

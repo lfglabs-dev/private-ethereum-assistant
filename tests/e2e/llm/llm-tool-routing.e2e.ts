@@ -21,6 +21,7 @@ import {
   sendChatPrompt,
 } from "../helpers/chat-client"
 import {
+  BALANCE_ROUTING_ETH_AMOUNT,
   BALANCE_ROUTING_PRIVACY_GUIDANCE,
   createBalanceRoutingRuntimeConfig,
 } from "../helpers/railgun-balance-routing"
@@ -221,7 +222,7 @@ describe("LLM tool routing E2E", () => {
 
   test("LLM recommends shielding instead of attempting a private spend with insufficient private balance", async () => {
     const result = await sendChatPrompt({
-      prompt: "Send 0.0001 ETH to vitalik.eth from my private balance.",
+      prompt: `Send ${BALANCE_ROUTING_ETH_AMOUNT} ETH to vitalik.eth from my private balance.`,
       runtimeConfig: balanceRoutingRuntimeConfig,
     })
 
@@ -231,7 +232,9 @@ describe("LLM tool routing E2E", () => {
       String(isRecord(routeCall.input) ? routeCall.input.action : ""),
     )
     expect(isRecord(routeCall.input) ? routeCall.input.token : undefined).toBe("ETH")
-    expect(isRecord(routeCall.input) ? routeCall.input.amount : undefined).toBe("0.0001")
+    expect(isRecord(routeCall.input) ? routeCall.input.amount : undefined).toBe(
+      BALANCE_ROUTING_ETH_AMOUNT,
+    )
     expect(result.toolCalls.some((entry) => entry.toolName === "railgun_transfer")).toBe(
       false,
     )
