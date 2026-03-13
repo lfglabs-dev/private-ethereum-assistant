@@ -379,8 +379,7 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
         if (!signerKey) {
           return {
             status: "manual_creation_required",
-            message:
-              "No Safe signer key is configured in browser settings. Open the Safe UI below to create this transaction manually with a connected signer wallet.",
+            message: "I can't create this Safe transaction for you. Add a Safe signer key or create it manually in Safe.",
             summary: transactionSummary,
             safeAddress,
             safeUILink,
@@ -388,9 +387,6 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
             signers: info.owners,
             currentConfirmations: 0,
             requiredConfirmations: info.threshold,
-            statusLabel: "Manual creation required",
-            pendingTransactionsHint:
-              "After proposing it in Safe, ask me 'what are the pending Safe transactions?' to check status.",
             transaction: {
               to,
               value: `${resolvedValue} ETH`,
@@ -408,8 +404,7 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
         if (!process.env.SAFE_API_KEY) {
           return {
             status: "manual_creation_required",
-            message:
-              "SAFE_API_KEY is not configured for automated Safe proposals in this environment. Open the Safe UI below to create and sign this transaction manually.",
+            message: "I can't create this Safe transaction for you. Add `SAFE_API_KEY` or create it manually in Safe.",
             summary: transactionSummary,
             safeAddress,
             safeUILink,
@@ -417,9 +412,6 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
             signers: info.owners,
             currentConfirmations: 0,
             requiredConfirmations: info.threshold,
-            statusLabel: "Manual creation required",
-            pendingTransactionsHint:
-              "After proposing it in Safe, ask me 'what are the pending Safe transactions?' to check status.",
             transaction: {
               to,
               value: `${resolvedValue} ETH`,

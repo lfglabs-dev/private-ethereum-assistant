@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   applyLegacyRuntimeConfigDefaults,
   createDefaultRuntimeConfig,
+  createDeveloperRuntimeConfig,
   createRuntimeConfigDraft,
   getActiveModel,
   parseRuntimeConfigDraft,
@@ -62,6 +63,30 @@ describe("runtime-config helpers", () => {
 
     expect(getActiveModel(openRouterConfig)).toBe("qwen/qwen3.5-27b");
     expect(getActiveModel(localConfig)).toBe("qwen3:8b");
+  });
+
+  test("developer mode reuses the EOA key as the Safe signer key", () => {
+    const originalEoaPrivateKey = process.env.EOA_PRIVATE_KEY;
+
+    process.env.EOA_PRIVATE_KEY =
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    try {
+      const runtimeConfig = createDeveloperRuntimeConfig();
+
+      expect(runtimeConfig.wallet.eoaPrivateKey).toBe(
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      );
+      expect(runtimeConfig.safe.signerPrivateKey).toBe(
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      );
+    } finally {
+      if (originalEoaPrivateKey === undefined) {
+        delete process.env.EOA_PRIVATE_KEY;
+      } else {
+        process.env.EOA_PRIVATE_KEY = originalEoaPrivateKey;
+      }
+    }
   });
 
   test("fills legacy Railgun privacy guidance defaults for stored configs", () => {

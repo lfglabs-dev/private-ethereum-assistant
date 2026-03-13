@@ -226,10 +226,17 @@ export function createDeveloperDisplayRuntimeConfig(): RuntimeConfig {
 }
 
 export function createDeveloperRuntimeConfig(): RuntimeConfig {
+  const displayRuntimeConfig = createDeveloperDisplayRuntimeConfig();
+  const developerWalletPrivateKey = getDeveloperWalletPrivateKey();
+
   return {
-    ...createDeveloperDisplayRuntimeConfig(),
+    ...displayRuntimeConfig,
+    safe: {
+      ...displayRuntimeConfig.safe,
+      signerPrivateKey: developerWalletPrivateKey,
+    },
     wallet: {
-      eoaPrivateKey: getDeveloperWalletPrivateKey(),
+      eoaPrivateKey: developerWalletPrivateKey,
     },
   };
 }
