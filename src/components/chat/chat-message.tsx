@@ -41,6 +41,8 @@ function getToolLabel(toolName: string): string {
   switch (toolName) {
     case "railgun_balance":
       return "Scanning Railgun balances on Arbitrum"
+    case "railgun_balance_route":
+      return "Checking Railgun private/public balance routing"
     case "railgun_shield":
       return "Preparing Railgun shield on Arbitrum"
     case "railgun_transfer":

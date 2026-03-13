@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import {
   railgunBalance,
+  railgunBalanceRoute,
   railgunShield,
   railgunTransfer,
   railgunUnshield,
@@ -21,6 +22,22 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
         ),
     }),
     execute: async ({ token }) => railgunBalance(token, runtimeConfig),
+  });
+
+  const routeRailgunBalance = tool({
+    description:
+      "Compare the requested private Railgun action against both the shielded Railgun balance and the public EOA balance for the same asset. Use this before private transfers or unshields when the user wants to spend from their private balance.",
+    inputSchema: z.object({
+      action: z
+        .enum(["transfer", "unshield"])
+        .describe("The private Railgun action the user wants to take."),
+      token: z
+        .string()
+        .describe("ETH, USDC, or a token contract address on the configured network."),
+      amount: z.string().describe("Human-readable token amount, like '0.1' or '25'."),
+    }),
+    execute: async ({ action, token, amount }) =>
+      railgunBalanceRoute(action, token, amount, runtimeConfig),
   });
 
   const railgunShieldTokens = tool({
@@ -70,6 +87,7 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
 
   return {
     getRailgunBalance,
+    routeRailgunBalance,
     railgunShieldTokens,
     railgunPrivateTransfer,
     railgunWithdraw,
