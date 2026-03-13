@@ -740,10 +740,15 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
   const isError = data.status === "error"
   const titleByOperation: Record<string, string> = {
     balance: "Railgun Balances",
+    route: "Railgun Balance Routing",
     shield: "Railgun Shield",
     transfer: "Railgun Transfer",
     unshield: "Railgun Unshield",
   }
+  const balanceRouting =
+    typeof data.balanceRouting === "object" && data.balanceRouting !== null
+      ? (data.balanceRouting as Record<string, unknown>)
+      : null
 
   if (
     data.status === "awaiting_local_approval" ||
@@ -755,7 +760,11 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
   if (isError) {
     const setup = Array.isArray(data.setup) ? (data.setup as string[]) : []
     return (
-      <Card size="sm" className="border-red-500/20 bg-red-500/5">
+      <Card
+        data-testid={`result-railgun-${operation || "error"}`}
+        size="sm"
+        className="border-red-500/20 bg-red-500/5"
+      >
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
             <Shield className="size-4 text-red-500" />
@@ -766,6 +775,30 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p>{String(data.message ?? "Unknown Railgun error")}</p>
+          {balanceRouting && (
+            <div className="rounded-md border border-red-500/20 bg-background/60 p-3 text-xs">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">
+                  Private {String(balanceRouting.shieldedBalance)}{" "}
+                  {String(balanceRouting.token)}
+                </Badge>
+                <Badge variant="secondary">
+                  Public {String(balanceRouting.publicBalance)}{" "}
+                  {String(balanceRouting.token)}
+                </Badge>
+                {"shortfall" in balanceRouting && balanceRouting.shortfall ? (
+                  <Badge variant="outline">
+                    Shortfall {String(balanceRouting.shortfall)}{" "}
+                    {String(balanceRouting.token)}
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-2">{String(balanceRouting.recommendation ?? "")}</p>
+              <p className="mt-1 text-muted-foreground">
+                {String(balanceRouting.privacyGuidance ?? "")}
+              </p>
+            </div>
+          )}
           {setup.length > 0 && (
             <ul className="space-y-1 text-xs text-muted-foreground">
               {setup.map((item) => (
@@ -778,13 +811,65 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
     )
   }
 
+  if (operation === "route" && balanceRouting) {
+    return (
+      <Card size="sm" className="border-0 bg-secondary/50">
+        <CardHeader className="pb-0">
+          <div className="flex items-center gap-2">
+            <Shield className="size-4 text-muted-foreground" />
+            <CardTitle className="text-sm">Railgun Balance Routing</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary">
+              {String(balanceRouting.requestedAmount)} {String(balanceRouting.token)}
+            </Badge>
+            <Badge variant="outline">
+              {String(balanceRouting.requestedOperation)}
+            </Badge>
+            <Badge variant="outline">{String(balanceRouting.route)}</Badge>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-md bg-background/50 p-3">
+              <p className="text-xs text-muted-foreground">Private balance</p>
+              <p className="font-medium">
+                {String(balanceRouting.shieldedBalance)} {String(balanceRouting.token)}
+              </p>
+            </div>
+            <div className="rounded-md bg-background/50 p-3">
+              <p className="text-xs text-muted-foreground">Public balance</p>
+              <p className="font-medium">
+                {String(balanceRouting.publicBalance)} {String(balanceRouting.token)}
+              </p>
+            </div>
+          </div>
+          {"shortfall" in balanceRouting && balanceRouting.shortfall ? (
+            <p className="text-xs text-muted-foreground">
+              Shortfall: {String(balanceRouting.shortfall)}{" "}
+              {String(balanceRouting.token)}
+            </p>
+          ) : null}
+          <p>{String(balanceRouting.recommendation)}</p>
+          <p className="text-xs text-muted-foreground">
+            {String(balanceRouting.privacyGuidance)}
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (operation === "balance") {
     const balances = Array.isArray(data.balances)
       ? (data.balances as Array<Record<string, unknown>>)
       : []
 
     return (
-      <Card size="sm" className="border-0 bg-secondary/50">
+      <Card
+        data-testid="result-railgun-balance"
+        size="sm"
+        className="border-0 bg-secondary/50"
+      >
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
             <Shield className="size-4 text-muted-foreground" />
@@ -823,7 +908,11 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
     : []
 
   return (
-    <Card size="sm" className="border-0 bg-secondary/50">
+    <Card
+      data-testid={`result-railgun-${operation || "operation"}`}
+      size="sm"
+      className="border-0 bg-secondary/50"
+    >
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
           <Shield className="size-4 text-muted-foreground" />
@@ -839,12 +928,23 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
               {String(data.amount)} {String(data.token)}
             </Badge>
           )}
-          {"recipient" in data && (
-            <Badge variant="outline" className="max-w-full truncate font-mono text-[10px]">
-              {String(data.recipient)}
-            </Badge>
-          )}
         </div>
+
+        {"recipient" in data && (
+          <div className="rounded-md bg-background/50 px-2.5 py-2 text-xs">
+            <p className="text-muted-foreground">
+              {operation === "unshield" ? "Public recipient" : "Recipient"}
+            </p>
+            <p className="break-all font-mono">{String(data.recipient)}</p>
+          </div>
+        )}
+
+        {"txHash" in data && (
+          <div className="rounded-md bg-background/50 px-2.5 py-2 text-xs">
+            <p className="text-muted-foreground">Tx hash</p>
+            <p className="break-all font-mono">{String(data.txHash)}</p>
+          </div>
+        )}
 
         {stages.length > 0 && (
           <div className="space-y-1.5">

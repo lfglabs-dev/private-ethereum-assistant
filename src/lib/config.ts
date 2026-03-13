@@ -33,6 +33,9 @@ export const config = {
     rpcUrl: process.env.RAILGUN_RPC_URL || "https://arb1.arbitrum.io/rpc",
     chainId: Number(process.env.RAILGUN_CHAIN_ID || "42161"),
     explorerTxBaseUrl: process.env.RAILGUN_EXPLORER_TX_URL || "https://arbiscan.io/tx/",
+    privacyGuidanceText:
+      process.env.RAILGUN_PRIVACY_GUIDANCE_TEXT ||
+      "Shielding is a public deposit on Arbitrum, but once confirmed the resulting private balance can fund later Railgun actions without publicly linking future transfers to the deposit address.",
     poiNodeUrls: (process.env.RAILGUN_POI_NODE_URLS || "https://ppoi-agg.horsewithsixlegs.xyz")
       .split(",")
       .map((url) => url.trim())
