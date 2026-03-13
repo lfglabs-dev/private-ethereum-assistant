@@ -177,16 +177,22 @@ function cleanupPreparedTransfers() {
   }
 }
 
-function getSignerPrivateKey(): { privateKey: Hex } | ToolError {
-  const value = process.env.EOA_PRIVATE_KEY ?? process.env.WALLET_PRIVATE_KEY;
+function getSignerPrivateKey(
+  configuredPrivateKey?: string
+): { privateKey: Hex } | ToolError {
+  const value = configuredPrivateKey?.trim();
   if (!value) {
-    return { error: "No EOA signer configured. Set EOA_PRIVATE_KEY in .env" };
+    return {
+      error:
+        "No EOA signer is configured. Add an EOA private key in browser settings first.",
+    };
   }
 
   const normalized = value.startsWith("0x") ? value : `0x${value}`;
   if (!isHex(normalized)) {
     return {
-      error: "EOA_PRIVATE_KEY is invalid. Expected a 0x-prefixed private key.",
+      error:
+        "The configured EOA private key is invalid. Expected a 32-byte hex string.",
     };
   }
 
@@ -312,12 +318,16 @@ function buildPreviewError(message: string, chain: ChainMetadata): PreviewResult
   };
 }
 
-async function prepareTransfer(input: TransferInput, network: NetworkConfig) {
+async function prepareTransfer(
+  input: TransferInput,
+  network: NetworkConfig,
+  eoaPrivateKey?: string
+) {
   cleanupPreparedTransfers();
   const { publicClient, ensClient, chainMetadata } =
     createEthereumContext(network);
 
-  const signer = getSignerPrivateKey();
+  const signer = getSignerPrivateKey(eoaPrivateKey);
   if (hasToolError(signer)) {
     return {
       ok: false,
@@ -717,7 +727,10 @@ function buildSignedTransactionRequest(
   };
 }
 
-export function createEoaTransferTools(networkConfig: NetworkConfig) {
+export function createEoaTransferTools(
+  networkConfig: NetworkConfig,
+  eoaPrivateKey?: string
+) {
   const chainMetadata = createEthereumContext(networkConfig).chainMetadata;
 
   const prepareEoaTransfer = tool({
@@ -725,7 +738,7 @@ export function createEoaTransferTools(networkConfig: NetworkConfig) {
       "Prepare an ETH or ERC-20 transfer from the configured EOA. Always call this first for send requests so you can show gas estimates and ask the user to confirm before signing.",
     inputSchema: transferInputSchema,
     execute: async (input) => {
-      const result = await prepareTransfer(input, networkConfig);
+      const result = await prepareTransfer(input, networkConfig, eoaPrivateKey);
       return result.ok ? result.preview : result.result;
     },
   });
@@ -760,7 +773,7 @@ export function createEoaTransferTools(networkConfig: NetworkConfig) {
 
       preparedTransfers.delete(confirmationId);
 
-      const signer = getSignerPrivateKey();
+      const signer = getSignerPrivateKey(eoaPrivateKey);
       if (hasToolError(signer)) {
         yield buildPreviewError(signer.error, prepared.chain);
         return;

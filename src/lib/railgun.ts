@@ -59,6 +59,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrum } from "viem/chains";
 import { config } from "./config";
+import type { RuntimeConfig } from "./runtime-config";
 
 const RAILGUN_NETWORK = NetworkName.Arbitrum;
 const RAILGUN_TXID_VERSION = TXIDVersion.V2_PoseidonMerkle;
@@ -107,6 +108,10 @@ type RailgunRuntime = {
   railgunAddress: string;
   encryptionKey: string;
   state: RailgunRuntimeState;
+};
+
+export type RailgunToolRuntimeConfig = RuntimeConfig["railgun"] & {
+  signerPrivateKey: string;
 };
 
 type RailgunBalanceRow = {
@@ -163,11 +168,58 @@ type RailgunResult =
 let initPromise: Promise<RailgunRuntime> | undefined;
 const runtimeState: RailgunRuntimeState = {};
 let operationQueue: Promise<void> = Promise.resolve();
+let engineStarted = false;
 
-const publicClient = createPublicClient({
+function createDefaultRailgunToolRuntimeConfig(): RailgunToolRuntimeConfig {
+  return {
+    networkLabel: config.railgun.networkLabel,
+    rpcUrl: config.railgun.rpcUrl,
+    chainId: config.railgun.chainId,
+    explorerTxBaseUrl: config.railgun.explorerTxBaseUrl,
+    poiNodeUrls: config.railgun.poiNodeUrls,
+    mnemonic: config.railgun.mnemonic || "",
+    signerPrivateKey: config.railgun.signerPrivateKey || "",
+    walletCreationBlock: config.railgun.walletCreationBlock,
+    scanTimeoutMs: config.railgun.scanTimeoutMs,
+    pollingIntervalMs: config.railgun.pollingIntervalMs,
+  };
+}
+
+let currentConfig = createDefaultRailgunToolRuntimeConfig();
+let currentConfigFingerprint = JSON.stringify(currentConfig);
+let publicClient = createPublicClient({
   chain: arbitrum,
-  transport: http(config.railgun.rpcUrl),
+  transport: http(currentConfig.rpcUrl),
 });
+
+function resetRuntimeState() {
+  runtimeState.utxoScan = undefined;
+  runtimeState.txidScan = undefined;
+  runtimeState.poiProof = undefined;
+  runtimeState.poiBatch = undefined;
+  runtimeState.lastSyncAt = undefined;
+}
+
+function setRailgunToolRuntimeConfig(nextConfig: RailgunToolRuntimeConfig) {
+  const fingerprint = JSON.stringify({
+    ...nextConfig,
+    poiNodeUrls: [...nextConfig.poiNodeUrls],
+  });
+
+  if (fingerprint === currentConfigFingerprint) {
+    return;
+  }
+
+  currentConfig = nextConfig;
+  currentConfigFingerprint = fingerprint;
+  initPromise = undefined;
+  operationQueue = Promise.resolve();
+  resetRuntimeState();
+  publicClient = createPublicClient({
+    chain: arbitrum,
+    transport: http(currentConfig.rpcUrl),
+  });
+}
 
 const withRailgunLock = async <T>(fn: () => Promise<T>): Promise<T> => {
   const previous = operationQueue;
@@ -217,19 +269,21 @@ const artifactStore = new ArtifactStore(
 );
 
 const clearRailgunSecrets = () => [
-  "Set `RAILGUN_MNEMONIC` to a dedicated Railgun wallet seed phrase, or set `EOA_PRIVATE_KEY` to derive one deterministically for testing.",
-  "Set `EOA_PRIVATE_KEY` if you want the assistant to submit Arbitrum transactions on your behalf.",
-  "Optionally override `RAILGUN_RPC_URL` and `RAILGUN_POI_NODE_URLS` if you want custom infrastructure.",
+  "Set a dedicated Railgun mnemonic in browser settings, or leave it blank to derive one from the configured EOA private key for testing.",
+  "Set an EOA private key in browser settings if you want the assistant to submit Arbitrum transactions on your behalf.",
+  "Optionally change the Railgun RPC URL and POI node URLs in settings if you want custom infrastructure.",
 ];
 
 const snapshotState = (): RailgunRuntimeState =>
   JSON.parse(JSON.stringify(runtimeState)) as RailgunRuntimeState;
 
 const getSignerPrivateKey = (): `0x${string}` => {
-  const privateKey = config.railgun.signerPrivateKey?.trim();
+  const privateKey = currentConfig.signerPrivateKey.trim();
 
   if (!privateKey) {
-    throw new Error("Missing EOA_PRIVATE_KEY for Arbitrum transaction signing.");
+    throw new Error(
+      "Missing EOA private key for Arbitrum transaction signing. Add it in browser settings first.",
+    );
   }
 
   return (privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`) as `0x${string}`;
@@ -241,21 +295,23 @@ const getWalletClient = () =>
   createWalletClient({
     account: getSignerAccount(),
     chain: arbitrum,
-    transport: http(config.railgun.rpcUrl),
+    transport: http(currentConfig.rpcUrl),
   });
 
 const deriveRailgunMnemonic = () => {
-  const explicitMnemonic = config.railgun.mnemonic?.trim();
+  const explicitMnemonic = currentConfig.mnemonic.trim();
   if (explicitMnemonic) {
     return explicitMnemonic;
   }
 
-  const privateKey = config.railgun.signerPrivateKey?.trim();
+  const privateKey = currentConfig.signerPrivateKey.trim();
   if (privateKey) {
     return Mnemonic.fromEntropy(ByteUtils.strip0x(privateKey));
   }
 
-  throw new Error("Missing RAILGUN_MNEMONIC or EOA_PRIVATE_KEY.");
+  throw new Error(
+    "Missing Railgun mnemonic and EOA private key. Add one of them in browser settings first.",
+  );
 };
 
 const deriveEncryptionKey = (mnemonic: string) =>
@@ -300,7 +356,7 @@ const initializeCallbacks = () => {
 };
 
 const waitForTxidScanIfRequired = async () => {
-  const deadline = Date.now() + config.railgun.scanTimeoutMs;
+  const deadline = Date.now() + currentConfig.scanTimeoutMs;
 
   while (Date.now() < deadline) {
     if (runtimeState.txidScan?.scanStatus === "Complete") {
@@ -320,7 +376,7 @@ const syncWalletState = async (runtime: RailgunRuntime) => {
     new Promise((_, reject) =>
       setTimeout(
         () => reject(new Error("Railgun wallet scan timed out.")),
-        config.railgun.scanTimeoutMs,
+        currentConfig.scanTimeoutMs,
       ),
     ),
   ]);
@@ -329,10 +385,10 @@ const syncWalletState = async (runtime: RailgunRuntime) => {
 };
 
 const createFallbackProviderConfig = () => ({
-  chainId: config.railgun.chainId,
+  chainId: currentConfig.chainId,
   providers: [
     {
-      provider: config.railgun.rpcUrl,
+      provider: currentConfig.rpcUrl,
       priority: 1,
       weight: 1,
       maxLogsPerBatch: 32,
@@ -348,15 +404,18 @@ const initializeRailgun = async (): Promise<RailgunRuntime> => {
   const fingerprint = getWalletFingerprint(mnemonic);
   const encryptionKey = deriveEncryptionKey(mnemonic);
 
-  await startRailgunEngine(
-    "railgunchat",
-    leveldown(RAILGUN_DB_PATH),
-    false,
-    artifactStore,
-    false,
-    false,
-    config.railgun.poiNodeUrls,
-  );
+  if (!engineStarted) {
+    await startRailgunEngine(
+      "railgunchat",
+      leveldown(RAILGUN_DB_PATH),
+      false,
+      artifactStore,
+      false,
+      false,
+      currentConfig.poiNodeUrls,
+    );
+    engineStarted = true;
+  }
 
   initializeCallbacks();
   getProver().setSnarkJSGroth16(groth16 as SnarkJSGroth16);
@@ -364,12 +423,12 @@ const initializeRailgun = async (): Promise<RailgunRuntime> => {
   await loadProvider(
     createFallbackProviderConfig(),
     RAILGUN_NETWORK,
-    config.railgun.pollingIntervalMs,
+    currentConfig.pollingIntervalMs,
   );
 
   const existingMeta = await loadWalletMeta();
   const creationBlockNumbers = {
-    [RAILGUN_NETWORK]: config.railgun.walletCreationBlock,
+    [RAILGUN_NETWORK]: currentConfig.walletCreationBlock,
   };
 
   const walletInfo =
@@ -405,7 +464,7 @@ const getRuntime = async () => {
 };
 
 const explorerUrlForTx = (txHash: string) =>
-  `${config.railgun.explorerTxBaseUrl}${txHash}`;
+  `${currentConfig.explorerTxBaseUrl}${txHash}`;
 
 const isNativeToken = (token: string) => token.trim().toUpperCase() === "ETH";
 
@@ -651,13 +710,20 @@ const buildErrorResult = (
     railgun: true,
     status: "error",
     operation,
-    network: config.railgun.networkLabel,
+    network: currentConfig.networkLabel,
     message,
     setup: clearRailgunSecrets(),
   };
 };
 
-export async function railgunBalance(token?: string): Promise<RailgunResult> {
+export async function railgunBalance(
+  token?: string,
+  runtimeConfig?: RailgunToolRuntimeConfig,
+): Promise<RailgunResult> {
+  if (runtimeConfig) {
+    setRailgunToolRuntimeConfig(runtimeConfig);
+  }
+
   return withRailgunLock(async () => {
     try {
       const runtime = await getRuntime();
@@ -705,7 +771,7 @@ export async function railgunBalance(token?: string): Promise<RailgunResult> {
         railgun: true,
         status: "success",
         operation: "balance",
-        network: config.railgun.networkLabel,
+        network: currentConfig.networkLabel,
         railgunAddress: runtime.railgunAddress,
         scan: snapshotState(),
         balances: filteredBalances,
@@ -719,7 +785,12 @@ export async function railgunBalance(token?: string): Promise<RailgunResult> {
 export async function railgunShield(
   token: string,
   amount: string,
+  runtimeConfig?: RailgunToolRuntimeConfig,
 ): Promise<RailgunResult> {
+  if (runtimeConfig) {
+    setRailgunToolRuntimeConfig(runtimeConfig);
+  }
+
   return withRailgunLock(async () => {
     try {
       const runtime = await getRuntime();
@@ -820,7 +891,7 @@ export async function railgunShield(
         railgun: true,
         status: "success",
         operation: "shield",
-        network: config.railgun.networkLabel,
+        network: currentConfig.networkLabel,
         railgunAddress: runtime.railgunAddress,
         token: resolvedToken.symbol,
         amount,
@@ -843,7 +914,12 @@ export async function railgunTransfer(
   recipient: string,
   token: string,
   amount: string,
+  runtimeConfig?: RailgunToolRuntimeConfig,
 ): Promise<RailgunResult> {
+  if (runtimeConfig) {
+    setRailgunToolRuntimeConfig(runtimeConfig);
+  }
+
   return withRailgunLock(async () => {
     const proofProgress: ProofStage[] = [];
 
@@ -960,7 +1036,7 @@ export async function railgunTransfer(
         railgun: true,
         status: "success",
         operation: "transfer",
-        network: config.railgun.networkLabel,
+        network: currentConfig.networkLabel,
         railgunAddress: runtime.railgunAddress,
         token: resolvedToken.symbol,
         amount,
@@ -984,7 +1060,12 @@ export async function railgunUnshield(
   recipient: string,
   token: string,
   amount: string,
+  runtimeConfig?: RailgunToolRuntimeConfig,
 ): Promise<RailgunResult> {
+  if (runtimeConfig) {
+    setRailgunToolRuntimeConfig(runtimeConfig);
+  }
+
   return withRailgunLock(async () => {
     const proofProgress: ProofStage[] = [];
 
@@ -1151,7 +1232,7 @@ export async function railgunUnshield(
         railgun: true,
         status: "success",
         operation: "unshield",
-        network: config.railgun.networkLabel,
+        network: currentConfig.networkLabel,
         railgunAddress: runtime.railgunAddress,
         token: resolvedToken.symbol,
         amount,

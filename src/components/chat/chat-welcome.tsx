@@ -13,9 +13,10 @@ const SUGGESTIONS = [
 
 interface ChatWelcomeProps {
   onSuggestionClick: (suggestion: string) => void
+  providerLabel: string
 }
 
-export function ChatWelcome({ onSuggestionClick }: ChatWelcomeProps) {
+export function ChatWelcome({ onSuggestionClick, providerLabel }: ChatWelcomeProps) {
   return (
     <div
       data-testid="chat-welcome"
@@ -45,8 +46,8 @@ export function ChatWelcome({ onSuggestionClick }: ChatWelcomeProps) {
         transition={{ duration: 0.4, delay: 0.2 }}
         className="mt-2 max-w-sm text-sm text-muted-foreground"
       >
-        Ask about Base Safe transactions or test private Railgun flows on Arbitrum.
-        Everything runs locally.
+        Ask about Safe transactions, route normal transfers, and test private
+        Railgun flows. Current chat backend: {providerLabel}.
       </motion.p>
 
       <motion.div

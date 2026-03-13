@@ -72,6 +72,13 @@ export function getChainMetadata(networkConfig: NetworkConfig): ChainMetadata {
   };
 }
 
+export function getNetworkLabel(networkConfig: NetworkConfig) {
+  return (
+    NETWORK_PRESETS.find((preset) => preset.chainId === networkConfig.chainId)?.name ??
+    `Chain ${networkConfig.chainId}`
+  );
+}
+
 export function createEthereumContext(networkConfig: NetworkConfig) {
   const chain = getChainDefinition(networkConfig.chainId);
   const chainMetadata = getChainMetadata(networkConfig);
