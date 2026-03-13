@@ -14,6 +14,7 @@ import {
   getWalletAddress,
 } from "../helpers/config"
 import { findRecentTransactionHash } from "../helpers/verification-client"
+import { ensureRailgunShieldedEthBalance } from "../helpers/railgun"
 import {
   cleanupChatServer,
   createOpenRouterRuntimeConfig,
@@ -21,11 +22,18 @@ import {
   sendChatPrompt,
 } from "../helpers/chat-client"
 
-setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 2)
+setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 6)
 
 const VITALIK_ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 const walletAddress = getWalletAddress()
 const runtimeConfig = createOpenRouterRuntimeConfig(ARBITRUM_CONFIG)
+const longRunningRuntimeConfig = {
+  ...runtimeConfig,
+  llm: {
+    ...runtimeConfig.llm,
+    timeoutMs: Math.max(runtimeConfig.llm.timeoutMs, 420_000),
+  },
+}
 
 type ToolCallSnapshot = {
   toolName: string
@@ -212,6 +220,39 @@ describe("LLM tool routing E2E", () => {
 
     expect(toolCall.output.status).toBe("error")
     expect(typeof toolCall.output.message).toBe("string")
+  })
+
+  test("LLM routes private-balance ENS sends through railgun_unshield", async () => {
+    await ensureRailgunShieldedEthBalance("0.00001")
+
+    const result = await sendChatPrompt({
+      prompt: "Send 0.00001 ETH to vitalik.eth from my private balance.",
+      runtimeConfig: longRunningRuntimeConfig,
+    })
+
+    const ensCall = findToolCall(result.toolCalls, "resolve_ens")
+    expect(isRecord(ensCall.input) ? ensCall.input.name : undefined).toBe("vitalik.eth")
+
+    const unshieldCall = findToolCall(result.toolCalls, "railgun_unshield")
+    expect(isRecord(unshieldCall.input) ? unshieldCall.input.recipient : undefined).toBe(
+      VITALIK_ADDRESS,
+    )
+    expect(isRecord(unshieldCall.input) ? unshieldCall.input.token : undefined).toBe("ETH")
+    expect(isRecord(unshieldCall.input) ? unshieldCall.input.amount : undefined).toBe("0.00001")
+    expect(result.toolCalls.some((entry) => entry.toolName === "railgun_transfer")).toBe(
+      false,
+    )
+
+    if (!isRecord(unshieldCall.output)) {
+      throw new Error("Expected railgun_unshield to return a structured result.")
+    }
+
+    expect(unshieldCall.output.status).toBe("success")
+    expect(unshieldCall.output.operation).toBe("unshield")
+    expect(unshieldCall.output.recipient).toBe(VITALIK_ADDRESS)
+    expect(typeof unshieldCall.output.txHash).toBe("string")
+    expect(typeof unshieldCall.output.privacyNote).toBe("string")
+    expect(String(unshieldCall.output.privacyNote).toLowerCase()).toContain("privacy")
   })
 
   test("LLM keeps routing context across turns for ENS then balance", async () => {

@@ -6,6 +6,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { privateKeyToAccount } from "viem/accounts";
+import { ensureRailgunShieldedEthBalance } from "../helpers/railgun";
 
 type TestResult = {
   name: string;
@@ -27,6 +28,7 @@ const E2E_WALLET_ADDRESS = E2E_WALLET_PRIVATE_KEY
         : `0x${E2E_WALLET_PRIVATE_KEY}`) as `0x${string}`,
     ).address
   : "";
+const VITALIK_ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
 let devServer: Bun.Subprocess | undefined;
 let startedDevServer = false;
@@ -340,6 +342,29 @@ async function main() {
       }
     },
     "railgun-balance.png",
+  );
+
+  await runTest(
+    "Railgun public-recipient sends render as unshield flows",
+    async () => {
+      await ensureRailgunShieldedEthBalance("0.00001");
+      await ensureDeveloperModeReady();
+      await submitMessage("Send 0.00001 ETH to vitalik.eth from my private balance.");
+      await waitForText('[data-testid="result-railgun-unshield"]', [
+        "Public recipient",
+        VITALIK_ADDRESS,
+        "Tx hash",
+        "privacy pool",
+      ], 360_000);
+      await waitForBodyCondition(
+        (text) =>
+          text.includes(VITALIK_ADDRESS) &&
+          /0x[a-fA-F0-9]{64}/.test(text) &&
+          text.toLowerCase().includes("privacy"),
+        360_000,
+      );
+    },
+    "railgun-public-send.png",
   );
 
   await runTest(
