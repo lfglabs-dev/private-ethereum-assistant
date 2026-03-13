@@ -114,10 +114,119 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
 
+function getTokenAvatarStyles(seed: string) {
+  let hash = 0
+  for (const char of seed) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 360
+  }
+
+  return {
+    backgroundColor: `hsl(${hash} 72% 92%)`,
+    color: `hsl(${hash} 55% 28%)`,
+  }
+}
+
+function getSourceLabel(source: unknown) {
+  return source === "verified" ? "verified" : "on-chain"
+}
+
+function TokenAvatar({
+  symbol,
+  address,
+  iconUrl,
+}: {
+  symbol: string
+  address: string
+  iconUrl?: string
+}) {
+  const [showFallback, setShowFallback] = useState(false)
+  const initials = symbol.slice(0, 2).toUpperCase() || "??"
+
+  if (iconUrl && !showFallback) {
+    return (
+      <div className="size-10 overflow-hidden rounded-full border border-border/60 bg-background">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={iconUrl}
+          alt={`${symbol} token icon`}
+          className="size-full object-cover"
+          loading="lazy"
+          onError={() => setShowFallback(true)}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div
+      aria-label={`${symbol} fallback icon`}
+      className="flex size-10 items-center justify-center rounded-full border border-border/60 text-[11px] font-semibold uppercase"
+      style={getTokenAvatarStyles(address || symbol)}
+    >
+      {initials}
+    </div>
+  )
+}
+
+function TokenRow({
+  token,
+  showBalance = true,
+}: {
+  token: Record<string, unknown>
+  showBalance?: boolean
+}) {
+  const address = String(token.address ?? "")
+  const symbol = String(token.symbol ?? address ?? "Unknown")
+  const name = typeof token.name === "string" ? token.name : undefined
+  const chainName = typeof token.chainName === "string" ? token.chainName : undefined
+  const iconUrl = typeof token.iconUrl === "string" ? token.iconUrl : undefined
+  const sourceLabel = getSourceLabel(token.source)
+  const balance = token.error
+    ? null
+    : `${String(token.formattedBalance ?? "0")} ${symbol}`.trim()
+
+  return (
+    <div className="rounded-xl bg-background/70 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 gap-3">
+          <TokenAvatar symbol={symbol} address={address} iconUrl={iconUrl} />
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-medium">{symbol}</p>
+              <Badge variant={sourceLabel === "verified" ? "secondary" : "outline"}>
+                {sourceLabel}
+              </Badge>
+              {chainName && <Badge variant="outline">{chainName}</Badge>}
+            </div>
+            <p className="truncate text-sm text-muted-foreground">
+              {name ?? "Token metadata unavailable"}
+            </p>
+            <p className="truncate font-mono text-[11px] text-muted-foreground" title={address}>
+              {shortenAddress(address)}
+            </p>
+          </div>
+        </div>
+        {showBalance && (
+          <div className="text-right">
+            {token.error ? (
+              <p className="max-w-40 text-xs text-destructive">{String(token.error)}</p>
+            ) : (
+              <p className="font-semibold">{balance}</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function BalanceResult({ data }: { data: Record<string, unknown> }) {
   const nativeBalance = isRecord(data.nativeBalance) ? data.nativeBalance : null
   const tokens = Array.isArray(data.tokens)
     ? data.tokens.filter(isRecord)
+    : []
+  const tokenCandidates = Array.isArray(data.tokenCandidates)
+    ? data.tokenCandidates.filter(isRecord)
     : []
   const errors = Array.isArray(data.errors) ? data.errors.map(String) : []
 
@@ -143,31 +252,28 @@ function BalanceResult({ data }: { data: Record<string, unknown> }) {
         {tokens.length > 0 && (
           <div className="space-y-2">
             {tokens.map((token) => (
-              <div
+              <TokenRow
                 key={`${String(token.address)}-${String(token.symbol)}`}
-                className="rounded-md bg-background/70 p-3"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-medium">{String(token.symbol)}</p>
-                    <p className="truncate font-mono text-[11px] text-muted-foreground">
-                      {String(token.address)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    {token.error ? (
-                      <p className="max-w-40 text-xs text-destructive">
-                        {String(token.error)}
-                      </p>
-                    ) : (
-                      <p className="font-semibold">
-                        {String(token.formattedBalance)} {String(token.symbol)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
+                token={token}
+              />
             ))}
+          </div>
+        )}
+        {tokenCandidates.length > 0 && (
+          <div className="space-y-2 rounded-xl border border-border/60 bg-background/40 p-3">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Info className="size-3.5" />
+              <p>Multiple verified matches found. Confirm the contract address.</p>
+            </div>
+            <div className="space-y-2">
+              {tokenCandidates.map((token) => (
+                <TokenRow
+                  key={`candidate-${String(token.address)}-${String(token.symbol)}`}
+                  token={token}
+                  showBalance={false}
+                />
+              ))}
+            </div>
           </div>
         )}
         {errors.length > 0 && (
@@ -808,15 +914,31 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
   const isError = data.status === "error"
   const titleByOperation: Record<string, string> = {
     balance: "Railgun Balances",
+    route: "Railgun Balance Routing",
     shield: "Railgun Shield",
     transfer: "Railgun Transfer",
     unshield: "Railgun Unshield",
+  }
+  const balanceRouting =
+    typeof data.balanceRouting === "object" && data.balanceRouting !== null
+      ? (data.balanceRouting as Record<string, unknown>)
+      : null
+
+  if (
+    data.status === "awaiting_local_approval" ||
+    data.status === "cancelled"
+  ) {
+    return <RailgunApprovalResult data={data} />
   }
 
   if (isError) {
     const setup = Array.isArray(data.setup) ? (data.setup as string[]) : []
     return (
-      <Card size="sm" className="border-red-500/20 bg-red-500/5">
+      <Card
+        data-testid={`result-railgun-${operation || "error"}`}
+        size="sm"
+        className="border-red-500/20 bg-red-500/5"
+      >
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
             <Shield className="size-4 text-red-500" />
@@ -827,6 +949,30 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           <p>{String(data.message ?? "Unknown Railgun error")}</p>
+          {balanceRouting && (
+            <div className="rounded-md border border-red-500/20 bg-background/60 p-3 text-xs">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="secondary">
+                  Private {String(balanceRouting.shieldedBalance)}{" "}
+                  {String(balanceRouting.token)}
+                </Badge>
+                <Badge variant="secondary">
+                  Public {String(balanceRouting.publicBalance)}{" "}
+                  {String(balanceRouting.token)}
+                </Badge>
+                {"shortfall" in balanceRouting && balanceRouting.shortfall ? (
+                  <Badge variant="outline">
+                    Shortfall {String(balanceRouting.shortfall)}{" "}
+                    {String(balanceRouting.token)}
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-2">{String(balanceRouting.recommendation ?? "")}</p>
+              <p className="mt-1 text-muted-foreground">
+                {String(balanceRouting.privacyGuidance ?? "")}
+              </p>
+            </div>
+          )}
           {setup.length > 0 && (
             <ul className="space-y-1 text-xs text-muted-foreground">
               {setup.map((item) => (
@@ -839,13 +985,65 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
     )
   }
 
+  if (operation === "route" && balanceRouting) {
+    return (
+      <Card size="sm" className="border-0 bg-secondary/50">
+        <CardHeader className="pb-0">
+          <div className="flex items-center gap-2">
+            <Shield className="size-4 text-muted-foreground" />
+            <CardTitle className="text-sm">Railgun Balance Routing</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="secondary">
+              {String(balanceRouting.requestedAmount)} {String(balanceRouting.token)}
+            </Badge>
+            <Badge variant="outline">
+              {String(balanceRouting.requestedOperation)}
+            </Badge>
+            <Badge variant="outline">{String(balanceRouting.route)}</Badge>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-md bg-background/50 p-3">
+              <p className="text-xs text-muted-foreground">Private balance</p>
+              <p className="font-medium">
+                {String(balanceRouting.shieldedBalance)} {String(balanceRouting.token)}
+              </p>
+            </div>
+            <div className="rounded-md bg-background/50 p-3">
+              <p className="text-xs text-muted-foreground">Public balance</p>
+              <p className="font-medium">
+                {String(balanceRouting.publicBalance)} {String(balanceRouting.token)}
+              </p>
+            </div>
+          </div>
+          {"shortfall" in balanceRouting && balanceRouting.shortfall ? (
+            <p className="text-xs text-muted-foreground">
+              Shortfall: {String(balanceRouting.shortfall)}{" "}
+              {String(balanceRouting.token)}
+            </p>
+          ) : null}
+          <p>{String(balanceRouting.recommendation)}</p>
+          <p className="text-xs text-muted-foreground">
+            {String(balanceRouting.privacyGuidance)}
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
   if (operation === "balance") {
     const balances = Array.isArray(data.balances)
       ? (data.balances as Array<Record<string, unknown>>)
       : []
 
     return (
-      <Card size="sm" className="border-0 bg-secondary/50">
+      <Card
+        data-testid="result-railgun-balance"
+        size="sm"
+        className="border-0 bg-secondary/50"
+      >
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
             <Shield className="size-4 text-muted-foreground" />
@@ -884,7 +1082,11 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
     : []
 
   return (
-    <Card size="sm" className="border-0 bg-secondary/50">
+    <Card
+      data-testid={`result-railgun-${operation || "operation"}`}
+      size="sm"
+      className="border-0 bg-secondary/50"
+    >
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
           <Shield className="size-4 text-muted-foreground" />
@@ -900,12 +1102,23 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
               {String(data.amount)} {String(data.token)}
             </Badge>
           )}
-          {"recipient" in data && (
-            <Badge variant="outline" className="max-w-full truncate font-mono text-[10px]">
-              {String(data.recipient)}
-            </Badge>
-          )}
         </div>
+
+        {"recipient" in data && (
+          <div className="rounded-md bg-background/50 px-2.5 py-2 text-xs">
+            <p className="text-muted-foreground">
+              {operation === "unshield" ? "Public recipient" : "Recipient"}
+            </p>
+            <p className="break-all font-mono">{String(data.recipient)}</p>
+          </div>
+        )}
+
+        {"txHash" in data && (
+          <div className="rounded-md bg-background/50 px-2.5 py-2 text-xs">
+            <p className="text-muted-foreground">Tx hash</p>
+            <p className="break-all font-mono">{String(data.txHash)}</p>
+          </div>
+        )}
 
         {stages.length > 0 && (
           <div className="space-y-1.5">
@@ -1004,6 +1217,182 @@ function buildLocalApprovalError(
     error: message,
     toolName: data.confirmationId,
   }
+}
+
+function RailgunApprovalResult({ data }: { data: Record<string, unknown> }) {
+  const [currentData, setCurrentData] = useState(data)
+  const [decision, setDecision] = useState<"approve" | "reject" | null>(null)
+  const [requestError, setRequestError] = useState<string | null>(null)
+
+  if (
+    currentData.status !== "awaiting_local_approval" &&
+    currentData.status !== "cancelled"
+  ) {
+    return <RailgunResult data={currentData} />
+  }
+
+  const approval = isRecord(currentData.approval) ? currentData.approval : null
+  const isAwaiting = currentData.status === "awaiting_local_approval"
+  const operation = String(currentData.operation ?? "")
+  const titleByOperation: Record<string, string> = {
+    shield: "Railgun Shield Approval",
+    transfer: "Railgun Transfer Approval",
+    unshield: "Railgun Unshield Approval",
+  }
+
+  const submitDecision = async (nextDecision: "approve" | "reject") => {
+    if (!approval || typeof approval.id !== "string") {
+      setRequestError("Missing Railgun approval ID.")
+      return
+    }
+
+    setDecision(nextDecision)
+    setRequestError(null)
+
+    try {
+      const response = await fetch("/api/railgun-approval", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          approvalId: approval.id,
+          decision: nextDecision,
+        }),
+      })
+
+      const payload = (await response.json()) as unknown
+      if (!response.ok) {
+        throw new Error(
+          isRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : "Railgun approval request failed.",
+        )
+      }
+
+      if (!isRecord(payload)) {
+        throw new Error("Railgun approval request returned an invalid response.")
+      }
+
+      setCurrentData(payload)
+    } catch (error) {
+      setRequestError(
+        error instanceof Error ? error.message : "Railgun approval request failed.",
+      )
+    } finally {
+      setDecision(null)
+    }
+  }
+
+  return (
+    <Card
+      data-testid="result-railgun-approval"
+      size="sm"
+      className={
+        isAwaiting ? "border-amber-500/20 bg-amber-500/5" : "border-muted bg-muted/40"
+      }
+    >
+      <CardHeader className="pb-0">
+        <div className="flex items-center gap-2">
+          {isAwaiting ? (
+            <Shield className="size-4 text-amber-500" />
+          ) : (
+            <X className="size-4 text-muted-foreground" />
+          )}
+          <CardTitle className={isAwaiting ? "text-sm text-amber-500" : "text-sm"}>
+            {titleByOperation[operation] ?? "Railgun Approval"}
+          </CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {"summary" in currentData && (
+          <p className="font-medium">{String(currentData.summary)}</p>
+        )}
+        {"message" in currentData && (
+          <p className="text-muted-foreground">{String(currentData.message)}</p>
+        )}
+
+        <div className="flex flex-wrap gap-2">
+          {"amount" in currentData && "token" in currentData && (
+            <Badge variant="secondary">
+              {String(currentData.amount)} {String(currentData.token)}
+            </Badge>
+          )}
+          {approval && typeof approval.threshold === "string" && (
+            <Badge variant="outline">
+              Threshold {approval.threshold} {String(currentData.token ?? "")}
+            </Badge>
+          )}
+        </div>
+
+        {"recipient" in currentData && Boolean(currentData.recipient) && (
+          <div className="rounded-md bg-background/60 p-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Recipient
+            </p>
+            <p className="break-all font-mono text-xs">
+              {String(currentData.recipient)}
+            </p>
+          </div>
+        )}
+
+        {("privacyImpact" in currentData || "privacyNote" in currentData) && (
+          <div className="rounded-md bg-background/60 p-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+              Privacy impact
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {String(currentData.privacyImpact ?? currentData.privacyNote)}
+            </p>
+          </div>
+        )}
+
+        {requestError ? (
+          <p className="text-sm text-destructive">{requestError}</p>
+        ) : null}
+
+        {isAwaiting ? (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              data-testid="railgun-approval-approve"
+              size="sm"
+              onClick={() => submitDecision("approve")}
+              disabled={decision !== null}
+            >
+              {decision === "approve" ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Approving
+                </>
+              ) : (
+                "Approve locally"
+              )}
+            </Button>
+            <Button
+              data-testid="railgun-approval-reject"
+              size="sm"
+              variant="outline"
+              onClick={() => submitDecision("reject")}
+              disabled={decision !== null}
+            >
+              {decision === "reject" ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Cancelling
+                </>
+              ) : (
+                "Reject"
+              )}
+            </Button>
+          </div>
+        ) : (
+          <p data-testid="railgun-approval-cancelled" className="text-sm text-muted-foreground">
+            Local approval was rejected on this device.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 export function ToolResultCard({ result, preliminary, runtimeConfig }: ToolResultCardProps) {

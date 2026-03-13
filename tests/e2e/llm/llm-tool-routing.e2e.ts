@@ -14,18 +14,32 @@ import {
   getWalletAddress,
 } from "../helpers/config"
 import { findRecentTransactionHash } from "../helpers/verification-client"
+import { ensureRailgunShieldedEthBalance } from "../helpers/railgun"
 import {
   cleanupChatServer,
   createOpenRouterRuntimeConfig,
   ensureChatServer,
   sendChatPrompt,
 } from "../helpers/chat-client"
+import {
+  BALANCE_ROUTING_ETH_AMOUNT,
+  BALANCE_ROUTING_PRIVACY_GUIDANCE,
+  createBalanceRoutingRuntimeConfig,
+} from "../helpers/railgun-balance-routing"
 
-setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 2)
+setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 6)
 
 const VITALIK_ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 const walletAddress = getWalletAddress()
 const runtimeConfig = createOpenRouterRuntimeConfig(ARBITRUM_CONFIG)
+const balanceRoutingRuntimeConfig = createBalanceRoutingRuntimeConfig(ARBITRUM_CONFIG)
+const longRunningRuntimeConfig = {
+  ...runtimeConfig,
+  llm: {
+    ...runtimeConfig.llm,
+    timeoutMs: Math.max(runtimeConfig.llm.timeoutMs, 420_000),
+  },
+}
 
 type ToolCallSnapshot = {
   toolName: string
@@ -207,32 +221,94 @@ describe("LLM tool routing E2E", () => {
     }
   })
 
-  test("LLM routes confirmed Railgun shielding prompts to railgun_shield", async () => {
+  test("LLM returns local approval-required Railgun shielding responses before signing", async () => {
     const result = await sendChatPrompt({
       prompt:
-        "I understand the Railgun deposit is public. Shield 0.0001 ETH into Railgun now.",
+        "I understand the Railgun deposit is public. Shield 0.000001 ETH into Railgun now.",
       runtimeConfig,
     })
 
     const toolCall = findToolCall(result.toolCalls, "railgun_shield")
     expect(isRecord(toolCall.input) ? toolCall.input.token : undefined).toBe("ETH")
-    expect(isRecord(toolCall.input) ? toolCall.input.amount : undefined).toBe("0.0001")
+    expect(isRecord(toolCall.input) ? toolCall.input.amount : undefined).toBe("0.000001")
 
     if (!isRecord(toolCall.output)) {
       return
     }
 
     expect(toolCall.output.railgun).toBe(true)
+    expect(toolCall.output.status).toBe("awaiting_local_approval")
+    expect(toolCall.output.operation).toBe("shield")
+    expect(typeof toolCall.output.summary).toBe("string")
+    expect(typeof toolCall.output.privacyImpact).toBe("string")
+    expect(result.text.toLowerCase()).toMatch(/approve|local approval/)
+    expect(result.text.toLowerCase()).toMatch(/privacy|public/)
+  })
 
-    if (toolCall.output.status === "success") {
-      expect(toolCall.output.operation).toBe("shield")
-      expect(typeof toolCall.output.txHash).toBe("string")
-      expect(typeof toolCall.output.privacyNote).toBe("string")
-      return
+  test("LLM recommends shielding instead of attempting a private spend with insufficient private balance", async () => {
+    const result = await sendChatPrompt({
+      prompt: `Send ${BALANCE_ROUTING_ETH_AMOUNT} ETH to vitalik.eth from my private balance.`,
+      runtimeConfig: balanceRoutingRuntimeConfig,
+    })
+
+    findToolCall(result.toolCalls, "resolve_ens")
+    const routeCall = findToolCall(result.toolCalls, "railgun_balance_route")
+    expect(["transfer", "unshield"]).toContain(
+      String(isRecord(routeCall.input) ? routeCall.input.action : ""),
+    )
+    expect(isRecord(routeCall.input) ? routeCall.input.token : undefined).toBe("ETH")
+    expect(isRecord(routeCall.input) ? routeCall.input.amount : undefined).toBe(
+      BALANCE_ROUTING_ETH_AMOUNT,
+    )
+    expect(result.toolCalls.some((entry) => entry.toolName === "railgun_transfer")).toBe(
+      false,
+    )
+    expect(result.toolCalls.some((entry) => entry.toolName === "railgun_unshield")).toBe(
+      false,
+    )
+
+    if (!isRecord(routeCall.output) || !isRecord(routeCall.output.balanceRouting)) {
+      throw new Error("Expected railgun_balance_route to return balance routing details.")
     }
 
-    expect(toolCall.output.status).toBe("error")
-    expect(typeof toolCall.output.message).toBe("string")
+    expect(routeCall.output.balanceRouting.route).toBe("shield_then_retry")
+    expect(result.text.toLowerCase()).toContain("private")
+    expect(result.text.toLowerCase()).toContain("public")
+    expect(result.text.toLowerCase()).toContain("shield")
+    expect(result.text).toContain(BALANCE_ROUTING_PRIVACY_GUIDANCE)
+  })
+
+  test("LLM routes private-balance ENS sends through railgun_unshield", async () => {
+    await ensureRailgunShieldedEthBalance("0.00001")
+
+    const result = await sendChatPrompt({
+      prompt: "Send 0.00001 ETH to vitalik.eth from my private balance.",
+      runtimeConfig: longRunningRuntimeConfig,
+    })
+
+    const ensCall = findToolCall(result.toolCalls, "resolve_ens")
+    expect(isRecord(ensCall.input) ? ensCall.input.name : undefined).toBe("vitalik.eth")
+
+    const unshieldCall = findToolCall(result.toolCalls, "railgun_unshield")
+    expect(isRecord(unshieldCall.input) ? unshieldCall.input.recipient : undefined).toBe(
+      VITALIK_ADDRESS,
+    )
+    expect(isRecord(unshieldCall.input) ? unshieldCall.input.token : undefined).toBe("ETH")
+    expect(isRecord(unshieldCall.input) ? unshieldCall.input.amount : undefined).toBe("0.00001")
+    expect(result.toolCalls.some((entry) => entry.toolName === "railgun_transfer")).toBe(
+      false,
+    )
+
+    if (!isRecord(unshieldCall.output)) {
+      throw new Error("Expected railgun_unshield to return a structured result.")
+    }
+
+    expect(unshieldCall.output.status).toBe("success")
+    expect(unshieldCall.output.operation).toBe("unshield")
+    expect(unshieldCall.output.recipient).toBe(VITALIK_ADDRESS)
+    expect(typeof unshieldCall.output.txHash).toBe("string")
+    expect(typeof unshieldCall.output.privacyNote).toBe("string")
+    expect(String(unshieldCall.output.privacyNote).toLowerCase()).toContain("privacy")
   })
 
   test("LLM keeps routing context across turns for ENS then balance", async () => {

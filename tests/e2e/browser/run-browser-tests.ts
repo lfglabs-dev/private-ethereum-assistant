@@ -6,6 +6,11 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { privateKeyToAccount } from "viem/accounts";
+import {
+  BALANCE_ROUTING_ETH_AMOUNT,
+  BALANCE_ROUTING_PRIVACY_GUIDANCE,
+} from "../helpers/railgun-balance-routing";
+import { ensureRailgunShieldedEthBalance } from "../helpers/railgun";
 
 type TestResult = {
   name: string;
@@ -27,9 +32,13 @@ const E2E_WALLET_ADDRESS = E2E_WALLET_PRIVATE_KEY
         : `0x${E2E_WALLET_PRIVATE_KEY}`) as `0x${string}`,
     ).address
   : "";
+const VITALIK_ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
+
+process.env.RAILGUN_PRIVACY_GUIDANCE_TEXT = BALANCE_ROUTING_PRIVACY_GUIDANCE;
 
 let devServer: Bun.Subprocess | undefined;
 let startedDevServer = false;
+const RAILGUN_APPROVAL_TEST_THRESHOLD = "0.0000005";
 const results: TestResult[] = [];
 const pageErrors = new Map<string, string>();
 
@@ -111,10 +120,9 @@ async function ensureServer() {
       NEXT_PUBLIC_APP_MODE: "developer",
       EOA_LOCAL_APPROVAL_NATIVE_THRESHOLD:
         process.env.E2E_LOCAL_APPROVAL_NATIVE_THRESHOLD ?? "0.00001",
-      RAILGUN_SCAN_TIMEOUT_MS:
-        process.env.E2E_RAILGUN_SCAN_TIMEOUT_MS ?? "30000",
-      RAILGUN_POLLING_INTERVAL_MS:
-        process.env.E2E_RAILGUN_POLLING_INTERVAL_MS ?? "2000",
+      RAILGUN_SHIELD_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
+      RAILGUN_TRANSFER_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
+      RAILGUN_UNSHIELD_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -405,6 +413,98 @@ async function main() {
       }
     },
     "railgun-balance.png",
+  );
+
+  await runTest(
+    "High-value Railgun shields require local approval and can be approved",
+    async () => {
+      await ensureDeveloperModeReady();
+      await submitMessage(
+        "I understand the Railgun deposit is public. Shield 0.000001 ETH into Railgun now.",
+      );
+      await waitForText('[data-testid="result-railgun-approval"]', [
+        "Shield 0.000001 ETH",
+        "Privacy impact",
+        "Approve locally",
+      ]);
+      await runAgentBrowser(["click", '[data-testid="railgun-approval-approve"]']);
+      await waitForBodyCondition(
+        (text) =>
+          text.includes("Shield transaction confirmed") &&
+          text.includes("View on Arbiscan"),
+        180_000,
+      );
+    },
+    "railgun-approval-approve.png",
+  );
+
+  await runTest(
+    "High-value Railgun unshields can be rejected locally without submission",
+    async () => {
+      await ensureDeveloperModeReady();
+      await submitMessage(
+        `I understand this exits the privacy pool. Unshield 0.0000001 ETH to ${E2E_WALLET_ADDRESS}.`,
+      );
+      await waitForText('[data-testid="result-railgun-approval"]', [
+        "Unshield 0.0000001 ETH",
+        "Privacy impact",
+        "Reject",
+      ]);
+      await runAgentBrowser(["click", '[data-testid="railgun-approval-reject"]']);
+      await waitForText('[data-testid="railgun-approval-cancelled"]', [
+        "Local approval was rejected",
+      ]);
+      await waitForBodyCondition(
+        (text) =>
+          text.includes("No Railgun transaction was signed or submitted.") ||
+          text.includes("Local approval was rejected"),
+      );
+    },
+    "railgun-approval-reject.png",
+  );
+
+  await runTest(
+    "Railgun private shortfalls recommend shielding in chat",
+    async () => {
+      await ensureDeveloperModeReady();
+      await submitMessage(
+        `Send ${BALANCE_ROUTING_ETH_AMOUNT} ETH to vitalik.eth from my private balance.`,
+      );
+      await waitForBodyCondition(
+        (text) =>
+          text.includes("Checking Railgun private/public balance routing") ||
+          text.includes("Railgun Balance Routing") ||
+          text.includes("Shield at least"),
+        30_000,
+      );
+      await waitForAssistantAnswer(
+        ["private", "public", "shield", BALANCE_ROUTING_PRIVACY_GUIDANCE],
+        120_000,
+      );
+    },
+    "railgun-balance-routing.png",
+  );
+
+  await runTest(
+    "Railgun public-recipient sends render as unshield flows",
+    async () => {
+      await ensureRailgunShieldedEthBalance("0.00001");
+      await ensureDeveloperModeReady();
+      await submitMessage("Send 0.00001 ETH to vitalik.eth from my private balance.");
+      await waitForText(
+        '[data-testid="result-railgun-unshield"]',
+        ["Public recipient", VITALIK_ADDRESS, "Tx hash", "privacy pool"],
+        360_000,
+      );
+      await waitForBodyCondition(
+        (text) =>
+          text.includes(VITALIK_ADDRESS) &&
+          /0x[a-fA-F0-9]{64}/.test(text) &&
+          text.toLowerCase().includes("privacy"),
+        360_000,
+      );
+    },
+    "railgun-public-send.png",
   );
 
   await runTest(

@@ -544,6 +544,24 @@ export function RuntimeConfigForm({
           </label>
 
           <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">Privacy guidance text</span>
+            <Textarea
+              data-testid="runtime-railgun-privacy-guidance"
+              value={draft.railgun.privacyGuidanceText}
+              onChange={(event) =>
+                onChange(
+                  updateDraftSection(draft, "railgun", {
+                    ...draft.railgun,
+                    privacyGuidanceText: event.target.value,
+                  }),
+                )
+              }
+              rows={3}
+              placeholder="Explain that shielding is public first, then future Railgun actions use private balance."
+            />
+          </label>
+
+          <label className="block space-y-1">
             <span className="text-xs text-muted-foreground">
               POI node URLs (one per line)
             </span>
@@ -635,6 +653,68 @@ export function RuntimeConfigForm({
                   )
                 }
                 inputMode="numeric"
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">
+                Shield approval threshold
+              </span>
+              <Input
+                data-testid="runtime-railgun-shield-approval-threshold"
+                value={draft.railgun.shieldApprovalThreshold}
+                onChange={(event) =>
+                  onChange(
+                    updateDraftSection(draft, "railgun", {
+                      ...draft.railgun,
+                      shieldApprovalThreshold: event.target.value,
+                    }),
+                  )
+                }
+                inputMode="decimal"
+                placeholder="1"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">
+                Private transfer threshold
+              </span>
+              <Input
+                data-testid="runtime-railgun-transfer-approval-threshold"
+                value={draft.railgun.transferApprovalThreshold}
+                onChange={(event) =>
+                  onChange(
+                    updateDraftSection(draft, "railgun", {
+                      ...draft.railgun,
+                      transferApprovalThreshold: event.target.value,
+                    }),
+                  )
+                }
+                inputMode="decimal"
+                placeholder="1"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">
+                Unshield approval threshold
+              </span>
+              <Input
+                data-testid="runtime-railgun-unshield-approval-threshold"
+                value={draft.railgun.unshieldApprovalThreshold}
+                onChange={(event) =>
+                  onChange(
+                    updateDraftSection(draft, "railgun", {
+                      ...draft.railgun,
+                      unshieldApprovalThreshold: event.target.value,
+                    }),
+                  )
+                }
+                inputMode="decimal"
+                placeholder="1"
               />
             </label>
           </div>

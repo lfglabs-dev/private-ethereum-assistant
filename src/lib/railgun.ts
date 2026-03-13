@@ -127,48 +127,139 @@ type RailgunOperationStage = {
   detail?: string;
 };
 
+type RailgunOperation = "shield" | "transfer" | "unshield";
+
+type RailgunPrivateAction = "transfer" | "unshield";
+
+type RailgunBalanceRouting = {
+  requestedOperation: RailgunPrivateAction;
+  route: "proceed" | "shield_then_retry" | "fund_public_wallet";
+  token: string;
+  requestedAmount: string;
+  shieldedBalance: string;
+  publicBalance: string;
+  shortfall?: string;
+  publicAddress: `0x${string}`;
+  recommendation: string;
+  privacyGuidance: string;
+};
+
+type RailgunApprovalStatus = "awaiting_local_approval" | "cancelled";
+
+type RailgunApprovalState = {
+  id: string;
+  threshold: string;
+  thresholdType: "token_amount";
+  status: RailgunApprovalStatus;
+  submitted: false;
+  createdAt: string;
+};
+
+type RailgunActionResultBase = {
+  railgun: true;
+  operation: RailgunOperation;
+  network: string;
+  railgunAddress: string;
+  token: string;
+  amount: string;
+  recipient?: string;
+  summary: string;
+  privacyImpact: string;
+  privacyNote: string;
+};
+
+type RailgunPreparedOperationBase = {
+  runtime: RailgunRuntime;
+  token: RailgunToken;
+  amount: string;
+  amountRaw: bigint;
+};
+
+type RailgunPreparedShield = RailgunPreparedOperationBase;
+
+type RailgunPreparedTransfer = RailgunPreparedOperationBase & {
+  recipient: string;
+};
+
+type RailgunPreparedUnshield = RailgunPreparedOperationBase & {
+  recipient: `0x${string}`;
+};
+
+type PendingRailgunApproval = RailgunActionResultBase & {
+  approval: RailgunApprovalState;
+  execute: () => Promise<RailgunResult>;
+};
+
+type RailgunBalanceSuccessResult = {
+  railgun: true;
+  status: "success";
+  operation: "balance";
+  network: string;
+  railgunAddress: string;
+  scan: RailgunRuntimeState;
+  balances: RailgunBalanceRow[];
+};
+
+type RailgunActionSuccessResult = RailgunActionResultBase & {
+  status: "success";
+  txHash: string;
+  explorerUrl: string;
+  stages: RailgunOperationStage[];
+  proofProgress?: ProofStage[];
+  shieldedBalanceAfter?: string;
+  publicBalanceAfter?: string;
+  approvalTxHash?: string;
+  scan: RailgunRuntimeState;
+};
+
+type RailgunApprovalRequiredResult = RailgunActionResultBase & {
+  status: "awaiting_local_approval";
+  message: string;
+  approval: RailgunApprovalState;
+};
+
+type RailgunCancelledResult = RailgunActionResultBase & {
+  status: "cancelled";
+  message: string;
+  approval: RailgunApprovalState;
+};
+
+type RailgunErrorResult = {
+  railgun: true;
+  status: "error";
+  operation: "balance" | "route" | "shield" | "transfer" | "unshield";
+  network: string;
+  message: string;
+  setup?: string[];
+  token?: string;
+  amount?: string;
+  recipient?: string;
+  railgunAddress?: string;
+  balanceRouting?: RailgunBalanceRouting;
+};
+
 type RailgunResult =
+  | RailgunBalanceSuccessResult
   | {
       railgun: true;
       status: "success";
-      operation: "balance";
+      operation: "route";
       network: string;
       railgunAddress: string;
       scan: RailgunRuntimeState;
-      balances: RailgunBalanceRow[];
+      balanceRouting: RailgunBalanceRouting;
     }
-  | {
-      railgun: true;
-      status: "success";
-      operation: "shield" | "transfer" | "unshield";
-      network: string;
-      railgunAddress: string;
-      token: string;
-      amount: string;
-      recipient?: string;
-      txHash: string;
-      explorerUrl: string;
-      stages: RailgunOperationStage[];
-      proofProgress?: ProofStage[];
-      shieldedBalanceAfter?: string;
-      publicBalanceAfter?: string;
-      approvalTxHash?: string;
-      privacyNote: string;
-      scan: RailgunRuntimeState;
-    }
-  | {
-      railgun: true;
-      status: "error";
-      operation: "balance" | "shield" | "transfer" | "unshield";
-      network: string;
-      message: string;
-      setup?: string[];
-    };
+  | RailgunActionSuccessResult
+  | RailgunApprovalRequiredResult
+  | RailgunCancelledResult
+  | RailgunErrorResult;
 
 let initPromise: Promise<RailgunRuntime> | undefined;
 const runtimeState: RailgunRuntimeState = {};
 let operationQueue: Promise<void> = Promise.resolve();
 let engineStarted = false;
+const RAILGUN_APPROVAL_TTL_MS = 10 * 60 * 1000;
+const pendingRailgunApprovals = new Map<string, PendingRailgunApproval>();
 
 function createDefaultRailgunToolRuntimeConfig(): RailgunToolRuntimeConfig {
   return {
@@ -176,12 +267,16 @@ function createDefaultRailgunToolRuntimeConfig(): RailgunToolRuntimeConfig {
     rpcUrl: config.railgun.rpcUrl,
     chainId: config.railgun.chainId,
     explorerTxBaseUrl: config.railgun.explorerTxBaseUrl,
+    privacyGuidanceText: config.railgun.privacyGuidanceText,
     poiNodeUrls: config.railgun.poiNodeUrls,
     mnemonic: config.railgun.mnemonic || "",
     signerPrivateKey: config.railgun.signerPrivateKey || "",
     walletCreationBlock: config.railgun.walletCreationBlock,
     scanTimeoutMs: config.railgun.scanTimeoutMs,
     pollingIntervalMs: config.railgun.pollingIntervalMs,
+    shieldApprovalThreshold: config.railgun.shieldApprovalThreshold,
+    transferApprovalThreshold: config.railgun.transferApprovalThreshold,
+    unshieldApprovalThreshold: config.railgun.unshieldApprovalThreshold,
   };
 }
 
@@ -198,6 +293,15 @@ function resetRuntimeState() {
   runtimeState.poiProof = undefined;
   runtimeState.poiBatch = undefined;
   runtimeState.lastSyncAt = undefined;
+}
+
+function cloneRailgunToolRuntimeConfig(
+  value: RailgunToolRuntimeConfig,
+): RailgunToolRuntimeConfig {
+  return {
+    ...value,
+    poiNodeUrls: [...value.poiNodeUrls],
+  };
 }
 
 function setRailgunToolRuntimeConfig(nextConfig: RailgunToolRuntimeConfig) {
@@ -381,6 +485,11 @@ const syncWalletState = async (runtime: RailgunRuntime) => {
     ),
   ]);
   await waitForTxidScanIfRequired();
+  runtimeState.lastSyncAt = new Date().toISOString();
+};
+
+const refreshWalletStateForRouting = async (runtime: RailgunRuntime) => {
+  await refreshBalances(RAILGUN_CHAIN, [runtime.walletId]);
   runtimeState.lastSyncAt = new Date().toISOString();
 };
 
@@ -699,10 +808,270 @@ const dedupeProofStages = (stages: ProofStage[]) => {
   return uniqueStages;
 };
 
+const getPrivacyImpact = (
+  operation: RailgunOperation,
+  networkLabel: string,
+) => {
+  switch (operation) {
+    case "shield":
+      return `This deposit is public on ${networkLabel}, but once shielded the resulting private balance can be spent without publicly linking future Railgun transfers to the deposit address.`;
+    case "transfer":
+      return `This Railgun transfer remains private on ${networkLabel}. Observers can see the chain transaction, but they should not be able to link the sender, recipient 0zk address, token, and amount the way they can with a public transfer.`;
+    case "unshield":
+      return `This exits the Railgun privacy pool on ${networkLabel}. The unshield target address and resulting public balance become visible after confirmation.`;
+  }
+};
+
+const buildActionSummary = (
+  operation: RailgunOperation,
+  amount: string,
+  tokenSymbol: string,
+  networkLabel: string,
+  recipient?: string,
+) => {
+  switch (operation) {
+    case "shield":
+      return `Shield ${amount} ${tokenSymbol} from the public wallet into Railgun on ${networkLabel}.`;
+    case "transfer":
+      return `Privately transfer ${amount} ${tokenSymbol} to Railgun address ${recipient ?? "unknown"} on ${networkLabel}.`;
+    case "unshield":
+      return `Unshield ${amount} ${tokenSymbol} from Railgun to public address ${recipient ?? "unknown"} on ${networkLabel}.`;
+  }
+};
+
+const getApprovalThreshold = (operation: RailgunOperation) => {
+  switch (operation) {
+    case "shield":
+      return currentConfig.shieldApprovalThreshold;
+    case "transfer":
+      return currentConfig.transferApprovalThreshold;
+    case "unshield":
+      return currentConfig.unshieldApprovalThreshold;
+  }
+};
+
+const requiresLocalApproval = (
+  operation: RailgunOperation,
+  amountRaw: bigint,
+  decimals: number,
+) => {
+  const threshold = getApprovalThreshold(operation);
+  const thresholdRaw = parseTokenAmount(threshold, decimals);
+  return amountRaw >= thresholdRaw;
+};
+
+const cleanupPendingRailgunApprovals = () => {
+  const now = Date.now();
+  for (const [approvalId, pendingApproval] of pendingRailgunApprovals.entries()) {
+    const createdAt = Date.parse(pendingApproval.approval.createdAt);
+    if (!Number.isFinite(createdAt) || now - createdAt >= RAILGUN_APPROVAL_TTL_MS) {
+      pendingRailgunApprovals.delete(approvalId);
+    }
+  }
+};
+
+const buildActionResultBase = (
+  operation: RailgunOperation,
+  runtime: RailgunRuntime,
+  token: RailgunToken,
+  amount: string,
+  recipient?: string,
+): RailgunActionResultBase => {
+  const privacyImpact = getPrivacyImpact(operation, currentConfig.networkLabel);
+
+  return {
+    railgun: true,
+    operation,
+    network: currentConfig.networkLabel,
+    railgunAddress: runtime.railgunAddress,
+    token: token.symbol,
+    amount,
+    recipient,
+    summary: buildActionSummary(
+      operation,
+      amount,
+      token.symbol,
+      currentConfig.networkLabel,
+      recipient,
+    ),
+    privacyImpact,
+    privacyNote: privacyImpact,
+  };
+};
+
+const createPendingApprovalResult = (
+  operation: RailgunOperation,
+  runtime: RailgunRuntime,
+  token: RailgunToken,
+  amount: string,
+  amountRaw: bigint,
+  execute: () => Promise<RailgunResult>,
+  recipient?: string,
+): RailgunApprovalRequiredResult => {
+  cleanupPendingRailgunApprovals();
+
+  const approvalId = crypto.randomUUID();
+  const threshold = getApprovalThreshold(operation);
+  const createdAt = new Date().toISOString();
+  const base = buildActionResultBase(operation, runtime, token, amount, recipient);
+  const approval: RailgunApprovalState = {
+    id: approvalId,
+    threshold,
+    thresholdType: "token_amount",
+    status: "awaiting_local_approval",
+    submitted: false,
+    createdAt,
+  };
+
+  pendingRailgunApprovals.set(approvalId, {
+    ...base,
+    approval,
+    execute,
+  });
+
+  if (amountRaw < parseTokenAmount(threshold, token.decimals)) {
+    throw new Error("Approval state mismatch.");
+  }
+
+  return {
+    ...base,
+    status: "awaiting_local_approval",
+    message:
+      "Local approval is required before signing this Railgun action. Review the exact action summary and privacy impact below, then approve or cancel on this device.",
+    approval,
+  };
+};
+
+const buildCancelledApprovalResult = (
+  pendingApproval: PendingRailgunApproval,
+): RailgunCancelledResult => {
+  return {
+    railgun: true,
+    operation: pendingApproval.operation,
+    network: pendingApproval.network,
+    railgunAddress: pendingApproval.railgunAddress,
+    token: pendingApproval.token,
+    amount: pendingApproval.amount,
+    recipient: pendingApproval.recipient,
+    summary: pendingApproval.summary,
+    privacyImpact: pendingApproval.privacyImpact,
+    privacyNote: pendingApproval.privacyNote,
+    status: "cancelled",
+    message:
+      "Local approval was rejected. No Railgun transaction was signed or submitted.",
+    approval: {
+      ...pendingApproval.approval,
+      status: "cancelled",
+    },
+  };
+};
+
+const buildShieldContext = async (
+  token: string,
+  amount: string,
+): Promise<RailgunPreparedShield> => {
+  const runtime = await getRuntime();
+  const resolvedToken = await resolveToken(token);
+  const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
+  const signerAddress = getSignerAccount().address;
+
+  if (resolvedToken.isNative) {
+    const publicBalance = await publicClient.getBalance({ address: signerAddress });
+    if (publicBalance < amountRaw) {
+      throw new Error(
+        `Insufficient public balance. Available: ${formatUnits(publicBalance, resolvedToken.decimals)} ${resolvedToken.symbol}.`,
+      );
+    }
+  } else {
+    const publicBalance = await publicClient.readContract({
+      address: resolvedToken.tokenAddress,
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [signerAddress],
+    });
+
+    if (publicBalance < amountRaw) {
+      throw new Error(
+        `Insufficient public balance. Available: ${formatUnits(publicBalance, resolvedToken.decimals)} ${resolvedToken.symbol}.`,
+      );
+    }
+  }
+
+  return {
+    runtime,
+    token: resolvedToken,
+    amount,
+    amountRaw,
+  };
+};
+
+const buildTransferContext = async (
+  recipient: string,
+  token: string,
+  amount: string,
+): Promise<RailgunPreparedTransfer> => {
+  if (!recipient.startsWith("0zk")) {
+    throw new Error("Railgun transfer recipients must use a 0zk address.");
+  }
+
+  const runtime = await getRuntime();
+  const resolvedToken = await resolveToken(token);
+  const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
+
+  await syncWalletState(runtime);
+  const spendableBalance = await getShieldedBalanceForToken(runtime, resolvedToken);
+  const spendableBalanceRaw = parseTokenAmount(spendableBalance, resolvedToken.decimals);
+  if (spendableBalanceRaw < amountRaw) {
+    throw new Error(
+      `Insufficient shielded balance. Available: ${spendableBalance} ${resolvedToken.symbol}.`,
+    );
+  }
+
+  return {
+    runtime,
+    token: resolvedToken,
+    amount,
+    amountRaw,
+    recipient,
+  };
+};
+
+const buildUnshieldContext = async (
+  recipient: string,
+  token: string,
+  amount: string,
+): Promise<RailgunPreparedUnshield> => {
+  const runtime = await getRuntime();
+  const resolvedToken = await resolveToken(token);
+  const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
+  const recipientAddress = getAddress(recipient) as `0x${string}`;
+
+  await syncWalletState(runtime);
+  const spendableBalance = await getShieldedBalanceForToken(runtime, resolvedToken);
+  const spendableBalanceRaw = parseTokenAmount(spendableBalance, resolvedToken.decimals);
+  if (spendableBalanceRaw < amountRaw) {
+    throw new Error(
+      `Insufficient shielded balance. Available: ${spendableBalance} ${resolvedToken.symbol}.`,
+    );
+  }
+
+  return {
+    runtime,
+    token: resolvedToken,
+    amount,
+    amountRaw,
+    recipient: recipientAddress,
+  };
+};
+
 const buildErrorResult = (
   operation: RailgunResult["operation"],
   error: unknown,
-): Extract<RailgunResult, { status: "error" }> => {
+  context?: Pick<
+    RailgunErrorResult,
+    "amount" | "balanceRouting" | "railgunAddress" | "recipient" | "token"
+  >,
+): RailgunErrorResult => {
   const message =
     error instanceof Error ? error.message : "Unknown Railgun error occurred.";
 
@@ -712,9 +1081,537 @@ const buildErrorResult = (
     operation,
     network: currentConfig.networkLabel,
     message,
+    ...context,
     setup: clearRailgunSecrets(),
   };
 };
+
+async function executeShield(
+  prepared: RailgunPreparedShield,
+): Promise<RailgunActionSuccessResult> {
+  const stages: RailgunOperationStage[] = [];
+
+  await syncWalletState(prepared.runtime);
+  stages.push({
+    label: "Wallet sync complete",
+    status: "completed",
+    detail: prepared.runtime.state.lastSyncAt,
+  });
+
+  const approvalTxHash = await ensureAllowance(prepared.token, prepared.amountRaw);
+  stages.push({
+    label: prepared.token.isNative ? "Token approval" : "Token approval ready",
+    status: approvalTxHash ? "completed" : "skipped",
+    detail: approvalTxHash,
+  });
+
+  const shieldPrivateKey = await getShieldPrivateKey();
+  const gasEstimate = prepared.token.isNative
+    ? await gasEstimateForShieldBaseToken(
+        RAILGUN_TXID_VERSION,
+        RAILGUN_NETWORK,
+        prepared.runtime.railgunAddress,
+        shieldPrivateKey,
+        {
+          tokenAddress: prepared.token.tokenAddress,
+          amount: prepared.amountRaw,
+        },
+        getSignerAccount().address,
+      )
+    : await gasEstimateForShield(
+        RAILGUN_TXID_VERSION,
+        RAILGUN_NETWORK,
+        shieldPrivateKey,
+        [
+          {
+            tokenAddress: prepared.token.tokenAddress,
+            amount: prepared.amountRaw,
+            recipientAddress: prepared.runtime.railgunAddress,
+          },
+        ],
+        [],
+        getSignerAccount().address,
+      );
+  const gasDetails = await getGasDetails(gasEstimate.gasEstimate);
+
+  const populated = prepared.token.isNative
+    ? await populateShieldBaseToken(
+        RAILGUN_TXID_VERSION,
+        RAILGUN_NETWORK,
+        prepared.runtime.railgunAddress,
+        shieldPrivateKey,
+        {
+          tokenAddress: prepared.token.tokenAddress,
+          amount: prepared.amountRaw,
+        },
+        gasDetails,
+      )
+    : await populateShield(
+        RAILGUN_TXID_VERSION,
+        RAILGUN_NETWORK,
+        shieldPrivateKey,
+        [
+          {
+            tokenAddress: prepared.token.tokenAddress,
+            amount: prepared.amountRaw,
+            recipientAddress: prepared.runtime.railgunAddress,
+          },
+        ],
+        [],
+        gasDetails,
+      );
+  stages.push({
+    label: "Shield transaction prepared",
+    status: "completed",
+  });
+
+  const txHash = await submitContractTransaction(populated.transaction);
+  stages.push({
+    label: "Shield transaction confirmed",
+    status: "completed",
+    detail: txHash,
+  });
+
+  await syncWalletState(prepared.runtime);
+  const shieldedBalanceAfter = await getShieldedBalanceForToken(
+    prepared.runtime,
+    prepared.token,
+  );
+  stages.push({
+    label: "Shielded balance refreshed",
+    status: "completed",
+    detail: shieldedBalanceAfter,
+  });
+
+  return {
+    ...buildActionResultBase(
+      "shield",
+      prepared.runtime,
+      prepared.token,
+      prepared.amount,
+    ),
+    status: "success",
+    txHash,
+    explorerUrl: explorerUrlForTx(txHash),
+    approvalTxHash,
+    stages,
+    shieldedBalanceAfter,
+    scan: snapshotState(),
+  };
+}
+
+async function executeTransfer(
+  prepared: RailgunPreparedTransfer,
+): Promise<RailgunActionSuccessResult> {
+  const proofProgress: ProofStage[] = [];
+  const stages: RailgunOperationStage[] = [];
+
+  await syncWalletState(prepared.runtime);
+  stages.push({
+    label: "Wallet sync complete",
+    status: "completed",
+    detail: prepared.runtime.state.lastSyncAt,
+  });
+
+  const spendableBalance = await getShieldedBalanceForToken(
+    prepared.runtime,
+    prepared.token,
+  );
+  const spendableBalanceRaw = parseTokenAmount(
+    spendableBalance,
+    prepared.token.decimals,
+  );
+  if (spendableBalanceRaw < prepared.amountRaw) {
+    throw new Error(
+      `Insufficient shielded balance. Available: ${spendableBalance} ${prepared.token.symbol}.`,
+    );
+  }
+
+  const originalGasDetails = await getGasDetails(BigInt(0));
+  const gasEstimate = await gasEstimateForUnprovenTransfer(
+    RAILGUN_TXID_VERSION,
+    RAILGUN_NETWORK,
+    prepared.runtime.walletId,
+    prepared.runtime.encryptionKey,
+    undefined,
+    [
+      {
+        tokenAddress: prepared.token.tokenAddress,
+        amount: prepared.amountRaw,
+        recipientAddress: prepared.recipient,
+      },
+    ],
+    [],
+    originalGasDetails,
+    undefined,
+    true,
+  );
+  const gasDetails = await getGasDetails(gasEstimate.gasEstimate);
+  stages.push({
+    label: "Gas estimated",
+    status: "completed",
+    detail: gasEstimate.gasEstimate.toString(),
+  });
+
+  await generateTransferProof(
+    RAILGUN_TXID_VERSION,
+    RAILGUN_NETWORK,
+    prepared.runtime.walletId,
+    prepared.runtime.encryptionKey,
+    false,
+    undefined,
+    [
+      {
+        tokenAddress: prepared.token.tokenAddress,
+        amount: prepared.amountRaw,
+        recipientAddress: prepared.recipient,
+      },
+    ],
+    [],
+    undefined,
+    true,
+    undefined,
+    (progress, status) => {
+      proofProgress.push({ progress, status });
+    },
+  );
+  stages.push({
+    label: "Zero-knowledge proof generated",
+    status: "completed",
+  });
+
+  const populated = await populateProvedTransfer(
+    RAILGUN_TXID_VERSION,
+    RAILGUN_NETWORK,
+    prepared.runtime.walletId,
+    false,
+    undefined,
+    [
+      {
+        tokenAddress: prepared.token.tokenAddress,
+        amount: prepared.amountRaw,
+        recipientAddress: prepared.recipient,
+      },
+    ],
+    [],
+    undefined,
+    true,
+    undefined,
+    gasDetails,
+  );
+
+  const txHash = await submitContractTransaction(populated.transaction);
+  stages.push({
+    label: "Private transfer confirmed",
+    status: "completed",
+    detail: txHash,
+  });
+
+  await syncWalletState(prepared.runtime);
+  const shieldedBalanceAfter = await getShieldedBalanceForToken(
+    prepared.runtime,
+    prepared.token,
+  );
+  stages.push({
+    label: "Shielded balance refreshed",
+    status: "completed",
+    detail: shieldedBalanceAfter,
+  });
+
+  return {
+    ...buildActionResultBase(
+      "transfer",
+      prepared.runtime,
+      prepared.token,
+      prepared.amount,
+      prepared.recipient,
+    ),
+    status: "success",
+    txHash,
+    explorerUrl: explorerUrlForTx(txHash),
+    stages,
+    proofProgress: dedupeProofStages(proofProgress),
+    shieldedBalanceAfter,
+    scan: snapshotState(),
+  };
+}
+
+async function executeUnshield(
+  prepared: RailgunPreparedUnshield,
+): Promise<RailgunActionSuccessResult> {
+  const proofProgress: ProofStage[] = [];
+  const stages: RailgunOperationStage[] = [];
+
+  await syncWalletState(prepared.runtime);
+  stages.push({
+    label: "Wallet sync complete",
+    status: "completed",
+    detail: prepared.runtime.state.lastSyncAt,
+  });
+
+  const spendableBalance = await getShieldedBalanceForToken(
+    prepared.runtime,
+    prepared.token,
+  );
+  const spendableBalanceRaw = parseTokenAmount(
+    spendableBalance,
+    prepared.token.decimals,
+  );
+  if (spendableBalanceRaw < prepared.amountRaw) {
+    throw new Error(
+      `Insufficient shielded balance. Available: ${spendableBalance} ${prepared.token.symbol}.`,
+    );
+  }
+
+  const originalGasDetails = await getGasDetails(BigInt(0));
+  const gasEstimate = prepared.token.isNative
+    ? await gasEstimateForUnprovenUnshieldBaseToken(
+        RAILGUN_TXID_VERSION,
+        RAILGUN_NETWORK,
+        prepared.recipient,
+        prepared.runtime.walletId,
+        prepared.runtime.encryptionKey,
+        {
+          tokenAddress: prepared.token.tokenAddress,
+          amount: prepared.amountRaw,
+        },
+        originalGasDetails,
+        undefined,
+        true,
+      )
+    : await gasEstimateForUnprovenUnshield(
+        RAILGUN_TXID_VERSION,
+        RAILGUN_NETWORK,
+        prepared.runtime.walletId,
+        prepared.runtime.encryptionKey,
+        [
+          {
+            tokenAddress: prepared.token.tokenAddress,
+            amount: prepared.amountRaw,
+            recipientAddress: prepared.recipient,
+          },
+        ],
+        [],
+        originalGasDetails,
+        undefined,
+        true,
+      );
+  const gasDetails = await getGasDetails(gasEstimate.gasEstimate);
+  stages.push({
+    label: "Gas estimated",
+    status: "completed",
+    detail: gasEstimate.gasEstimate.toString(),
+  });
+
+  if (prepared.token.isNative) {
+    await generateUnshieldBaseTokenProof(
+      RAILGUN_TXID_VERSION,
+      RAILGUN_NETWORK,
+      prepared.recipient,
+      prepared.runtime.walletId,
+      prepared.runtime.encryptionKey,
+      {
+        tokenAddress: prepared.token.tokenAddress,
+        amount: prepared.amountRaw,
+      },
+      undefined,
+      true,
+      undefined,
+      (progress, status) => {
+        proofProgress.push({ progress, status });
+      },
+    );
+  } else {
+    await generateUnshieldProof(
+      RAILGUN_TXID_VERSION,
+      RAILGUN_NETWORK,
+      prepared.runtime.walletId,
+      prepared.runtime.encryptionKey,
+      [
+        {
+          tokenAddress: prepared.token.tokenAddress,
+          amount: prepared.amountRaw,
+          recipientAddress: prepared.recipient,
+        },
+      ],
+      [],
+      undefined,
+      true,
+      undefined,
+      (progress, status) => {
+        proofProgress.push({ progress, status });
+      },
+    );
+  }
+  stages.push({
+    label: "Zero-knowledge proof generated",
+    status: "completed",
+  });
+
+  const populated = prepared.token.isNative
+    ? await populateProvedUnshieldBaseToken(
+        RAILGUN_TXID_VERSION,
+        RAILGUN_NETWORK,
+        prepared.recipient,
+        prepared.runtime.walletId,
+        {
+          tokenAddress: prepared.token.tokenAddress,
+          amount: prepared.amountRaw,
+        },
+        undefined,
+        true,
+        undefined,
+        gasDetails,
+      )
+    : await populateProvedUnshield(
+        RAILGUN_TXID_VERSION,
+        RAILGUN_NETWORK,
+        prepared.runtime.walletId,
+        [
+          {
+            tokenAddress: prepared.token.tokenAddress,
+            amount: prepared.amountRaw,
+            recipientAddress: prepared.recipient,
+          },
+        ],
+        [],
+        undefined,
+        true,
+        undefined,
+        gasDetails,
+      );
+
+  const txHash = await submitContractTransaction(populated.transaction);
+  stages.push({
+    label: "Unshield transaction confirmed",
+    status: "completed",
+    detail: txHash,
+  });
+
+  await syncWalletState(prepared.runtime);
+  const shieldedBalanceAfter = await getShieldedBalanceForToken(
+    prepared.runtime,
+    prepared.token,
+  );
+  const publicBalanceAfter = await getPublicBalanceForToken(
+    prepared.recipient,
+    prepared.token,
+  );
+  stages.push({
+    label: "Balances refreshed",
+    status: "completed",
+    detail: `${shieldedBalanceAfter} private / ${publicBalanceAfter} public`,
+  });
+
+  return {
+    ...buildActionResultBase(
+      "unshield",
+      prepared.runtime,
+      prepared.token,
+      prepared.amount,
+      prepared.recipient,
+    ),
+    status: "success",
+    txHash,
+    explorerUrl: explorerUrlForTx(txHash),
+    stages,
+    proofProgress: dedupeProofStages(proofProgress),
+    shieldedBalanceAfter,
+    publicBalanceAfter,
+    scan: snapshotState(),
+  };
+}
+
+const buildBalanceRouting = async (
+  runtime: RailgunRuntime,
+  token: RailgunToken,
+  amount: string,
+  amountRaw: bigint,
+  requestedOperation: RailgunPrivateAction,
+): Promise<RailgunBalanceRouting> => {
+  const shieldedBalance = await getShieldedBalanceForToken(runtime, token);
+  const shieldedBalanceRaw = parseTokenAmount(shieldedBalance, token.decimals);
+  const publicAddress = getSignerAccount().address as `0x${string}`;
+  const publicBalance = await getPublicBalanceForToken(publicAddress, token);
+  const publicBalanceRaw = parseTokenAmount(publicBalance, token.decimals);
+
+  if (shieldedBalanceRaw >= amountRaw) {
+    return {
+      requestedOperation,
+      route: "proceed",
+      token: token.symbol,
+      requestedAmount: amount,
+      shieldedBalance,
+      publicBalance,
+      publicAddress,
+      recommendation: `Private balance is sufficient. Proceed with the Railgun ${requestedOperation}.`,
+      privacyGuidance: currentConfig.privacyGuidanceText,
+    };
+  }
+
+  const shortfallRaw = amountRaw - shieldedBalanceRaw;
+  const shortfall = formatUnits(shortfallRaw, token.decimals);
+  if (publicBalanceRaw >= shortfallRaw) {
+    return {
+      requestedOperation,
+      route: "shield_then_retry",
+      token: token.symbol,
+      requestedAmount: amount,
+      shieldedBalance,
+      publicBalance,
+      shortfall,
+      publicAddress,
+      recommendation: `Shield at least ${shortfall} ${token.symbol} from ${publicAddress} into Railgun, then retry the private ${requestedOperation}.`,
+      privacyGuidance: currentConfig.privacyGuidanceText,
+    };
+  }
+
+  return {
+    requestedOperation,
+    route: "fund_public_wallet",
+    token: token.symbol,
+    requestedAmount: amount,
+    shieldedBalance,
+    publicBalance,
+    shortfall,
+    publicAddress,
+    recommendation: `You need ${amount} ${token.symbol} for the private ${requestedOperation}, but only ${shieldedBalance} is private and ${publicBalance} is public. Fund the public wallet first, then shield the shortfall into Railgun.`,
+    privacyGuidance: currentConfig.privacyGuidanceText,
+  };
+};
+
+function buildInsufficientPrivateBalanceResult(
+  operation: RailgunPrivateAction,
+  routing: RailgunBalanceRouting,
+  runtime: RailgunRuntime,
+  amount: string,
+  recipient: string,
+): Extract<RailgunResult, { status: "error" }> {
+  const shortfallText = routing.shortfall
+    ? ` Shortfall: ${routing.shortfall} ${routing.token}.`
+    : "";
+  const recommendationText =
+    routing.route === "shield_then_retry"
+      ? ` ${routing.recommendation}`
+      : ` ${routing.recommendation}`;
+
+  return {
+    railgun: true,
+    status: "error",
+    operation,
+    network: currentConfig.networkLabel,
+    token: routing.token,
+    amount,
+    recipient,
+    railgunAddress: runtime.railgunAddress,
+    balanceRouting: routing,
+    message:
+      `Insufficient private balance for this Railgun ${operation}. ` +
+      `Private: ${routing.shieldedBalance} ${routing.token}. ` +
+      `Public: ${routing.publicBalance} ${routing.token}.${shortfallText}${recommendationText}`,
+    setup: clearRailgunSecrets(),
+  };
+}
 
 export async function railgunBalance(
   token?: string,
@@ -782,7 +1679,8 @@ export async function railgunBalance(
   });
 }
 
-export async function railgunShield(
+export async function railgunBalanceRoute(
+  requestedOperation: RailgunPrivateAction,
   token: string,
   amount: string,
   runtimeConfig?: RailgunToolRuntimeConfig,
@@ -796,114 +1694,75 @@ export async function railgunShield(
       const runtime = await getRuntime();
       const resolvedToken = await resolveToken(token);
       const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
-      const stages: RailgunOperationStage[] = [];
 
-      await syncWalletState(runtime);
-      stages.push({
-        label: "Wallet sync complete",
-        status: "completed",
-        detail: runtime.state.lastSyncAt,
-      });
-
-      const approvalTxHash = await ensureAllowance(resolvedToken, amountRaw);
-      stages.push({
-        label: resolvedToken.isNative ? "Token approval" : "Token approval ready",
-        status: approvalTxHash ? "completed" : "skipped",
-        detail: approvalTxHash,
-      });
-
-      const shieldPrivateKey = await getShieldPrivateKey();
-      const gasEstimate = resolvedToken.isNative
-        ? await gasEstimateForShieldBaseToken(
-            RAILGUN_TXID_VERSION,
-            RAILGUN_NETWORK,
-            runtime.railgunAddress,
-            shieldPrivateKey,
-            {
-              tokenAddress: resolvedToken.tokenAddress,
-              amount: amountRaw,
-            },
-            getSignerAccount().address,
-          )
-        : await gasEstimateForShield(
-            RAILGUN_TXID_VERSION,
-            RAILGUN_NETWORK,
-            shieldPrivateKey,
-            [
-              {
-                tokenAddress: resolvedToken.tokenAddress,
-                amount: amountRaw,
-                recipientAddress: runtime.railgunAddress,
-              },
-            ],
-            [],
-            getSignerAccount().address,
-          );
-      const gasDetails = await getGasDetails(gasEstimate.gasEstimate);
-
-      const populated = resolvedToken.isNative
-        ? await populateShieldBaseToken(
-            RAILGUN_TXID_VERSION,
-            RAILGUN_NETWORK,
-            runtime.railgunAddress,
-            shieldPrivateKey,
-            {
-              tokenAddress: resolvedToken.tokenAddress,
-              amount: amountRaw,
-            },
-            gasDetails,
-          )
-        : await populateShield(
-            RAILGUN_TXID_VERSION,
-            RAILGUN_NETWORK,
-            shieldPrivateKey,
-            [
-              {
-                tokenAddress: resolvedToken.tokenAddress,
-                amount: amountRaw,
-                recipientAddress: runtime.railgunAddress,
-              },
-            ],
-            [],
-            gasDetails,
-          );
-      stages.push({
-        label: "Shield transaction prepared",
-        status: "completed",
-      });
-
-      const txHash = await submitContractTransaction(populated.transaction);
-      stages.push({
-        label: "Shield transaction confirmed",
-        status: "completed",
-        detail: txHash,
-      });
-
-      await syncWalletState(runtime);
-      const shieldedBalanceAfter = await getShieldedBalanceForToken(runtime, resolvedToken);
-      stages.push({
-        label: "Shielded balance refreshed",
-        status: "completed",
-        detail: shieldedBalanceAfter,
-      });
+      await refreshWalletStateForRouting(runtime);
+      const balanceRouting = await buildBalanceRouting(
+        runtime,
+        resolvedToken,
+        amount,
+        amountRaw,
+        requestedOperation,
+      );
 
       return {
         railgun: true,
         status: "success",
-        operation: "shield",
+        operation: "route",
         network: currentConfig.networkLabel,
         railgunAddress: runtime.railgunAddress,
-        token: resolvedToken.symbol,
-        amount,
-        txHash,
-        explorerUrl: explorerUrlForTx(txHash),
-        approvalTxHash,
-        stages,
-        shieldedBalanceAfter,
-        privacyNote:
-          "This deposit is public on Arbitrum, but once shielded the resulting private balance can be spent without publicly linking future Railgun transfers to the deposit address.",
         scan: snapshotState(),
+        balanceRouting,
       };
+    } catch (error) {
+      return buildErrorResult("route", error);
+    }
+  });
+}
+
+export async function railgunShield(
+  token: string,
+  amount: string,
+  runtimeConfig?: RailgunToolRuntimeConfig,
+): Promise<RailgunResult> {
+  if (runtimeConfig) {
+    setRailgunToolRuntimeConfig(runtimeConfig);
+  }
+
+  return withRailgunLock(async () => {
+    try {
+      const prepared = await buildShieldContext(token, amount);
+      if (
+        requiresLocalApproval(
+          "shield",
+          prepared.amountRaw,
+          prepared.token.decimals,
+        )
+      ) {
+        const capturedConfig = cloneRailgunToolRuntimeConfig(currentConfig);
+        const tokenSelector = prepared.token.isNative
+          ? "ETH"
+          : prepared.token.tokenAddress;
+
+        return createPendingApprovalResult(
+          "shield",
+          prepared.runtime,
+          prepared.token,
+          prepared.amount,
+          prepared.amountRaw,
+          async () => {
+            setRailgunToolRuntimeConfig(capturedConfig);
+            try {
+              return await executeShield(
+                await buildShieldContext(tokenSelector, prepared.amount),
+              );
+            } catch (error) {
+              return buildErrorResult("shield", error);
+            }
+          },
+        );
+      }
+
+      return await executeShield(prepared);
     } catch (error) {
       return buildErrorResult("shield", error);
     }
@@ -921,137 +1780,76 @@ export async function railgunTransfer(
   }
 
   return withRailgunLock(async () => {
-    const proofProgress: ProofStage[] = [];
-
     try {
       const runtime = await getRuntime();
-      const resolvedToken = await resolveToken(token);
-      const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
-      const stages: RailgunOperationStage[] = [];
-
-      await syncWalletState(runtime);
-      stages.push({
-        label: "Wallet sync complete",
-        status: "completed",
-        detail: runtime.state.lastSyncAt,
-      });
-
-      const spendableBalance = await getShieldedBalanceForToken(runtime, resolvedToken);
-      const spendableBalanceRaw = parseTokenAmount(spendableBalance, resolvedToken.decimals);
-      if (spendableBalanceRaw < amountRaw) {
+      const normalizedRecipient = recipient.trim();
+      if (!normalizedRecipient.startsWith("0zk")) {
         throw new Error(
-          `Insufficient shielded balance. Available: ${spendableBalance} ${resolvedToken.symbol}.`,
+          "Railgun private transfers require a 0zk recipient. For ENS names or public 0x addresses, resolve ENS first and use railgun_unshield instead.",
         );
       }
 
-      const originalGasDetails = await getGasDetails(BigInt(0));
-      const gasEstimate = await gasEstimateForUnprovenTransfer(
-        RAILGUN_TXID_VERSION,
-        RAILGUN_NETWORK,
-        runtime.walletId,
-        runtime.encryptionKey,
-        undefined,
-        [
-          {
-            tokenAddress: resolvedToken.tokenAddress,
-            amount: amountRaw,
-            recipientAddress: recipient,
-          },
-        ],
-        [],
-        originalGasDetails,
-        undefined,
-        true,
-      );
-      const gasDetails = await getGasDetails(gasEstimate.gasEstimate);
-      stages.push({
-        label: "Gas estimated",
-        status: "completed",
-        detail: gasEstimate.gasEstimate.toString(),
-      });
-
-      await generateTransferProof(
-        RAILGUN_TXID_VERSION,
-        RAILGUN_NETWORK,
-        runtime.walletId,
-        runtime.encryptionKey,
-        false,
-        undefined,
-        [
-          {
-            tokenAddress: resolvedToken.tokenAddress,
-            amount: amountRaw,
-            recipientAddress: recipient,
-          },
-        ],
-        [],
-        undefined,
-        true,
-        undefined,
-        (progress, status) => {
-          proofProgress.push({ progress, status });
-        },
-      );
-      stages.push({
-        label: "Zero-knowledge proof generated",
-        status: "completed",
-      });
-
-      const populated = await populateProvedTransfer(
-        RAILGUN_TXID_VERSION,
-        RAILGUN_NETWORK,
-        runtime.walletId,
-        false,
-        undefined,
-        [
-          {
-            tokenAddress: resolvedToken.tokenAddress,
-            amount: amountRaw,
-            recipientAddress: recipient,
-          },
-        ],
-        [],
-        undefined,
-        true,
-        undefined,
-        gasDetails,
-      );
-
-      const txHash = await submitContractTransaction(populated.transaction);
-      stages.push({
-        label: "Private transfer confirmed",
-        status: "completed",
-        detail: txHash,
-      });
-
-      await syncWalletState(runtime);
-      const shieldedBalanceAfter = await getShieldedBalanceForToken(runtime, resolvedToken);
-      stages.push({
-        label: "Shielded balance refreshed",
-        status: "completed",
-        detail: shieldedBalanceAfter,
-      });
-
-      return {
-        railgun: true,
-        status: "success",
-        operation: "transfer",
-        network: currentConfig.networkLabel,
-        railgunAddress: runtime.railgunAddress,
-        token: resolvedToken.symbol,
+      const resolvedToken = await resolveToken(token);
+      const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
+      await refreshWalletStateForRouting(runtime);
+      const balanceRouting = await buildBalanceRouting(
+        runtime,
+        resolvedToken,
         amount,
-        recipient,
-        txHash,
-        explorerUrl: explorerUrlForTx(txHash),
-        stages,
-        proofProgress: dedupeProofStages(proofProgress),
-        shieldedBalanceAfter,
-        privacyNote:
-          "The Railgun transfer occurs privately. Observers can see the Arbitrum transaction, but they should not be able to link the sender, recipient 0zk address, token, and amount the way they can with a public ERC-20 transfer.",
-        scan: snapshotState(),
-      };
+        amountRaw,
+        "transfer",
+      );
+      if (balanceRouting.route !== "proceed") {
+        return buildInsufficientPrivateBalanceResult(
+          "transfer",
+          balanceRouting,
+          runtime,
+          amount,
+          recipient,
+        );
+      }
+
+      const tokenSelector = resolvedToken.isNative ? "ETH" : resolvedToken.tokenAddress;
+      const prepared = await buildTransferContext(
+        normalizedRecipient,
+        tokenSelector,
+        amount,
+      );
+      if (
+        requiresLocalApproval(
+          "transfer",
+          prepared.amountRaw,
+          prepared.token.decimals,
+        )
+      ) {
+        const capturedConfig = cloneRailgunToolRuntimeConfig(currentConfig);
+        return createPendingApprovalResult(
+          "transfer",
+          prepared.runtime,
+          prepared.token,
+          prepared.amount,
+          prepared.amountRaw,
+          async () => {
+            setRailgunToolRuntimeConfig(capturedConfig);
+            try {
+              return await executeTransfer(
+                await buildTransferContext(
+                  normalizedRecipient,
+                  tokenSelector,
+                  prepared.amount,
+                ),
+              );
+            } catch (error) {
+              return buildErrorResult("transfer", error);
+            }
+          },
+          prepared.recipient,
+        );
+      }
+
+      return await executeTransfer(prepared);
     } catch (error) {
-      return buildErrorResult("transfer", error);
+      return buildErrorResult("transfer", error, { amount, recipient, token });
     }
   });
 }
@@ -1067,188 +1865,91 @@ export async function railgunUnshield(
   }
 
   return withRailgunLock(async () => {
-    const proofProgress: ProofStage[] = [];
-
     try {
       const runtime = await getRuntime();
       const resolvedToken = await resolveToken(token);
       const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
-      const stages: RailgunOperationStage[] = [];
-      const recipientAddress = getAddress(recipient) as `0x${string}`;
-
-      await syncWalletState(runtime);
-      stages.push({
-        label: "Wallet sync complete",
-        status: "completed",
-        detail: runtime.state.lastSyncAt,
-      });
-
-      const spendableBalance = await getShieldedBalanceForToken(runtime, resolvedToken);
-      const spendableBalanceRaw = parseTokenAmount(spendableBalance, resolvedToken.decimals);
-      if (spendableBalanceRaw < amountRaw) {
-        throw new Error(
-          `Insufficient shielded balance. Available: ${spendableBalance} ${resolvedToken.symbol}.`,
-        );
-      }
-
-      const originalGasDetails = await getGasDetails(BigInt(0));
-      const gasEstimate = resolvedToken.isNative
-        ? await gasEstimateForUnprovenUnshieldBaseToken(
-            RAILGUN_TXID_VERSION,
-            RAILGUN_NETWORK,
-            recipientAddress,
-            runtime.walletId,
-            runtime.encryptionKey,
-            {
-              tokenAddress: resolvedToken.tokenAddress,
-              amount: amountRaw,
-            },
-            originalGasDetails,
-            undefined,
-            true,
-          )
-        : await gasEstimateForUnprovenUnshield(
-            RAILGUN_TXID_VERSION,
-            RAILGUN_NETWORK,
-            runtime.walletId,
-            runtime.encryptionKey,
-            [
-              {
-                tokenAddress: resolvedToken.tokenAddress,
-                amount: amountRaw,
-                recipientAddress,
-              },
-            ],
-            [],
-            originalGasDetails,
-            undefined,
-            true,
-          );
-      const gasDetails = await getGasDetails(gasEstimate.gasEstimate);
-      stages.push({
-        label: "Gas estimated",
-        status: "completed",
-        detail: gasEstimate.gasEstimate.toString(),
-      });
-
-      if (resolvedToken.isNative) {
-        await generateUnshieldBaseTokenProof(
-          RAILGUN_TXID_VERSION,
-          RAILGUN_NETWORK,
-          recipientAddress,
-          runtime.walletId,
-          runtime.encryptionKey,
-          {
-            tokenAddress: resolvedToken.tokenAddress,
-            amount: amountRaw,
-          },
-          undefined,
-          true,
-          undefined,
-          (progress, status) => {
-            proofProgress.push({ progress, status });
-          },
-        );
-      } else {
-        await generateUnshieldProof(
-          RAILGUN_TXID_VERSION,
-          RAILGUN_NETWORK,
-          runtime.walletId,
-          runtime.encryptionKey,
-          [
-            {
-              tokenAddress: resolvedToken.tokenAddress,
-              amount: amountRaw,
-              recipientAddress,
-            },
-          ],
-          [],
-          undefined,
-          true,
-          undefined,
-          (progress, status) => {
-            proofProgress.push({ progress, status });
-          },
-        );
-      }
-      stages.push({
-        label: "Zero-knowledge proof generated",
-        status: "completed",
-      });
-
-      const populated = resolvedToken.isNative
-        ? await populateProvedUnshieldBaseToken(
-            RAILGUN_TXID_VERSION,
-            RAILGUN_NETWORK,
-            recipientAddress,
-            runtime.walletId,
-            {
-              tokenAddress: resolvedToken.tokenAddress,
-              amount: amountRaw,
-            },
-            undefined,
-            true,
-            undefined,
-            gasDetails,
-          )
-        : await populateProvedUnshield(
-            RAILGUN_TXID_VERSION,
-            RAILGUN_NETWORK,
-            runtime.walletId,
-            [
-              {
-                tokenAddress: resolvedToken.tokenAddress,
-                amount: amountRaw,
-                recipientAddress,
-              },
-            ],
-            [],
-            undefined,
-            true,
-            undefined,
-            gasDetails,
-          );
-
-      const txHash = await submitContractTransaction(populated.transaction);
-      stages.push({
-        label: "Unshield transaction confirmed",
-        status: "completed",
-        detail: txHash,
-      });
-
-      await syncWalletState(runtime);
-      const shieldedBalanceAfter = await getShieldedBalanceForToken(runtime, resolvedToken);
-      const publicBalanceAfter = await getPublicBalanceForToken(
-        recipientAddress,
+      await refreshWalletStateForRouting(runtime);
+      const balanceRouting = await buildBalanceRouting(
+        runtime,
         resolvedToken,
-      );
-      stages.push({
-        label: "Balances refreshed",
-        status: "completed",
-        detail: `${shieldedBalanceAfter} private / ${publicBalanceAfter} public`,
-      });
-
-      return {
-        railgun: true,
-        status: "success",
-        operation: "unshield",
-        network: currentConfig.networkLabel,
-        railgunAddress: runtime.railgunAddress,
-        token: resolvedToken.symbol,
         amount,
-        recipient: recipientAddress,
-        txHash,
-        explorerUrl: explorerUrlForTx(txHash),
-        stages,
-        proofProgress: dedupeProofStages(proofProgress),
-        shieldedBalanceAfter,
-        publicBalanceAfter,
-        privacyNote:
-          "This exits the Railgun privacy pool. The unshield target address and resulting public balance become visible on Arbitrum after confirmation.",
-        scan: snapshotState(),
-      };
+        amountRaw,
+        "unshield",
+      );
+      if (balanceRouting.route !== "proceed") {
+        return buildInsufficientPrivateBalanceResult(
+          "unshield",
+          balanceRouting,
+          runtime,
+          amount,
+          recipient,
+        );
+      }
+
+      const tokenSelector = resolvedToken.isNative ? "ETH" : resolvedToken.tokenAddress;
+      const prepared = await buildUnshieldContext(recipient, tokenSelector, amount);
+      if (
+        requiresLocalApproval(
+          "unshield",
+          prepared.amountRaw,
+          prepared.token.decimals,
+        )
+      ) {
+        const capturedConfig = cloneRailgunToolRuntimeConfig(currentConfig);
+        return createPendingApprovalResult(
+          "unshield",
+          prepared.runtime,
+          prepared.token,
+          prepared.amount,
+          prepared.amountRaw,
+          async () => {
+            setRailgunToolRuntimeConfig(capturedConfig);
+            try {
+              return await executeUnshield(
+                await buildUnshieldContext(
+                  prepared.recipient,
+                  tokenSelector,
+                  prepared.amount,
+                ),
+              );
+            } catch (error) {
+              return buildErrorResult("unshield", error);
+            }
+          },
+          prepared.recipient,
+        );
+      }
+
+      return await executeUnshield(prepared);
     } catch (error) {
-      return buildErrorResult("unshield", error);
+      return buildErrorResult("unshield", error, { amount, recipient, token });
     }
   });
+}
+
+export async function approveRailgunAction(
+  approvalId: string,
+): Promise<RailgunResult> {
+  cleanupPendingRailgunApprovals();
+  const pendingApproval = pendingRailgunApprovals.get(approvalId);
+
+  if (!pendingApproval) {
+    throw new Error("Railgun approval request was not found or has expired.");
+  }
+
+  pendingRailgunApprovals.delete(approvalId);
+  return withRailgunLock(() => pendingApproval.execute());
+}
+
+export function rejectRailgunAction(approvalId: string): RailgunResult {
+  cleanupPendingRailgunApprovals();
+  const pendingApproval = pendingRailgunApprovals.get(approvalId);
+
+  if (!pendingApproval) {
+    throw new Error("Railgun approval request was not found or has expired.");
+  }
+
+  pendingRailgunApprovals.delete(approvalId);
+  return buildCancelledApprovalResult(pendingApproval);
 }

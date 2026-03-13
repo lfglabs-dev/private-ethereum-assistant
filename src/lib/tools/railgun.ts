@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import {
   railgunBalance,
+  railgunBalanceRoute,
   railgunShield,
   railgunTransfer,
   railgunUnshield,
@@ -23,9 +24,25 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
     execute: async ({ token }) => railgunBalance(token, runtimeConfig),
   });
 
+  const routeRailgunBalance = tool({
+    description:
+      "Compare the requested private Railgun action against both the shielded Railgun balance and the public EOA balance for the same asset. Use this before private transfers or unshields when the user wants to spend from their private balance.",
+    inputSchema: z.object({
+      action: z
+        .enum(["transfer", "unshield"])
+        .describe("The private Railgun action the user wants to take."),
+      token: z
+        .string()
+        .describe("ETH, USDC, or a token contract address on the configured network."),
+      amount: z.string().describe("Human-readable token amount, like '0.1' or '25'."),
+    }),
+    execute: async ({ action, token, amount }) =>
+      railgunBalanceRoute(action, token, amount, runtimeConfig),
+  });
+
   const railgunShieldTokens = tool({
     description:
-      "Shield tokens into Railgun on the configured Railgun network. Use ETH, USDC, or an explicit token contract address. Explain the privacy tradeoff before calling this tool.",
+      "Shield tokens into Railgun on the configured Railgun network. Use ETH, USDC, or an explicit token contract address. Explain the privacy tradeoff before calling this tool. Higher-value actions may return a local approval requirement before anything is signed.",
     inputSchema: z.object({
       token: z
         .string()
@@ -38,7 +55,7 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
 
   const railgunPrivateTransfer = tool({
     description:
-      "Send a private Railgun transfer on the configured Railgun network to a Railgun address that starts with 0zk.",
+      "Send a private Railgun transfer on the configured Railgun network to a Railgun address that starts with 0zk. Do not use this for ENS names or public 0x recipients. Higher-value actions may return a local approval requirement before anything is signed.",
     inputSchema: z.object({
       recipient: z
         .string()
@@ -54,7 +71,7 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
 
   const railgunWithdraw = tool({
     description:
-      "Unshield tokens from Railgun to a public 0x address on the configured Railgun network.",
+      "Unshield tokens from Railgun to a public 0x address on the configured Railgun network. Use this when a send from private balance needs to go to a public wallet or an ENS name after ENS resolution, and explain that this exits privacy. Higher-value actions may return a local approval requirement before anything is signed.",
     inputSchema: z.object({
       recipient: z
         .string()
@@ -70,6 +87,7 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
 
   return {
     getRailgunBalance,
+    routeRailgunBalance,
     railgunShieldTokens,
     railgunPrivateTransfer,
     railgunWithdraw,

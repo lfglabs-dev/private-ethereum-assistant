@@ -2,6 +2,7 @@ import { setTimeout as delay } from "node:timers/promises"
 import {
   DefaultChatTransport,
   readUIMessageStream,
+  type UIMessageChunk,
 } from "ai"
 import type { NetworkConfig } from "@/lib/ethereum"
 import type { AssistantUIMessage } from "@/lib/chat-stream"
@@ -16,6 +17,7 @@ const DEV_PORT = new URL(APP_URL).port || "3000"
 
 let devServer: Bun.Subprocess | undefined
 let startedDevServer = false
+const RAILGUN_APPROVAL_TEST_THRESHOLD = "0.0000005"
 
 type ToolCallSnapshot = {
   toolName: string
@@ -66,10 +68,9 @@ export async function ensureChatServer() {
       NEXT_PUBLIC_APP_MODE: "developer",
       EOA_LOCAL_APPROVAL_NATIVE_THRESHOLD:
         process.env.E2E_LOCAL_APPROVAL_NATIVE_THRESHOLD ?? "0.00001",
-      RAILGUN_SCAN_TIMEOUT_MS:
-        process.env.E2E_RAILGUN_SCAN_TIMEOUT_MS ?? "30000",
-      RAILGUN_POLLING_INTERVAL_MS:
-        process.env.E2E_RAILGUN_POLLING_INTERVAL_MS ?? "2000",
+      RAILGUN_SHIELD_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
+      RAILGUN_TRANSFER_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
+      RAILGUN_UNSHIELD_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -193,7 +194,7 @@ async function readAssistantMessage(
   let finalMessage: AssistantUIMessage | undefined
 
   for await (const message of readUIMessageStream<AssistantUIMessage>({
-    stream: stream as ReadableStream<any>,
+    stream: stream as ReadableStream<UIMessageChunk>,
     terminateOnError: true,
   })) {
     finalMessage = message

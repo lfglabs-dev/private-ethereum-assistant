@@ -49,8 +49,6 @@ export function createE2ERuntimeConfig(
     },
     railgun: {
       ...runtimeConfig.railgun,
-      scanTimeoutMs: 30_000,
-      pollingIntervalMs: 2_000,
       signerPrivateKey: eoaPrivateKey,
     },
   }

@@ -57,6 +57,20 @@ describe("read-chain E2E", () => {
     expect(result.tokens[0]?.rawBalance).toBe(verifiedBalance.toString())
   })
 
+  test("get_balance resolves a verified token by symbol on Arbitrum", async () => {
+    const result = await executeTool(tools.get_balance, {
+      address: walletAddress,
+      tokenSymbol: "USDC",
+    })
+
+    expect(result.tokens).toHaveLength(1)
+    expect(result.tokens[0]?.address).toBe(ARBITRUM_USDC_ADDRESS)
+    expect(result.tokens[0]?.symbol).toBe("USDC")
+    expect(result.tokens[0]?.name).toBe("USD Coin")
+    expect(result.tokens[0]?.source).toBe("verified")
+    expect(result.tokens[0]?.iconUrl).toContain(ARBITRUM_USDC_ADDRESS)
+  })
+
   test("get_balance returns a valid snapshot for an otherwise unused address", async () => {
     const result = await executeTool(tools.get_balance, {
       address: "0x0000000000000000000000000000000000000001",

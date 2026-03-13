@@ -22,10 +22,10 @@ export const appModeSchema = z.enum(["standard", "developer"]);
 
 const positiveIntegerSchema = z.coerce.number().int().positive();
 const nonNegativeIntegerSchema = z.coerce.number().int().nonnegative();
-const decimalAmountSchema = z
+const tokenAmountSchema = z
   .string()
   .trim()
-  .regex(/^\d+(\.\d+)?$/, "Enter a valid decimal amount.");
+  .regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/, "Enter a non-negative token amount.");
 
 const addressSchema = z
   .string()
@@ -82,8 +82,8 @@ export const runtimeConfigSchema = z.object({
     eoaPrivateKey: privateKeySchema,
     approvalPolicy: z.object({
       enabled: z.boolean(),
-      nativeThreshold: decimalAmountSchema,
-      erc20Threshold: decimalAmountSchema,
+      nativeThreshold: tokenAmountSchema,
+      erc20Threshold: tokenAmountSchema,
     }),
   }),
   railgun: z.object({
@@ -91,6 +91,10 @@ export const runtimeConfigSchema = z.object({
     chainId: positiveIntegerSchema,
     rpcUrl: z.string().trim().url(),
     explorerTxBaseUrl: z.string().trim().url(),
+    privacyGuidanceText: z
+      .string()
+      .trim()
+      .min(1, "Enter the Railgun privacy guidance text."),
     poiNodeUrls: z
       .array(z.string().trim().url())
       .min(1, "Enter at least one Railgun POI node URL."),
@@ -98,6 +102,9 @@ export const runtimeConfigSchema = z.object({
     walletCreationBlock: nonNegativeIntegerSchema,
     scanTimeoutMs: positiveIntegerSchema,
     pollingIntervalMs: positiveIntegerSchema,
+    shieldApprovalThreshold: tokenAmountSchema,
+    transferApprovalThreshold: tokenAmountSchema,
+    unshieldApprovalThreshold: tokenAmountSchema,
   }),
 });
 
@@ -136,11 +143,15 @@ export type RuntimeConfigDraft = {
     chainId: string;
     rpcUrl: string;
     explorerTxBaseUrl: string;
+    privacyGuidanceText: string;
     poiNodeUrls: string;
     mnemonic: string;
     walletCreationBlock: string;
     scanTimeoutMs: string;
     pollingIntervalMs: string;
+    shieldApprovalThreshold: string;
+    transferApprovalThreshold: string;
+    unshieldApprovalThreshold: string;
   };
 };
 
@@ -212,11 +223,15 @@ export function createDefaultRuntimeConfig(): RuntimeConfig {
       chainId: config.railgun.chainId,
       rpcUrl: config.railgun.rpcUrl,
       explorerTxBaseUrl: config.railgun.explorerTxBaseUrl,
+      privacyGuidanceText: config.railgun.privacyGuidanceText,
       poiNodeUrls: config.railgun.poiNodeUrls,
       mnemonic: config.railgun.mnemonic || "",
       walletCreationBlock: config.railgun.walletCreationBlock,
       scanTimeoutMs: config.railgun.scanTimeoutMs,
       pollingIntervalMs: config.railgun.pollingIntervalMs,
+      shieldApprovalThreshold: config.railgun.shieldApprovalThreshold,
+      transferApprovalThreshold: config.railgun.transferApprovalThreshold,
+      unshieldApprovalThreshold: config.railgun.unshieldApprovalThreshold,
     },
   } as RuntimeConfig;
 }
@@ -240,11 +255,18 @@ export function createDeveloperDisplayRuntimeConfig(): RuntimeConfig {
 }
 
 export function createDeveloperRuntimeConfig(): RuntimeConfig {
+  const displayRuntimeConfig = createDeveloperDisplayRuntimeConfig();
+  const developerWalletPrivateKey = getDeveloperWalletPrivateKey();
+
   return {
-    ...createDeveloperDisplayRuntimeConfig(),
+    ...displayRuntimeConfig,
+    safe: {
+      ...displayRuntimeConfig.safe,
+      signerPrivateKey: developerWalletPrivateKey,
+    },
     wallet: {
-      ...createDeveloperDisplayRuntimeConfig().wallet,
-      eoaPrivateKey: getDeveloperWalletPrivateKey(),
+      ...displayRuntimeConfig.wallet,
+      eoaPrivateKey: developerWalletPrivateKey,
     },
   };
 }
@@ -295,11 +317,15 @@ export function createRuntimeConfigDraft(
       chainId: String(runtimeConfig.railgun.chainId),
       rpcUrl: runtimeConfig.railgun.rpcUrl,
       explorerTxBaseUrl: runtimeConfig.railgun.explorerTxBaseUrl,
+      privacyGuidanceText: runtimeConfig.railgun.privacyGuidanceText,
       poiNodeUrls: runtimeConfig.railgun.poiNodeUrls.join("\n"),
       mnemonic: runtimeConfig.railgun.mnemonic,
       walletCreationBlock: String(runtimeConfig.railgun.walletCreationBlock),
       scanTimeoutMs: String(runtimeConfig.railgun.scanTimeoutMs),
       pollingIntervalMs: String(runtimeConfig.railgun.pollingIntervalMs),
+      shieldApprovalThreshold: runtimeConfig.railgun.shieldApprovalThreshold,
+      transferApprovalThreshold: runtimeConfig.railgun.transferApprovalThreshold,
+      unshieldApprovalThreshold: runtimeConfig.railgun.unshieldApprovalThreshold,
     },
   };
 }
@@ -337,6 +363,7 @@ export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfi
       chainId: draft.railgun.chainId,
       rpcUrl: draft.railgun.rpcUrl,
       explorerTxBaseUrl: draft.railgun.explorerTxBaseUrl,
+      privacyGuidanceText: draft.railgun.privacyGuidanceText,
       poiNodeUrls: draft.railgun.poiNodeUrls
         .split(/\n|,/)
         .map((value) => value.trim())
@@ -345,6 +372,9 @@ export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfi
       walletCreationBlock: draft.railgun.walletCreationBlock,
       scanTimeoutMs: draft.railgun.scanTimeoutMs,
       pollingIntervalMs: draft.railgun.pollingIntervalMs,
+      shieldApprovalThreshold: draft.railgun.shieldApprovalThreshold,
+      transferApprovalThreshold: draft.railgun.transferApprovalThreshold,
+      unshieldApprovalThreshold: draft.railgun.unshieldApprovalThreshold,
     },
   });
 }
@@ -424,6 +454,30 @@ export function applyNetworkPreset(
   };
 }
 
+export function applyLegacyRuntimeConfigDefaults(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const railgun =
+    typeof record.railgun === "object" && record.railgun !== null
+      ? (record.railgun as Record<string, unknown>)
+      : null;
+
+  if (!railgun || typeof railgun.privacyGuidanceText === "string") {
+    return value;
+  }
+
+  return {
+    ...record,
+    railgun: {
+      ...railgun,
+      privacyGuidanceText: config.railgun.privacyGuidanceText,
+    },
+  };
+}
+
 export function loadStoredRuntimeConfig() {
   if (typeof window === "undefined") {
     return null;
@@ -441,7 +495,9 @@ export function loadStoredRuntimeConfig() {
   }
 
   try {
-    const parsed = runtimeConfigSchema.parse(JSON.parse(rawValue));
+    const parsed = runtimeConfigSchema.parse(
+      applyLegacyRuntimeConfigDefaults(JSON.parse(rawValue)),
+    );
     if (getAppMode() !== "developer" && parsed.llm.provider === "openrouter") {
       window.localStorage.removeItem(RUNTIME_CONFIG_STORAGE_KEY);
       cachedRuntimeConfigRaw = null;

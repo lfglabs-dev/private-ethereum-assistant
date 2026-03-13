@@ -8,13 +8,13 @@ function getNumberEnv(name: string, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function getDecimalEnv(name: string, fallback: string) {
+function getTokenAmountEnv(name: string, fallback: string) {
   const value = process.env[name]?.trim();
   if (!value) {
     return fallback;
   }
 
-  return /^\d+(\.\d+)?$/.test(value) ? value : fallback;
+  return /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value) ? value : fallback;
 }
 
 export const config = {
@@ -27,11 +27,11 @@ export const config = {
     safeAddress: process.env.SAFE_ADDRESS || "0x4581812Df7500277e3fC72CF93f766DBBd32d371",
     rpcUrl: process.env.RPC_URL || "https://mainnet.base.org",
     chainId: Number(process.env.CHAIN_ID || "8453"),
-    localApprovalNativeThreshold: getDecimalEnv(
+    localApprovalNativeThreshold: getTokenAmountEnv(
       "EOA_LOCAL_APPROVAL_NATIVE_THRESHOLD",
       "0.5",
     ),
-    localApprovalErc20Threshold: getDecimalEnv(
+    localApprovalErc20Threshold: getTokenAmountEnv(
       "EOA_LOCAL_APPROVAL_ERC20_THRESHOLD",
       "1000",
     ),
@@ -41,6 +41,9 @@ export const config = {
     rpcUrl: process.env.RAILGUN_RPC_URL || "https://arb1.arbitrum.io/rpc",
     chainId: Number(process.env.RAILGUN_CHAIN_ID || "42161"),
     explorerTxBaseUrl: process.env.RAILGUN_EXPLORER_TX_URL || "https://arbiscan.io/tx/",
+    privacyGuidanceText:
+      process.env.RAILGUN_PRIVACY_GUIDANCE_TEXT ||
+      "Shielding is a public deposit on Arbitrum, but once confirmed the resulting private balance can fund later Railgun actions without publicly linking future transfers to the deposit address.",
     poiNodeUrls: (process.env.RAILGUN_POI_NODE_URLS || "https://ppoi-agg.horsewithsixlegs.xyz")
       .split(",")
       .map((url) => url.trim())
@@ -50,5 +53,17 @@ export const config = {
     walletCreationBlock: Number(process.env.RAILGUN_WALLET_CREATION_BLOCK || "56109834"),
     scanTimeoutMs: Number(process.env.RAILGUN_SCAN_TIMEOUT_MS || "180000"),
     pollingIntervalMs: Number(process.env.RAILGUN_POLLING_INTERVAL_MS || "15000"),
+    shieldApprovalThreshold: getTokenAmountEnv(
+      "RAILGUN_SHIELD_APPROVAL_THRESHOLD",
+      "1",
+    ),
+    transferApprovalThreshold: getTokenAmountEnv(
+      "RAILGUN_TRANSFER_APPROVAL_THRESHOLD",
+      "1",
+    ),
+    unshieldApprovalThreshold: getTokenAmountEnv(
+      "RAILGUN_UNSHIELD_APPROVAL_THRESHOLD",
+      "1",
+    ),
   },
 } as const;
