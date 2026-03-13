@@ -19,6 +19,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { normalize } from "viem/ens";
 import {
   createEthereumContext,
+  DEFAULT_NETWORK_CONFIG,
   getExplorerTxUrl,
   type ChainMetadata,
   type NetworkConfig,
@@ -51,6 +52,37 @@ type TokenInfo = {
   decimals: number;
 };
 
+export type EoaApprovalPolicy = {
+  enabled: boolean;
+  nativeThreshold: string;
+  erc20Threshold: string;
+};
+
+export type EoaWalletConfig = {
+  eoaPrivateKey?: string;
+  approvalPolicy: EoaApprovalPolicy;
+};
+
+type PreviewGasEstimate = NonNullable<PreviewResult["gasEstimate"]>;
+type PreviewBalance = NonNullable<PreviewResult["balance"]>;
+type ApprovalState = "not_required" | "pending" | "approved" | "rejected";
+
+type ApprovalSummary = {
+  recipient: string;
+  asset: string;
+  amount: string;
+  network: string;
+  estimatedGas: string;
+};
+
+type PreparedTransferApproval = {
+  required: boolean;
+  state: ApprovalState;
+  thresholdAmount?: string;
+  thresholdAssetSymbol?: string;
+  summary: ApprovalSummary;
+};
+
 type PreparedTransfer = {
   confirmationId: string;
   expiresAt: number;
@@ -66,6 +98,9 @@ type PreparedTransfer = {
   value: bigint;
   data: Hex;
   gasLimitOverride?: bigint;
+  balance: PreviewBalance;
+  gasEstimate: PreviewGasEstimate;
+  approval: PreparedTransferApproval;
 };
 
 type StepState = "pending" | "in_progress" | "complete" | "error";
@@ -79,7 +114,11 @@ type ProgressStep = {
 
 type PreviewResult = {
   kind: "transaction_preview" | "transaction_error";
-  status: "awaiting_confirmation" | "error";
+  status:
+    | "awaiting_confirmation"
+    | "awaiting_local_approval"
+    | "aborted"
+    | "error";
   summary: string;
   message: string;
   confirmationId?: string;
@@ -103,6 +142,13 @@ type PreviewResult = {
     maxFeePerGasGwei: string;
     maxPriorityFeePerGasGwei?: string;
     gasCostNative: string;
+  };
+  approval?: {
+    required: boolean;
+    state: ApprovalState;
+    thresholdAmount?: string;
+    thresholdAssetSymbol?: string;
+    summary: ApprovalSummary;
   };
   error?: string;
 };
@@ -158,6 +204,9 @@ type ToolError = {
 
 const PREPARED_TRANSFER_TTL_MS = 10 * 60 * 1000;
 const preparedTransfers = new Map<string, PreparedTransfer>();
+const fallbackChainMetadata = createEthereumContext(
+  DEFAULT_NETWORK_CONFIG
+).chainMetadata;
 
 function hasToolError(value: unknown): value is ToolError {
   return (
@@ -318,10 +367,8 @@ async function estimateFees(
 }
 
 function buildSummary(prepared: PreparedTransfer) {
-  const assetLabel = prepared.token?.symbol ?? prepared.chain.nativeSymbol;
-  const recipientLabel = prepared.resolvedEnsName
-    ? `${prepared.resolvedEnsName} (${prepared.recipient})`
-    : prepared.recipient;
+  const assetLabel = getAssetLabel(prepared);
+  const recipientLabel = getRecipientLabel(prepared);
   return `Sending ${prepared.amount} ${assetLabel} to ${recipientLabel}`;
 }
 
@@ -336,16 +383,212 @@ function buildPreviewError(message: string, chain: ChainMetadata): PreviewResult
   };
 }
 
+function getRecipientLabel(prepared: Pick<
+  PreparedTransfer,
+  "recipient" | "resolvedEnsName"
+>) {
+  return prepared.resolvedEnsName
+    ? `${prepared.resolvedEnsName} (${prepared.recipient})`
+    : prepared.recipient;
+}
+
+function getAssetLabel(prepared: Pick<PreparedTransfer, "token" | "chain">) {
+  return prepared.token?.symbol ?? prepared.chain.nativeSymbol;
+}
+
+function formatApprovalEstimatedGas(gasEstimate: PreviewGasEstimate, chain: ChainMetadata) {
+  return `${gasEstimate.gasLimit} gas @ max ${gasEstimate.maxFeePerGasGwei} gwei (~${gasEstimate.gasCostNative} ${chain.nativeSymbol})`;
+}
+
+function buildApprovalSummary(
+  prepared: Pick<
+    PreparedTransfer,
+    "recipient" | "resolvedEnsName" | "token" | "chain" | "amount" | "gasEstimate"
+  >
+): ApprovalSummary {
+  return {
+    recipient: getRecipientLabel(prepared),
+    asset: prepared.token
+      ? `${prepared.token.symbol} (${prepared.token.address})`
+      : prepared.chain.nativeSymbol,
+    amount: `${prepared.amount} ${getAssetLabel(prepared)}`,
+    network: prepared.chain.name,
+    estimatedGas: formatApprovalEstimatedGas(prepared.gasEstimate, prepared.chain),
+  };
+}
+
+function buildPreviewFromPrepared(
+  prepared: PreparedTransfer,
+  overrides?: Partial<Pick<PreviewResult, "status" | "message" | "summary" | "error">>
+): PreviewResult {
+  const status =
+    overrides?.status ??
+    (prepared.approval.required
+      ? prepared.approval.state === "rejected"
+        ? "aborted"
+        : "awaiting_local_approval"
+      : "awaiting_confirmation");
+  const message =
+    overrides?.message ??
+    (status === "awaiting_local_approval"
+      ? "Local approval is required on this device before signing. Use the approval card to approve or reject the transfer."
+      : status === "aborted"
+        ? "Local approval was rejected. The transaction was not signed or broadcast."
+        : "Transaction prepared. Summarize it for the user, ask for explicit confirmation, and only call send_eoa_transfer after the user says yes.");
+
+  return {
+    kind: "transaction_preview",
+    status,
+    summary: overrides?.summary ?? buildSummary(prepared),
+    message,
+    confirmationId: prepared.confirmationId,
+    chain: prepared.chain,
+    sender: prepared.sender,
+    recipient: prepared.recipient,
+    recipientInput: prepared.recipientInput,
+    resolvedEnsName: prepared.resolvedEnsName,
+    asset: prepared.token
+      ? {
+          type: "ERC20",
+          symbol: prepared.token.symbol,
+          tokenAddress: prepared.token.address,
+        }
+      : {
+          type: "ETH",
+          symbol: prepared.chain.nativeSymbol,
+        },
+    amount: prepared.amount,
+    balance: prepared.balance,
+    gasEstimate: prepared.gasEstimate,
+    approval: {
+      required: prepared.approval.required,
+      state: prepared.approval.state,
+      thresholdAmount: prepared.approval.thresholdAmount,
+      thresholdAssetSymbol: prepared.approval.thresholdAssetSymbol,
+      summary: prepared.approval.summary,
+    },
+    ...(overrides?.error ? { error: overrides.error } : {}),
+  };
+}
+
+function getApprovalThreshold(
+  prepared: Pick<PreparedTransfer, "token" | "chain" | "amountBaseUnits">,
+  approvalPolicy: EoaApprovalPolicy
+): { thresholdAmount: string; thresholdBaseUnits: bigint; thresholdAssetSymbol: string } | ToolError {
+  const thresholdAmount = prepared.token
+    ? approvalPolicy.erc20Threshold
+    : approvalPolicy.nativeThreshold;
+  const thresholdAssetSymbol = getAssetLabel(prepared);
+
+  try {
+    return {
+      thresholdAmount,
+      thresholdBaseUnits: prepared.token
+        ? parseUnits(thresholdAmount, prepared.token.decimals)
+        : parseEther(thresholdAmount),
+      thresholdAssetSymbol,
+    };
+  } catch {
+    return {
+      error: `Invalid local approval threshold for ${thresholdAssetSymbol}. Update the approval policy in settings.`,
+    };
+  }
+}
+
+function buildApprovalRequirement(
+  prepared: Pick<
+    PreparedTransfer,
+    "token" | "chain" | "amountBaseUnits" | "recipient" | "resolvedEnsName" | "amount" | "gasEstimate"
+  >,
+  approvalPolicy: EoaApprovalPolicy
+): PreparedTransferApproval | ToolError {
+  const summary = buildApprovalSummary(prepared);
+  if (!approvalPolicy.enabled) {
+    return {
+      required: false,
+      state: "not_required",
+      summary,
+    };
+  }
+
+  const threshold = getApprovalThreshold(prepared, approvalPolicy);
+  if (hasToolError(threshold)) {
+    return threshold;
+  }
+
+  const required = prepared.amountBaseUnits > threshold.thresholdBaseUnits;
+  return {
+    required,
+    state: required ? "pending" : "not_required",
+    thresholdAmount: threshold.thresholdAmount,
+    thresholdAssetSymbol: threshold.thresholdAssetSymbol,
+    summary,
+  };
+}
+
+function getPreparedTransferOrError(
+  confirmationId: string
+): { prepared: PreparedTransfer } | { error: PreviewResult } {
+  cleanupPreparedTransfers();
+  const prepared = preparedTransfers.get(confirmationId);
+  if (!prepared || prepared.expiresAt <= Date.now()) {
+    return {
+      error: buildPreviewError(
+        "The prepared transaction expired or was not found. Run prepare_eoa_transfer again.",
+        fallbackChainMetadata
+      ),
+    } as const;
+  }
+
+  return { prepared } as const;
+}
+
+function markPreparedTransferApproved(
+  confirmationId: string
+): PreparedTransfer | PreviewResult {
+  const lookup = getPreparedTransferOrError(confirmationId);
+  if ("error" in lookup) {
+    return lookup.error;
+  }
+
+  const { prepared } = lookup;
+  if (!prepared.approval.required) {
+    return prepared;
+  }
+
+  if (prepared.approval.state === "rejected") {
+    return buildPreviewFromPrepared(prepared, {
+      status: "aborted",
+    });
+  }
+
+  prepared.approval.state = "approved";
+  return prepared;
+}
+
+export function rejectPreparedEoaTransfer(confirmationId: string): PreviewResult {
+  const lookup = getPreparedTransferOrError(confirmationId);
+  if ("error" in lookup) {
+    return lookup.error;
+  }
+
+  const { prepared } = lookup;
+  prepared.approval.state = prepared.approval.required ? "rejected" : "not_required";
+  return buildPreviewFromPrepared(prepared, {
+    status: "aborted",
+  });
+}
+
 async function prepareTransfer(
   input: TransferInput,
   network: NetworkConfig,
-  eoaPrivateKey?: string
+  walletConfig: EoaWalletConfig
 ) {
   cleanupPreparedTransfers();
   const { publicClient, ensClient, chainMetadata } =
     createEthereumContext(network);
 
-  const signer = getSignerPrivateKey(eoaPrivateKey);
+  const signer = getSignerPrivateKey(walletConfig.eoaPrivateKey);
   if (hasToolError(signer)) {
     return {
       ok: false,
@@ -517,6 +760,35 @@ async function prepareTransfer(
     } as const;
   }
 
+  const gasEstimate: PreviewGasEstimate = {
+    gasLimit: estimatedGas.toString(),
+    maxFeePerGasGwei: formatGwei(getFeePerGas(fees)) ?? "0",
+    maxPriorityFeePerGasGwei: formatGwei(fees.maxPriorityFeePerGas),
+    gasCostNative: formatEther(estimatedGas * getFeePerGas(fees)),
+  };
+  const balance: PreviewBalance = {
+    asset: chainMetadata.nativeSymbol,
+    amount: formatEther(nativeBalance),
+  };
+  const approval = buildApprovalRequirement(
+    {
+      token,
+      chain: chainMetadata,
+      amountBaseUnits,
+      recipient: recipient.address,
+      resolvedEnsName: recipient.resolvedEnsName,
+      amount: amountText,
+      gasEstimate,
+    },
+    walletConfig.approvalPolicy
+  );
+  if (hasToolError(approval)) {
+    return {
+      ok: false,
+      result: buildPreviewError(approval.error, chainMetadata),
+    } as const;
+  }
+
   const prepared: PreparedTransfer = {
     confirmationId: crypto.randomUUID(),
     expiresAt: Date.now() + PREPARED_TRANSFER_TTL_MS,
@@ -532,46 +804,21 @@ async function prepareTransfer(
     value,
     data,
     gasLimitOverride: gasLimitOverride?.gasLimit,
+    balance,
+    gasEstimate,
+    approval,
   };
 
   preparedTransfers.set(prepared.confirmationId, prepared);
 
   return {
     ok: true,
-    preview: {
-      kind: "transaction_preview",
-      status: "awaiting_confirmation",
-      summary: buildSummary(prepared),
-      message:
-        "Transaction prepared. Summarize it for the user, ask for explicit confirmation, and only call send_eoa_transfer after the user says yes.",
-      confirmationId: prepared.confirmationId,
-      chain: prepared.chain,
-      sender: prepared.sender,
-      recipient: prepared.recipient,
-      recipientInput: prepared.recipientInput,
-      resolvedEnsName: prepared.resolvedEnsName,
-      asset: prepared.token
-        ? {
-            type: "ERC20",
-            symbol: prepared.token.symbol,
-            tokenAddress: prepared.token.address,
-          }
-        : {
-            type: "ETH",
-            symbol: prepared.chain.nativeSymbol,
-          },
-      amount: prepared.amount,
-      balance: {
-        asset: prepared.chain.nativeSymbol,
-        amount: formatEther(nativeBalance),
-      },
-      gasEstimate: {
-        gasLimit: estimatedGas.toString(),
-        maxFeePerGasGwei: formatGwei(getFeePerGas(fees)) ?? "0",
-        maxPriorityFeePerGasGwei: formatGwei(fees.maxPriorityFeePerGas),
-        gasCostNative: formatEther(estimatedGas * getFeePerGas(fees)),
-      },
-    } satisfies PreviewResult,
+    preview: buildPreviewFromPrepared(prepared, {
+      status: approval.required ? "awaiting_local_approval" : "awaiting_confirmation",
+      message: approval.required
+        ? "Local approval is required on this device before signing. Show the exact summary and direct the user to approve or reject it in the approval card."
+        : undefined,
+    }),
   } as const;
 }
 
@@ -745,9 +992,270 @@ function buildSignedTransactionRequest(
   };
 }
 
+export async function* executePreparedEoaTransfer(
+  confirmationId: string,
+  eoaPrivateKey?: string
+) {
+  const lookup = getPreparedTransferOrError(confirmationId);
+  if ("error" in lookup) {
+    yield lookup.error;
+    return;
+  }
+
+  const { prepared } = lookup;
+  if (prepared.approval.required) {
+    if (prepared.approval.state === "rejected") {
+      yield buildPreviewFromPrepared(prepared, {
+        status: "aborted",
+      });
+      return;
+    }
+
+    if (prepared.approval.state !== "approved") {
+      yield buildPreviewFromPrepared(prepared, {
+        status: "awaiting_local_approval",
+      });
+      return;
+    }
+  }
+
+  const signer = getSignerPrivateKey(eoaPrivateKey);
+  if (hasToolError(signer)) {
+    yield buildPreviewError(signer.error, prepared.chain);
+    return;
+  }
+
+  const account = privateKeyToAccount(signer.privateKey);
+  if (getAddress(account.address) !== prepared.sender) {
+    yield buildPreviewError(
+      "The configured EOA signer changed after this transfer was prepared. Prepare the transfer again before sending.",
+      prepared.chain
+    );
+    return;
+  }
+
+  preparedTransfers.delete(confirmationId);
+
+  const { publicClient, chain } = createEthereumContext(prepared.network);
+  const walletClient = createWalletClient({
+    account,
+    ...(chain ? { chain } : {}),
+    transport: http(prepared.network.rpcUrl),
+  });
+  const base = makeProgressBase(prepared);
+
+  yield {
+    ...base,
+    status: "estimating_gas",
+    message: "Estimating gas.",
+    steps: buildSteps({
+      estimate: { status: "in_progress", detail: "Fetching gas estimate…" },
+    }),
+  } satisfies ProgressResult;
+
+  try {
+    const { fees, gasLimit, nonce } = await buildSendPlan(prepared, publicClient);
+
+    yield {
+      ...base,
+      status: "building",
+      message: "Gas estimated. Building the transaction request.",
+      steps: buildSteps({
+        estimate: {
+          status: "complete",
+          detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
+            getFeePerGas(fees)
+          )} gwei`,
+        },
+        build: {
+          status: "in_progress",
+          detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
+        },
+      }),
+    } satisfies ProgressResult;
+
+    const request = buildSignedTransactionRequest(
+      prepared,
+      nonce,
+      gasLimit,
+      fees,
+      chain
+    );
+
+    yield {
+      ...base,
+      status: "signing",
+      message: "Transaction built. Signing with the configured EOA.",
+      steps: buildSteps({
+        estimate: {
+          status: "complete",
+          detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
+            getFeePerGas(fees)
+          )} gwei`,
+        },
+        build: {
+          status: "complete",
+          detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
+        },
+        sign: { status: "in_progress", detail: "Signing locally…" },
+      }),
+    } satisfies ProgressResult;
+
+    const serializedTransaction = await walletClient.signTransaction(request);
+
+    yield {
+      ...base,
+      status: "broadcasting",
+      message: "Signed. Broadcasting the raw transaction.",
+      steps: buildSteps({
+        estimate: {
+          status: "complete",
+          detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
+            getFeePerGas(fees)
+          )} gwei`,
+        },
+        build: {
+          status: "complete",
+          detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
+        },
+        sign: { status: "complete", detail: "Signed successfully." },
+        broadcast: {
+          status: "in_progress",
+          detail: "Submitting to the RPC…",
+        },
+      }),
+    } satisfies ProgressResult;
+
+    const txHash = await publicClient.sendRawTransaction({
+      serializedTransaction,
+    });
+    const explorerUrl = getExplorerTxUrl(txHash, prepared.network);
+
+    yield {
+      ...base,
+      status: "waiting_for_confirmation",
+      message: "Broadcast complete. Waiting for the transaction receipt.",
+      txHash,
+      explorerUrl,
+      steps: buildSteps({
+        estimate: {
+          status: "complete",
+          detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
+            getFeePerGas(fees)
+          )} gwei`,
+        },
+        build: {
+          status: "complete",
+          detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
+        },
+        sign: { status: "complete", detail: "Signed successfully." },
+        broadcast: { status: "complete", detail: txHash },
+        confirm: {
+          status: "in_progress",
+          detail: "Waiting for 1 confirmation…",
+        },
+      }),
+    } satisfies ProgressResult;
+
+    const receipt = await publicClient.waitForTransactionReceipt({
+      hash: txHash,
+    });
+
+    const receiptData = {
+      status: receipt.status === "success" ? "success" : "reverted",
+      blockNumber: Number(receipt.blockNumber),
+      gasUsed: receipt.gasUsed.toString(),
+      effectiveGasPriceGwei: formatGwei(receipt.effectiveGasPrice),
+      gasCostNative: formatEther(receipt.gasUsed * receipt.effectiveGasPrice),
+    } as const;
+
+    if (receipt.status === "success") {
+      yield {
+        ...base,
+        status: "confirmed",
+        message: `Confirmed in block ${receipt.blockNumber.toString()}.`,
+        txHash,
+        explorerUrl,
+        receipt: receiptData,
+        steps: buildSteps({
+          estimate: {
+            status: "complete",
+            detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
+              getFeePerGas(fees)
+            )} gwei`,
+          },
+          build: {
+            status: "complete",
+            detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
+          },
+          sign: { status: "complete", detail: "Signed successfully." },
+          broadcast: { status: "complete", detail: txHash },
+          confirm: {
+            status: "complete",
+            detail: `Confirmed in block ${receipt.blockNumber.toString()}`,
+          },
+        }),
+      } satisfies ProgressResult;
+      return;
+    }
+
+    const revertReason = await getRevertReason(prepared, publicClient);
+    yield {
+      ...base,
+      status: "reverted",
+      message: revertReason
+        ? `Transaction reverted: ${revertReason}`
+        : "Transaction reverted on-chain.",
+      txHash,
+      explorerUrl,
+      receipt: receiptData,
+      revertReason,
+      steps: buildSteps({
+        estimate: {
+          status: "complete",
+          detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
+            getFeePerGas(fees)
+          )} gwei`,
+        },
+        build: {
+          status: "complete",
+          detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
+        },
+        sign: { status: "complete", detail: "Signed successfully." },
+        broadcast: { status: "complete", detail: txHash },
+        confirm: { status: "error", detail: revertReason ?? "Reverted" },
+      }),
+    } satisfies ProgressResult;
+  } catch (error) {
+    const message = extractErrorMessage(error);
+    yield {
+      ...base,
+      status: "error",
+      message,
+      error: message,
+      steps: buildSteps({
+        estimate: { status: "error", detail: message },
+      }),
+    } satisfies ProgressResult;
+  }
+}
+
+export async function* approveAndSendPreparedEoaTransfer(
+  confirmationId: string,
+  eoaPrivateKey?: string
+) {
+  const approved = markPreparedTransferApproved(confirmationId);
+  if ("kind" in approved) {
+    yield approved;
+    return;
+  }
+
+  yield* executePreparedEoaTransfer(confirmationId, eoaPrivateKey);
+}
+
 export function createEoaTransferTools(
   networkConfig: NetworkConfig,
-  eoaPrivateKey?: string
+  walletConfig: EoaWalletConfig
 ) {
   const chainMetadata = createEthereumContext(networkConfig).chainMetadata;
 
@@ -755,8 +1263,8 @@ export function createEoaTransferTools(
     description:
       "Prepare an ETH or ERC-20 transfer from the configured EOA. Always call this first for send requests so you can show gas estimates and ask the user to confirm before signing.",
     inputSchema: transferInputSchema,
-    execute: async (input) => {
-      const result = await prepareTransfer(input, networkConfig, eoaPrivateKey);
+    execute: async (input: TransferInput) => {
+      const result = await prepareTransfer(input, networkConfig, walletConfig);
       return result.ok ? result.preview : result.result;
     },
   });
@@ -771,237 +1279,33 @@ export function createEoaTransferTools(
           "The confirmationId returned by prepare_eoa_transfer for the exact transaction the user approved."
         ),
     }),
-    execute: async function* ({ confirmationId }) {
-      cleanupPreparedTransfers();
-
-      const prepared = preparedTransfers.get(confirmationId);
-      if (!prepared || prepared.expiresAt <= Date.now()) {
-        yield {
-          kind: "transaction_error",
-          status: "error",
-          summary: "Prepared transaction not found",
-          message:
-            "The prepared transaction expired or was not found. Run prepare_eoa_transfer again.",
-          chain: chainMetadata,
-          error:
-            "The prepared transaction expired or was not found. Run prepare_eoa_transfer again.",
-        } satisfies PreviewResult;
-        return;
-      }
-
-      preparedTransfers.delete(confirmationId);
-
-      const signer = getSignerPrivateKey(eoaPrivateKey);
-      if (hasToolError(signer)) {
-        yield buildPreviewError(signer.error, prepared.chain);
-        return;
-      }
-
-      const { publicClient, chain } = createEthereumContext(prepared.network);
-      const account = privateKeyToAccount(signer.privateKey);
-      const walletClient = createWalletClient({
-        account,
-        ...(chain ? { chain } : {}),
-        transport: http(prepared.network.rpcUrl),
-      });
-      const base = makeProgressBase(prepared);
-
-      yield {
-        ...base,
-        status: "estimating_gas",
-        message: "Estimating gas.",
-        steps: buildSteps({
-          estimate: { status: "in_progress", detail: "Fetching gas estimate…" },
-        }),
-      } satisfies ProgressResult;
-
-      try {
-        const { fees, gasLimit, nonce } = await buildSendPlan(
-          prepared,
-          publicClient
-        );
-
-        yield {
-          ...base,
-          status: "building",
-          message: "Gas estimated. Building the transaction request.",
-          steps: buildSteps({
-            estimate: {
-              status: "complete",
-              detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
-                getFeePerGas(fees)
-              )} gwei`,
-            },
-            build: {
-              status: "in_progress",
-              detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
-            },
-          }),
-        } satisfies ProgressResult;
-
-        const request = buildSignedTransactionRequest(
-          prepared,
-          nonce,
-          gasLimit,
-          fees,
-          chain
-        );
-
-        yield {
-          ...base,
-          status: "signing",
-          message: "Transaction built. Signing with the configured EOA.",
-          steps: buildSteps({
-            estimate: {
-              status: "complete",
-              detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
-                getFeePerGas(fees)
-              )} gwei`,
-            },
-            build: {
-              status: "complete",
-              detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
-            },
-            sign: { status: "in_progress", detail: "Signing locally…" },
-          }),
-        } satisfies ProgressResult;
-
-        const serializedTransaction = await walletClient.signTransaction(request);
-
-        yield {
-          ...base,
-          status: "broadcasting",
-          message: "Signed. Broadcasting the raw transaction.",
-          steps: buildSteps({
-            estimate: {
-              status: "complete",
-              detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
-                getFeePerGas(fees)
-              )} gwei`,
-            },
-            build: {
-              status: "complete",
-              detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
-            },
-            sign: { status: "complete", detail: "Signed successfully." },
-            broadcast: {
-              status: "in_progress",
-              detail: "Submitting to the RPC…",
-            },
-          }),
-        } satisfies ProgressResult;
-
-        const txHash = await publicClient.sendRawTransaction({
-          serializedTransaction,
-        });
-        const explorerUrl = getExplorerTxUrl(txHash, prepared.network);
-
-        yield {
-          ...base,
-          status: "waiting_for_confirmation",
-          message: "Broadcast complete. Waiting for the transaction receipt.",
-          txHash,
-          explorerUrl,
-          steps: buildSteps({
-            estimate: {
-              status: "complete",
-              detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
-                getFeePerGas(fees)
-              )} gwei`,
-            },
-            build: {
-              status: "complete",
-              detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
-            },
-            sign: { status: "complete", detail: "Signed successfully." },
-            broadcast: { status: "complete", detail: txHash },
-            confirm: {
-              status: "in_progress",
-              detail: "Waiting for 1 confirmation…",
-            },
-          }),
-        } satisfies ProgressResult;
-
-        const receipt = await publicClient.waitForTransactionReceipt({
-          hash: txHash,
-        });
-
-        const receiptData = {
-          status: receipt.status === "success" ? "success" : "reverted",
-          blockNumber: Number(receipt.blockNumber),
-          gasUsed: receipt.gasUsed.toString(),
-          effectiveGasPriceGwei: formatGwei(receipt.effectiveGasPrice),
-          gasCostNative: formatEther(receipt.gasUsed * receipt.effectiveGasPrice),
-        } as const;
-
-        if (receipt.status === "success") {
-          yield {
-            ...base,
-            status: "confirmed",
-            message: `Confirmed in block ${receipt.blockNumber.toString()}.`,
-            txHash,
-            explorerUrl,
-            receipt: receiptData,
-            steps: buildSteps({
-              estimate: {
-                status: "complete",
-                detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
-                  getFeePerGas(fees)
-                )} gwei`,
-              },
-              build: {
-                status: "complete",
-                detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
-              },
-              sign: { status: "complete", detail: "Signed successfully." },
-              broadcast: { status: "complete", detail: txHash },
-              confirm: {
-                status: "complete",
-                detail: `Confirmed in block ${receipt.blockNumber.toString()}`,
-              },
-            }),
-          } satisfies ProgressResult;
-          return;
+    execute: async function* ({
+      confirmationId,
+    }: {
+      confirmationId: string;
+    }) {
+      for await (const update of executePreparedEoaTransfer(
+        confirmationId,
+        walletConfig.eoaPrivateKey
+      )) {
+        if (!update) {
+          continue;
         }
 
-        const revertReason = await getRevertReason(prepared, publicClient);
-        yield {
-          ...base,
-          status: "reverted",
-          message: revertReason
-            ? `Transaction reverted: ${revertReason}`
-            : "Transaction reverted on-chain.",
-          txHash,
-          explorerUrl,
-          receipt: receiptData,
-          revertReason,
-          steps: buildSteps({
-            estimate: {
-              status: "complete",
-              detail: `Gas: ${gasLimit.toString()} @ ~${formatGwei(
-                getFeePerGas(fees)
-              )} gwei`,
-            },
-            build: {
-              status: "complete",
-              detail: `Nonce ${nonce}, chain ID ${prepared.network.chainId}`,
-            },
-            sign: { status: "complete", detail: "Signed successfully." },
-            broadcast: { status: "complete", detail: txHash },
-            confirm: { status: "error", detail: revertReason ?? "Reverted" },
-          }),
-        } satisfies ProgressResult;
-      } catch (error) {
-        const message = extractErrorMessage(error);
-        yield {
-          ...base,
-          status: "error",
-          message,
-          error: message,
-          steps: buildSteps({
-            estimate: { status: "error", detail: message },
-          }),
-        } satisfies ProgressResult;
+        if (
+          update.kind === "transaction_error" &&
+          update.error ===
+            "The prepared transaction expired or was not found. Run prepare_eoa_transfer again."
+        ) {
+          const missingPreparedError: PreviewResult = {
+            ...update,
+            chain: chainMetadata,
+          };
+          yield missingPreparedError;
+          continue;
+        }
+
+        yield update;
       }
     },
   });

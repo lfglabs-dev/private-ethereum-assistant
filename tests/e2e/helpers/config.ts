@@ -45,6 +45,7 @@ export function createE2ERuntimeConfig(
     network: networkConfig,
     wallet: {
       eoaPrivateKey,
+      approvalPolicy: runtimeConfig.wallet.approvalPolicy,
     },
     railgun: {
       ...runtimeConfig.railgun,

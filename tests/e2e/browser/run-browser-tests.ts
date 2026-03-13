@@ -118,6 +118,8 @@ async function ensureServer() {
       ...process.env,
       APP_MODE: "developer",
       NEXT_PUBLIC_APP_MODE: "developer",
+      EOA_LOCAL_APPROVAL_NATIVE_THRESHOLD:
+        process.env.E2E_LOCAL_APPROVAL_NATIVE_THRESHOLD ?? "0.00001",
       RAILGUN_SHIELD_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
       RAILGUN_TRANSFER_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
       RAILGUN_UNSHIELD_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
@@ -173,6 +175,10 @@ async function expectText(selector: string, expected: string[]) {
 
 async function fill(selector: string, value: string) {
   await runAgentBrowser(["fill", selector, value]);
+}
+
+async function click(selector: string) {
+  await runAgentBrowser(["click", selector]);
 }
 
 async function submitMessage(message: string) {
@@ -332,6 +338,61 @@ async function main() {
       await waitForAssistantAnswer(["confirm"]);
     },
     "transfer-preview.png",
+  );
+
+  await runTest(
+    "High-value transfers require local approval in chat",
+    async () => {
+      await ensureDeveloperModeReady();
+      await submitMessage(`Send 0.00002 ETH to ${E2E_WALLET_ADDRESS}`);
+      await waitForText('[data-testid="result-local-approval"]', [
+        "Local Approval Required",
+        "Recipient:",
+        "Amount:",
+        "Estimated gas:",
+      ]);
+      await waitForAssistantAnswer(["approval"]);
+    },
+    "local-approval-required.png",
+  );
+
+  await runTest(
+    "Local approval approve path completes the send",
+    async () => {
+      await ensureDeveloperModeReady();
+      await submitMessage(`Send 0.00002 ETH to ${E2E_WALLET_ADDRESS}`);
+      await waitForText('[data-testid="result-local-approval"]', [
+        "Local Approval Required",
+      ]);
+      await click('[data-testid="local-approval-approve"]');
+      await waitForText('[data-testid="result-transaction-progress"]', [
+        "Confirmed",
+        "Tx hash:",
+      ]);
+    },
+    "local-approval-approve.png",
+  );
+
+  await runTest(
+    "Local approval reject path aborts without broadcast",
+    async () => {
+      await ensureDeveloperModeReady();
+      await submitMessage(`Send 0.00002 ETH to ${E2E_WALLET_ADDRESS}`);
+      await waitForText('[data-testid="result-local-approval"]', [
+        "Local Approval Required",
+      ]);
+      await click('[data-testid="local-approval-reject"]');
+      await waitForText('[data-testid="result-transaction-aborted"]', [
+        "Transfer Aborted",
+        "not signed or broadcast",
+      ]);
+
+      const bodyText = await getText("body");
+      if (bodyText.includes("Tx hash:")) {
+        throw new Error(`Reject flow should not broadcast a transaction.\n${bodyText}`);
+      }
+    },
+    "local-approval-reject.png",
   );
 
   await runTest(

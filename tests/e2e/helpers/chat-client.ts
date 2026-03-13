@@ -66,6 +66,8 @@ export async function ensureChatServer() {
       ...process.env,
       APP_MODE: "developer",
       NEXT_PUBLIC_APP_MODE: "developer",
+      EOA_LOCAL_APPROVAL_NATIVE_THRESHOLD:
+        process.env.E2E_LOCAL_APPROVAL_NATIVE_THRESHOLD ?? "0.00001",
       RAILGUN_SHIELD_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
       RAILGUN_TRANSFER_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
       RAILGUN_UNSHIELD_APPROVAL_THRESHOLD: RAILGUN_APPROVAL_TEST_THRESHOLD,
@@ -120,6 +122,7 @@ export function createOpenRouterRuntimeConfig(
     network: networkConfig,
     wallet: {
       eoaPrivateKey: getWalletPrivateKey(),
+      approvalPolicy: runtimeConfig.wallet.approvalPolicy,
     },
   }
 }

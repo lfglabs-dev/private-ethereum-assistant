@@ -11,6 +11,7 @@ import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
 import { ToolResultCard } from "@/components/chat/tool-result-card"
 import { MessageActions } from "@/components/chat/message-actions"
 import type { DebugLogEntry } from "@/lib/chat-stream"
+import type { RuntimeConfig } from "@/lib/runtime-config"
 
 type Part = { type: string; [key: string]: unknown }
 
@@ -61,6 +62,7 @@ interface ChatMessageProps {
   showTrace?: boolean
   canToggleTrace?: boolean
   onToggleTrace?: () => void
+  runtimeConfig?: RuntimeConfig
 }
 
 export function ChatMessage({
@@ -70,6 +72,7 @@ export function ChatMessage({
   showTrace = false,
   canToggleTrace = false,
   onToggleTrace,
+  runtimeConfig,
 }: ChatMessageProps) {
   const isUser = message.role === "user"
   const parts = message.parts as Part[] | undefined
@@ -156,6 +159,7 @@ export function ChatMessage({
                       <ToolResultCard
                         result={toolInfo.output}
                         preliminary={toolInfo.preliminary}
+                        runtimeConfig={runtimeConfig}
                       />
                     ) : toolInfo.state === "output-error" ? (
                       <ToolResultCard
@@ -165,6 +169,7 @@ export function ChatMessage({
                           error: toolInfo.errorText || "Tool execution failed.",
                           toolName: toolInfo.toolName,
                         }}
+                        runtimeConfig={runtimeConfig}
                       />
                     ) : (
                       <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">

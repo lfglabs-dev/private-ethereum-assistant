@@ -80,6 +80,11 @@ export const runtimeConfigSchema = z.object({
   }),
   wallet: z.object({
     eoaPrivateKey: privateKeySchema,
+    approvalPolicy: z.object({
+      enabled: z.boolean(),
+      nativeThreshold: tokenAmountSchema,
+      erc20Threshold: tokenAmountSchema,
+    }),
   }),
   railgun: z.object({
     networkLabel: z.string().trim().min(1, "Enter a Railgun network label."),
@@ -127,6 +132,11 @@ export type RuntimeConfigDraft = {
   };
   wallet: {
     eoaPrivateKey: string;
+    approvalPolicy: {
+      enabled: boolean;
+      nativeThreshold: string;
+      erc20Threshold: string;
+    };
   };
   railgun: {
     networkLabel: string;
@@ -202,6 +212,11 @@ export function createDefaultRuntimeConfig(): RuntimeConfig {
     },
     wallet: {
       eoaPrivateKey: "",
+      approvalPolicy: {
+        enabled: true,
+        nativeThreshold: config.ethereum.localApprovalNativeThreshold,
+        erc20Threshold: config.ethereum.localApprovalErc20Threshold,
+      },
     },
     railgun: {
       networkLabel: config.railgun.networkLabel,
@@ -233,6 +248,7 @@ export function createDeveloperDisplayRuntimeConfig(): RuntimeConfig {
     },
     network: getArbitrumNetworkConfig(),
     wallet: {
+      ...runtimeConfig.wallet,
       eoaPrivateKey: DEVELOPER_MODE_PLACEHOLDER_PRIVATE_KEY,
     },
   };
@@ -249,6 +265,7 @@ export function createDeveloperRuntimeConfig(): RuntimeConfig {
       signerPrivateKey: developerWalletPrivateKey,
     },
     wallet: {
+      ...displayRuntimeConfig.wallet,
       eoaPrivateKey: developerWalletPrivateKey,
     },
   };
@@ -289,6 +306,11 @@ export function createRuntimeConfigDraft(
     },
     wallet: {
       eoaPrivateKey: runtimeConfig.wallet.eoaPrivateKey,
+      approvalPolicy: {
+        enabled: runtimeConfig.wallet.approvalPolicy.enabled,
+        nativeThreshold: runtimeConfig.wallet.approvalPolicy.nativeThreshold,
+        erc20Threshold: runtimeConfig.wallet.approvalPolicy.erc20Threshold,
+      },
     },
     railgun: {
       networkLabel: runtimeConfig.railgun.networkLabel,
@@ -330,6 +352,11 @@ export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfi
     },
     wallet: {
       eoaPrivateKey: draft.wallet.eoaPrivateKey,
+      approvalPolicy: {
+        enabled: draft.wallet.approvalPolicy.enabled,
+        nativeThreshold: draft.wallet.approvalPolicy.nativeThreshold,
+        erc20Threshold: draft.wallet.approvalPolicy.erc20Threshold,
+      },
     },
     railgun: {
       networkLabel: draft.railgun.networkLabel,

@@ -167,6 +167,27 @@ describe("LLM tool routing E2E", () => {
     expect(result.text.toLowerCase()).toMatch(/confirm|prepared|gas/)
   })
 
+  test("LLM requires local approval for a high-value ETH transfer", async () => {
+    const result = await sendChatPrompt({
+      prompt: "Send 0.00002 ETH to vitalik.eth.",
+      runtimeConfig,
+    })
+
+    const previewCall = findToolCall(result.toolCalls, "prepare_eoa_transfer")
+    expect(isRecord(previewCall.input) ? previewCall.input.to : undefined).toBe("vitalik.eth")
+    expect(isRecord(previewCall.input) ? previewCall.input.amount : undefined).toBe("0.00002")
+    expect(result.toolCalls.some((entry) => entry.toolName === "send_eoa_transfer")).toBe(false)
+
+    if (!isRecord(previewCall.output)) {
+      throw new Error("Expected prepare_eoa_transfer to return a preview payload.")
+    }
+
+    expect(previewCall.output.kind).toBe("transaction_preview")
+    expect(previewCall.output.status).toBe("awaiting_local_approval")
+    expectTextToContain(result.text, ["0.00002 ETH", "Arbitrum", "gas"])
+    expect(result.text.toLowerCase()).toMatch(/approval|approve/)
+  })
+
   test("LLM queries Safe info", async () => {
     const result = await sendChatPrompt({
       prompt: "Show me info about our Safe wallet.",

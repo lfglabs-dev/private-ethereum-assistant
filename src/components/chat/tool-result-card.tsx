@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   AlertCircle,
   ArrowUpRight,
@@ -18,15 +18,17 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import type { RuntimeConfig } from "@/lib/runtime-config"
 
 type ToolResultCardProps = {
   result: unknown
   preliminary?: boolean
+  runtimeConfig?: RuntimeConfig
 }
 
 type TransactionPreviewData = {
   kind: "transaction_preview"
-  status: "awaiting_confirmation"
+  status: "awaiting_confirmation" | "awaiting_local_approval" | "aborted"
   summary: string
   message: string
   chain: { id: number; name: string; nativeSymbol: string }
@@ -43,6 +45,19 @@ type TransactionPreviewData = {
     maxFeePerGasGwei: string
     maxPriorityFeePerGasGwei?: string
     gasCostNative: string
+  }
+  approval?: {
+    required: boolean
+    state: "not_required" | "pending" | "approved" | "rejected"
+    thresholdAmount?: string
+    thresholdAssetSymbol?: string
+    summary: {
+      recipient: string
+      asset: string
+      amount: string
+      network: string
+      estimatedGas: string
+    }
   }
 }
 
@@ -620,25 +635,70 @@ function TransactionErrorResult({ data }: { data: TransactionErrorData }) {
 }
 
 function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
+  const isLocalApproval = data.status === "awaiting_local_approval"
+  const isAborted = data.status === "aborted"
+  const approvalSummary = data.approval?.summary
+
   return (
     <Card
-      data-testid="result-transaction-preview"
+      data-testid={isLocalApproval ? "result-local-approval" : isAborted ? "result-transaction-aborted" : "result-transaction-preview"}
       size="sm"
-      className="border-amber-500/20 bg-amber-500/5"
+      className={
+        isAborted
+          ? "border-destructive/20 bg-destructive/5"
+          : isLocalApproval
+            ? "border-orange-500/20 bg-orange-500/5"
+            : "border-amber-500/20 bg-amber-500/5"
+      }
     >
       <CardHeader className="pb-0">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Wallet className="size-4 text-amber-500" />
-            <CardTitle className="text-sm text-amber-500">Ready to Confirm</CardTitle>
+            <Wallet className={`size-4 ${isAborted ? "text-destructive" : isLocalApproval ? "text-orange-500" : "text-amber-500"}`} />
+            <CardTitle className={`text-sm ${isAborted ? "text-destructive" : isLocalApproval ? "text-orange-600" : "text-amber-500"}`}>
+              {isAborted ? "Transfer Aborted" : isLocalApproval ? "Local Approval Required" : "Ready to Confirm"}
+            </CardTitle>
           </div>
-          <Badge variant="outline" className="border-amber-500/30 text-amber-600">
-            Awaiting confirmation
+          <Badge
+            variant="outline"
+            className={
+              isAborted
+                ? "border-destructive/30 text-destructive"
+                : isLocalApproval
+                  ? "border-orange-500/30 text-orange-600"
+                  : "border-amber-500/30 text-amber-600"
+            }
+          >
+            {isAborted ? "Rejected" : isLocalApproval ? "Awaiting local approval" : "Awaiting confirmation"}
           </Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p>{data.summary}</p>
+        {approvalSummary ? (
+          <div className="space-y-2 rounded-md bg-background/60 p-3" data-testid="approval-summary">
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Recipient:</span>
+              <span className="break-all">{approvalSummary.recipient}</span>
+            </div>
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Asset:</span>
+              <span className="break-all">{approvalSummary.asset}</span>
+            </div>
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Amount:</span>
+              <span>{approvalSummary.amount}</span>
+            </div>
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Network:</span>
+              <span>{approvalSummary.network}</span>
+            </div>
+            <div className="flex gap-2">
+              <span className="text-muted-foreground">Estimated gas:</span>
+              <span>{approvalSummary.estimatedGas}</span>
+            </div>
+          </div>
+        ) : null}
         <div className="space-y-1.5">
           <div className="flex gap-2">
             <span className="text-muted-foreground">Network:</span>
@@ -697,6 +757,14 @@ function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
             </div>
           )}
         </div>
+        {data.approval?.required && data.approval.thresholdAmount && data.approval.thresholdAssetSymbol ? (
+          <p className="text-xs text-muted-foreground">
+            Local approval threshold: {data.approval.thresholdAmount} {data.approval.thresholdAssetSymbol}
+          </p>
+        ) : null}
+        <p className={isAborted ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
+          {data.message}
+        </p>
       </CardContent>
     </Card>
   )
@@ -1102,6 +1170,55 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
   )
 }
 
+async function readJsonResponse(response: Response) {
+  const text = await response.text()
+  return text ? JSON.parse(text) : null
+}
+
+async function streamApprovalUpdates(
+  response: Response,
+  onUpdate: (value: unknown) => void,
+) {
+  if (!response.body) {
+    return
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+      onUpdate(JSON.parse(line))
+    }
+  }
+
+  if (buffer.trim()) {
+    onUpdate(JSON.parse(buffer))
+  }
+}
+
+function buildLocalApprovalError(
+  message: string,
+  data: TransactionPreviewData,
+): TransactionErrorData {
+  return {
+    kind: "transaction_error",
+    summary: "Local approval failed",
+    message,
+    error: message,
+    toolName: data.confirmationId,
+  }
+}
+
 function RailgunApprovalResult({ data }: { data: Record<string, unknown> }) {
   const [currentData, setCurrentData] = useState(data)
   const [decision, setDecision] = useState<"approve" | "reject" | null>(null)
@@ -1278,12 +1395,107 @@ function RailgunApprovalResult({ data }: { data: Record<string, unknown> }) {
   )
 }
 
-export function ToolResultCard({ result, preliminary }: ToolResultCardProps) {
-  if (!result || typeof result !== "object") return null
-  const data = result as Record<string, unknown>
+export function ToolResultCard({ result, preliminary, runtimeConfig }: ToolResultCardProps) {
+  const [liveResult, setLiveResult] = useState(result)
+  const [pendingAction, setPendingAction] = useState<"approve" | "reject" | null>(null)
+  const [isLocalOverride, setIsLocalOverride] = useState(false)
+
+  useEffect(() => {
+    if (!isLocalOverride) {
+      setLiveResult(result)
+    }
+  }, [isLocalOverride, result])
+
+  if (!liveResult || typeof liveResult !== "object") return null
+  const data = liveResult as Record<string, unknown>
+
+  const handleLocalApproval = async (
+    preview: TransactionPreviewData,
+    action: "approve" | "reject",
+  ) => {
+    if (!preview.confirmationId || pendingAction) {
+      return
+    }
+
+    setPendingAction(action)
+    setIsLocalOverride(true)
+    try {
+      const response = await fetch("/api/eoa-approval", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          confirmationId: preview.confirmationId,
+          runtimeConfig,
+        }),
+      })
+
+      if (!response.ok) {
+        const payload = await readJsonResponse(response)
+        const message =
+          typeof payload?.error === "string"
+            ? payload.error
+            : "Local approval failed."
+        setLiveResult(buildLocalApprovalError(message, preview))
+        return
+      }
+
+      if (action === "reject") {
+        setLiveResult(await readJsonResponse(response))
+        return
+      }
+
+      await streamApprovalUpdates(response, setLiveResult)
+    } catch (error) {
+      setLiveResult(
+        buildLocalApprovalError(
+          error instanceof Error ? error.message : "Local approval failed.",
+          preview,
+        ),
+      )
+    } finally {
+      setPendingAction(null)
+    }
+  }
 
   if ("kind" in data && data.kind === "transaction_preview") {
-    return <TransactionPreviewResult data={data as unknown as TransactionPreviewData} />
+    const previewData = data as unknown as TransactionPreviewData
+    const canApproveLocally =
+      previewData.status === "awaiting_local_approval" &&
+      previewData.approval?.required === true &&
+      previewData.approval.state !== "rejected" &&
+      Boolean(previewData.confirmationId)
+
+    return (
+      <div className="space-y-3">
+        <TransactionPreviewResult data={previewData} />
+        {canApproveLocally ? (
+          <div className="flex gap-2">
+            <Button
+              data-testid="local-approval-approve"
+              size="sm"
+              onClick={() => handleLocalApproval(previewData, "approve")}
+              disabled={pendingAction !== null}
+            >
+              {pendingAction === "approve" ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              Approve and send
+            </Button>
+            <Button
+              data-testid="local-approval-reject"
+              size="sm"
+              variant="outline"
+              onClick={() => handleLocalApproval(previewData, "reject")}
+              disabled={pendingAction !== null}
+            >
+              {pendingAction === "reject" ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              Reject
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    )
   }
   if ("kind" in data && data.kind === "transaction_progress") {
     return (

@@ -387,6 +387,7 @@ export function RuntimeConfigForm({
               onChange={(event) =>
                 onChange(
                   updateDraftSection(draft, "wallet", {
+                    ...draft.wallet,
                     eoaPrivateKey: event.target.value,
                   }),
                 )
@@ -394,6 +395,74 @@ export function RuntimeConfigForm({
               placeholder="0x..."
             />
           </label>
+
+          <label className="flex items-start gap-3 rounded-xl border bg-secondary/20 px-4 py-3">
+            <input
+              data-testid="runtime-approval-enabled"
+              type="checkbox"
+              checked={draft.wallet.approvalPolicy.enabled}
+              onChange={(event) =>
+                onChange(
+                  updateDraftSection(draft, "wallet", {
+                    ...draft.wallet,
+                    approvalPolicy: {
+                      ...draft.wallet.approvalPolicy,
+                      enabled: event.target.checked,
+                    },
+                  }),
+                )
+              }
+              className="mt-0.5 size-4 rounded border-input"
+            />
+            <div className="space-y-1">
+              <span className="block text-sm font-medium">Require local approval for high-value sends</span>
+              <p className="text-xs text-muted-foreground">
+                Transfers above the configured threshold must be approved in the local chat UI before signing.
+              </p>
+            </div>
+          </label>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">Native threshold</span>
+              <Input
+                data-testid="runtime-approval-native-threshold"
+                value={draft.wallet.approvalPolicy.nativeThreshold}
+                onChange={(event) =>
+                  onChange(
+                    updateDraftSection(draft, "wallet", {
+                      ...draft.wallet,
+                      approvalPolicy: {
+                        ...draft.wallet.approvalPolicy,
+                        nativeThreshold: event.target.value,
+                      },
+                    }),
+                  )
+                }
+                placeholder="0.5"
+              />
+            </label>
+
+            <label className="block space-y-1">
+              <span className="text-xs text-muted-foreground">ERC-20 threshold</span>
+              <Input
+                data-testid="runtime-approval-erc20-threshold"
+                value={draft.wallet.approvalPolicy.erc20Threshold}
+                onChange={(event) =>
+                  onChange(
+                    updateDraftSection(draft, "wallet", {
+                      ...draft.wallet,
+                      approvalPolicy: {
+                        ...draft.wallet.approvalPolicy,
+                        erc20Threshold: event.target.value,
+                      },
+                    }),
+                  )
+                }
+                placeholder="1000"
+              />
+            </label>
+          </div>
         </CardContent>
       </Card>
       ) : null}
