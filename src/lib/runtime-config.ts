@@ -22,6 +22,10 @@ export const appModeSchema = z.enum(["standard", "developer"]);
 
 const positiveIntegerSchema = z.coerce.number().int().positive();
 const nonNegativeIntegerSchema = z.coerce.number().int().nonnegative();
+const tokenAmountSchema = z
+  .string()
+  .trim()
+  .regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/, "Enter a non-negative token amount.");
 
 const addressSchema = z
   .string()
@@ -93,6 +97,9 @@ export const runtimeConfigSchema = z.object({
     walletCreationBlock: nonNegativeIntegerSchema,
     scanTimeoutMs: positiveIntegerSchema,
     pollingIntervalMs: positiveIntegerSchema,
+    shieldApprovalThreshold: tokenAmountSchema,
+    transferApprovalThreshold: tokenAmountSchema,
+    unshieldApprovalThreshold: tokenAmountSchema,
   }),
 });
 
@@ -132,6 +139,9 @@ export type RuntimeConfigDraft = {
     walletCreationBlock: string;
     scanTimeoutMs: string;
     pollingIntervalMs: string;
+    shieldApprovalThreshold: string;
+    transferApprovalThreshold: string;
+    unshieldApprovalThreshold: string;
   };
 };
 
@@ -204,6 +214,9 @@ export function createDefaultRuntimeConfig(): RuntimeConfig {
       walletCreationBlock: config.railgun.walletCreationBlock,
       scanTimeoutMs: config.railgun.scanTimeoutMs,
       pollingIntervalMs: config.railgun.pollingIntervalMs,
+      shieldApprovalThreshold: config.railgun.shieldApprovalThreshold,
+      transferApprovalThreshold: config.railgun.transferApprovalThreshold,
+      unshieldApprovalThreshold: config.railgun.unshieldApprovalThreshold,
     },
   } as RuntimeConfig;
 }
@@ -288,6 +301,9 @@ export function createRuntimeConfigDraft(
       walletCreationBlock: String(runtimeConfig.railgun.walletCreationBlock),
       scanTimeoutMs: String(runtimeConfig.railgun.scanTimeoutMs),
       pollingIntervalMs: String(runtimeConfig.railgun.pollingIntervalMs),
+      shieldApprovalThreshold: runtimeConfig.railgun.shieldApprovalThreshold,
+      transferApprovalThreshold: runtimeConfig.railgun.transferApprovalThreshold,
+      unshieldApprovalThreshold: runtimeConfig.railgun.unshieldApprovalThreshold,
     },
   };
 }
@@ -329,6 +345,9 @@ export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfi
       walletCreationBlock: draft.railgun.walletCreationBlock,
       scanTimeoutMs: draft.railgun.scanTimeoutMs,
       pollingIntervalMs: draft.railgun.pollingIntervalMs,
+      shieldApprovalThreshold: draft.railgun.shieldApprovalThreshold,
+      transferApprovalThreshold: draft.railgun.transferApprovalThreshold,
+      unshieldApprovalThreshold: draft.railgun.unshieldApprovalThreshold,
     },
   });
 }

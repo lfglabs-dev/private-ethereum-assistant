@@ -8,6 +8,15 @@ function getNumberEnv(name: string, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function getTokenAmountEnv(name: string, fallback: string) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    return fallback;
+  }
+
+  return /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value) ? value : fallback;
+}
+
 export const config = {
   llm: {
     baseURL: process.env.LLM_BASE_URL || "http://localhost:11434/v1",
@@ -36,5 +45,17 @@ export const config = {
     walletCreationBlock: Number(process.env.RAILGUN_WALLET_CREATION_BLOCK || "56109834"),
     scanTimeoutMs: Number(process.env.RAILGUN_SCAN_TIMEOUT_MS || "180000"),
     pollingIntervalMs: Number(process.env.RAILGUN_POLLING_INTERVAL_MS || "15000"),
+    shieldApprovalThreshold: getTokenAmountEnv(
+      "RAILGUN_SHIELD_APPROVAL_THRESHOLD",
+      "1",
+    ),
+    transferApprovalThreshold: getTokenAmountEnv(
+      "RAILGUN_TRANSFER_APPROVAL_THRESHOLD",
+      "1",
+    ),
+    unshieldApprovalThreshold: getTokenAmountEnv(
+      "RAILGUN_UNSHIELD_APPROVAL_THRESHOLD",
+      "1",
+    ),
   },
 } as const;
