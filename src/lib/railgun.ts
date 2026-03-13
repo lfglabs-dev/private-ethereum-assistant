@@ -1095,6 +1095,12 @@ export async function railgunTransfer(
 
     try {
       const runtime = await getRuntime();
+      const normalizedRecipient = recipient.trim();
+      if (!normalizedRecipient.startsWith("0zk")) {
+        throw new Error(
+          "Railgun private transfers require a 0zk recipient. For ENS names or public 0x addresses, resolve ENS first and use railgun_unshield instead.",
+        );
+      }
       const resolvedToken = await resolveToken(token);
       const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
       const stages: RailgunOperationStage[] = [];
@@ -1141,7 +1147,7 @@ export async function railgunTransfer(
           {
             tokenAddress: resolvedToken.tokenAddress,
             amount: amountRaw,
-            recipientAddress: recipient,
+            recipientAddress: normalizedRecipient,
           },
         ],
         [],
@@ -1167,7 +1173,7 @@ export async function railgunTransfer(
           {
             tokenAddress: resolvedToken.tokenAddress,
             amount: amountRaw,
-            recipientAddress: recipient,
+            recipientAddress: normalizedRecipient,
           },
         ],
         [],
@@ -1193,7 +1199,7 @@ export async function railgunTransfer(
           {
             tokenAddress: resolvedToken.tokenAddress,
             amount: amountRaw,
-            recipientAddress: recipient,
+            recipientAddress: normalizedRecipient,
           },
         ],
         [],
@@ -1226,7 +1232,7 @@ export async function railgunTransfer(
         railgunAddress: runtime.railgunAddress,
         token: resolvedToken.symbol,
         amount,
-        recipient,
+        recipient: normalizedRecipient,
         txHash,
         explorerUrl: explorerUrlForTx(txHash),
         stages,

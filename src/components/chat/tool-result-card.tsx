@@ -751,7 +751,11 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
   if (isError) {
     const setup = Array.isArray(data.setup) ? (data.setup as string[]) : []
     return (
-      <Card size="sm" className="border-red-500/20 bg-red-500/5">
+      <Card
+        data-testid={`result-railgun-${operation || "error"}`}
+        size="sm"
+        className="border-red-500/20 bg-red-500/5"
+      >
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
             <Shield className="size-4 text-red-500" />
@@ -852,7 +856,11 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
       : []
 
     return (
-      <Card size="sm" className="border-0 bg-secondary/50">
+      <Card
+        data-testid="result-railgun-balance"
+        size="sm"
+        className="border-0 bg-secondary/50"
+      >
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
             <Shield className="size-4 text-muted-foreground" />
@@ -891,7 +899,11 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
     : []
 
   return (
-    <Card size="sm" className="border-0 bg-secondary/50">
+    <Card
+      data-testid={`result-railgun-${operation || "operation"}`}
+      size="sm"
+      className="border-0 bg-secondary/50"
+    >
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
           <Shield className="size-4 text-muted-foreground" />
@@ -907,12 +919,23 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
               {String(data.amount)} {String(data.token)}
             </Badge>
           )}
-          {"recipient" in data && (
-            <Badge variant="outline" className="max-w-full truncate font-mono text-[10px]">
-              {String(data.recipient)}
-            </Badge>
-          )}
         </div>
+
+        {"recipient" in data && (
+          <div className="rounded-md bg-background/50 px-2.5 py-2 text-xs">
+            <p className="text-muted-foreground">
+              {operation === "unshield" ? "Public recipient" : "Recipient"}
+            </p>
+            <p className="break-all font-mono">{String(data.recipient)}</p>
+          </div>
+        )}
+
+        {"txHash" in data && (
+          <div className="rounded-md bg-background/50 px-2.5 py-2 text-xs">
+            <p className="text-muted-foreground">Tx hash</p>
+            <p className="break-all font-mono">{String(data.txHash)}</p>
+          </div>
+        )}
 
         {stages.length > 0 && (
           <div className="space-y-1.5">

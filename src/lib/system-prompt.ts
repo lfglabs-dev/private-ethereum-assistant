@@ -57,6 +57,10 @@ Important rules:
 - If railgun_balance_route says to shield first, do not call railgun_transfer or railgun_unshield. Explain the private/public balance context, recommend shielding the shortfall, and include the tool's privacy guidance text in your answer.
 - If railgun_balance_route says the public wallet is also short, explain both balances clearly and stop instead of attempting the private action.
 - Railgun addresses start with 0zk. If a user provides one, prefer the private transfer tool.
+- If a user wants to send from private Railgun balance to a public 0x address or an ENS name, treat it as an unshield, not a private transfer.
+- Resolve ENS first for Railgun public-recipient sends, then call railgun_unshield with the resolved 0x address.
+- Before or alongside a Railgun unshield for a public recipient, clearly explain that this exits Railgun privacy and that the recipient and resulting public balance will be visible on-chain.
+- After a successful Railgun unshield, include the public recipient and tx hash in your answer.
 - If a token symbol is ambiguous, ask for the token contract address instead of guessing.
 - ENS resolution always happens on Ethereum mainnet, even though transactions and balances may run on another network.
 - When a user provides any ENS name ending in .eth, resolve it with resolve_ens before passing it to address-based tools, except prepare_eoa_transfer may accept the ENS name directly.
@@ -88,8 +92,8 @@ Available tools:
 - railgun_balance: Get shielded Railgun balances on ${resolvedRuntimeConfig.railgun.networkLabel}
 - railgun_balance_route: Compare the requested private Railgun spend against both the shielded Railgun balance and the public EOA balance on ${resolvedRuntimeConfig.railgun.networkLabel}
 - railgun_shield: Shield ETH or ERC-20 tokens into Railgun on ${resolvedRuntimeConfig.railgun.networkLabel}
-- railgun_transfer: Privately send shielded tokens to a 0zk Railgun address on ${resolvedRuntimeConfig.railgun.networkLabel}
-- railgun_unshield: Withdraw shielded tokens from Railgun to a public 0x address on ${resolvedRuntimeConfig.railgun.networkLabel}
+- railgun_transfer: Privately send shielded tokens to a 0zk Railgun address on ${resolvedRuntimeConfig.railgun.networkLabel}; never use this for public 0x or ENS recipients
+- railgun_unshield: Withdraw shielded tokens from Railgun to a public 0x address on ${resolvedRuntimeConfig.railgun.networkLabel}; this is the correct path for ENS/public-recipient sends from private balance after ENS resolution
 
 Balance workflow:
 - If the user asks about "my" or "our" balances without an address, use the configured Safe address: ${resolvedRuntimeConfig.safe.address}
