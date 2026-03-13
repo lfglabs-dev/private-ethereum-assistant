@@ -82,6 +82,10 @@ export const runtimeConfigSchema = z.object({
     chainId: positiveIntegerSchema,
     rpcUrl: z.string().trim().url(),
     explorerTxBaseUrl: z.string().trim().url(),
+    privacyGuidanceText: z
+      .string()
+      .trim()
+      .min(1, "Enter the Railgun privacy guidance text."),
     poiNodeUrls: z
       .array(z.string().trim().url())
       .min(1, "Enter at least one Railgun POI node URL."),
@@ -122,6 +126,7 @@ export type RuntimeConfigDraft = {
     chainId: string;
     rpcUrl: string;
     explorerTxBaseUrl: string;
+    privacyGuidanceText: string;
     poiNodeUrls: string;
     mnemonic: string;
     walletCreationBlock: string;
@@ -193,6 +198,7 @@ export function createDefaultRuntimeConfig(): RuntimeConfig {
       chainId: config.railgun.chainId,
       rpcUrl: config.railgun.rpcUrl,
       explorerTxBaseUrl: config.railgun.explorerTxBaseUrl,
+      privacyGuidanceText: config.railgun.privacyGuidanceText,
       poiNodeUrls: config.railgun.poiNodeUrls,
       mnemonic: config.railgun.mnemonic || "",
       walletCreationBlock: config.railgun.walletCreationBlock,
@@ -276,6 +282,7 @@ export function createRuntimeConfigDraft(
       chainId: String(runtimeConfig.railgun.chainId),
       rpcUrl: runtimeConfig.railgun.rpcUrl,
       explorerTxBaseUrl: runtimeConfig.railgun.explorerTxBaseUrl,
+      privacyGuidanceText: runtimeConfig.railgun.privacyGuidanceText,
       poiNodeUrls: runtimeConfig.railgun.poiNodeUrls.join("\n"),
       mnemonic: runtimeConfig.railgun.mnemonic,
       walletCreationBlock: String(runtimeConfig.railgun.walletCreationBlock),
@@ -313,6 +320,7 @@ export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfi
       chainId: draft.railgun.chainId,
       rpcUrl: draft.railgun.rpcUrl,
       explorerTxBaseUrl: draft.railgun.explorerTxBaseUrl,
+      privacyGuidanceText: draft.railgun.privacyGuidanceText,
       poiNodeUrls: draft.railgun.poiNodeUrls
         .split(/\n|,/)
         .map((value) => value.trim())
@@ -400,6 +408,30 @@ export function applyNetworkPreset(
   };
 }
 
+export function applyLegacyRuntimeConfigDefaults(value: unknown) {
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const railgun =
+    typeof record.railgun === "object" && record.railgun !== null
+      ? (record.railgun as Record<string, unknown>)
+      : null;
+
+  if (!railgun || typeof railgun.privacyGuidanceText === "string") {
+    return value;
+  }
+
+  return {
+    ...record,
+    railgun: {
+      ...railgun,
+      privacyGuidanceText: config.railgun.privacyGuidanceText,
+    },
+  };
+}
+
 export function loadStoredRuntimeConfig() {
   if (typeof window === "undefined") {
     return null;
@@ -417,7 +449,9 @@ export function loadStoredRuntimeConfig() {
   }
 
   try {
-    const parsed = runtimeConfigSchema.parse(JSON.parse(rawValue));
+    const parsed = runtimeConfigSchema.parse(
+      applyLegacyRuntimeConfigDefaults(JSON.parse(rawValue)),
+    );
     if (getAppMode() !== "developer" && parsed.llm.provider === "openrouter") {
       window.localStorage.removeItem(RUNTIME_CONFIG_STORAGE_KEY);
       cachedRuntimeConfigRaw = null;

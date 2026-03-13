@@ -475,6 +475,24 @@ export function RuntimeConfigForm({
           </label>
 
           <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">Privacy guidance text</span>
+            <Textarea
+              data-testid="runtime-railgun-privacy-guidance"
+              value={draft.railgun.privacyGuidanceText}
+              onChange={(event) =>
+                onChange(
+                  updateDraftSection(draft, "railgun", {
+                    ...draft.railgun,
+                    privacyGuidanceText: event.target.value,
+                  }),
+                )
+              }
+              rows={3}
+              placeholder="Explain that shielding is public first, then future Railgun actions use private balance."
+            />
+          </label>
+
+          <label className="block space-y-1">
             <span className="text-xs text-muted-foreground">
               POI node URLs (one per line)
             </span>
