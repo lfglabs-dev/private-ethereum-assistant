@@ -12,6 +12,7 @@ interface ChatInputProps {
   onStop: () => void
   isLoading: boolean
   networkLabel: string
+  providerLabel: string
 }
 
 export function ChatInput({
@@ -21,6 +22,7 @@ export function ChatInput({
   onStop,
   isLoading,
   networkLabel,
+  providerLabel,
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -87,7 +89,7 @@ export function ChatInput({
           )}
         </div>
         <p className="mt-2 text-center text-xs text-muted-foreground">
-          Local LLM &middot; {networkLabel} &middot; Your data never leaves this machine
+          {providerLabel} &middot; {networkLabel} &middot; Private keys stay in this browser
         </p>
       </div>
     </div>

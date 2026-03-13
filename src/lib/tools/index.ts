@@ -1,24 +1,48 @@
 import { DEFAULT_NETWORK_CONFIG, type NetworkConfig } from "../ethereum";
-import {
-  getRailgunBalance,
-  railgunPrivateTransfer,
-  railgunShieldTokens,
-  railgunWithdraw,
-} from "./railgun";
 import { createEoaTransferTools } from "./eoa-tx";
 import { createReadChainTools } from "./read-chain";
-import { getSafeInfo, getPendingTransactions, proposeTransaction } from "./safe";
+import { createRailgunTools } from "./railgun";
+import { createSafeTools } from "./safe";
+import {
+  createDefaultRuntimeConfig,
+  getRuntimeConfigForNetwork,
+  type RuntimeConfig,
+} from "../runtime-config";
 
-export function getTools(networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG) {
-  const { prepareEoaTransfer, sendEoaTransfer } =
-    createEoaTransferTools(networkConfig);
+function resolveRuntimeConfig(
+  networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG,
+  runtimeConfig?: RuntimeConfig,
+) {
+  return runtimeConfig ?? getRuntimeConfigForNetwork(networkConfig);
+}
+
+export function getTools(
+  networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG,
+  runtimeConfig?: RuntimeConfig,
+) {
+  const resolvedRuntimeConfig = resolveRuntimeConfig(networkConfig, runtimeConfig);
+  const { prepareEoaTransfer, sendEoaTransfer } = createEoaTransferTools(
+    resolvedRuntimeConfig.network,
+    resolvedRuntimeConfig.wallet.eoaPrivateKey,
+  );
   const {
     getBalance,
     getPortfolio,
     getTransaction,
     resolveEns,
     reverseResolveEns,
-  } = createReadChainTools(networkConfig);
+  } = createReadChainTools(resolvedRuntimeConfig.network);
+  const { getSafeInfo, getPendingTransactions, proposeTransaction } =
+    createSafeTools(resolvedRuntimeConfig.safe);
+  const {
+    getRailgunBalance,
+    railgunShieldTokens,
+    railgunPrivateTransfer,
+    railgunWithdraw,
+  } = createRailgunTools({
+    ...resolvedRuntimeConfig.railgun,
+    signerPrivateKey: resolvedRuntimeConfig.wallet.eoaPrivateKey,
+  });
 
   return {
     prepare_eoa_transfer: prepareEoaTransfer,
@@ -39,9 +63,12 @@ export function getTools(networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG) 
 }
 
 export function createTools(
-  networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG
+  networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG,
+  runtimeConfig?: RuntimeConfig,
 ) {
-  return getTools(networkConfig);
+  return getTools(networkConfig, runtimeConfig);
 }
 
-export const tools = getTools();
+const defaultRuntimeConfig = createDefaultRuntimeConfig();
+
+export const tools = getTools(defaultRuntimeConfig.network, defaultRuntimeConfig);

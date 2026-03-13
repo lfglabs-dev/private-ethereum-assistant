@@ -1,193 +1,154 @@
-"use client"
+"use client";
 
-import { useChat } from "@ai-sdk/react"
-import { useSyncExternalStore, useState } from "react"
-import { AnimatePresence, motion } from "framer-motion"
-import { ArrowDown } from "lucide-react"
-import { DEFAULT_NETWORK_CONFIG, NETWORK_PRESETS } from "@/lib/ethereum"
-import { EthereumIcon } from "@/components/icons/ethereum-icon"
-import { NetworkSettings, type NetworkFormState } from "@/components/chat/network-settings"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Button } from "@/components/ui/button"
-import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
-import { ChatMessage } from "@/components/chat/chat-message"
-import { ChatDebugPanel } from "@/components/chat/chat-debug-panel"
-import { ChatWelcome } from "@/components/chat/chat-welcome"
-import { ChatInput } from "@/components/chat/chat-input"
-import { ChatError } from "@/components/chat/chat-error"
-import { ThemeToggle } from "@/components/theme-toggle"
-import { useScrollToBottom } from "@/hooks/use-scroll-to-bottom"
+import { useState, useSyncExternalStore } from "react";
+import { useChat } from "@ai-sdk/react";
+import { AnimatePresence, motion } from "framer-motion";
+import { ArrowDown, RefreshCw, Settings2, Trash2, X } from "lucide-react";
+import { ZodError } from "zod";
+import { EthereumIcon } from "@/components/icons/ethereum-icon";
+import { RuntimeConfigForm } from "@/components/chat/runtime-config-form";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { ThinkingIndicator } from "@/components/ui/thinking-indicator";
+import { ChatMessage } from "@/components/chat/chat-message";
+import { ChatDebugPanel } from "@/components/chat/chat-debug-panel";
+import { ChatWelcome } from "@/components/chat/chat-welcome";
+import { ChatInput } from "@/components/chat/chat-input";
+import { ChatError } from "@/components/chat/chat-error";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { useScrollToBottom } from "@/hooks/use-scroll-to-bottom";
 import {
   assistantDataPartSchemas,
   type AssistantUIMessage,
   type DebugLogEntry,
   createDebugLog,
-} from "@/lib/chat-stream"
+} from "@/lib/chat-stream";
+import {
+  clearStoredRuntimeConfig,
+  createDefaultRuntimeConfig,
+  createRuntimeConfigDraft,
+  getProviderLabel,
+  loadStoredRuntimeConfig,
+  parseRuntimeConfigDraft,
+  saveStoredRuntimeConfig,
+  subscribeToStoredRuntimeConfig,
+  type RuntimeConfig,
+  type RuntimeConfigDraft,
+} from "@/lib/runtime-config";
+import { getNetworkLabel } from "@/lib/ethereum";
 
-const NETWORK_STORAGE_KEY = "private-ethereum-assistant.network.v1"
-const NETWORK_STORAGE_EVENT = "private-ethereum-assistant.network.changed"
-const E2E_CHAT_MOCK_STORAGE_KEY = "private-ethereum-assistant.e2e-chat-mock-scenario"
+function getValidationMessage(error: unknown) {
+  if (error instanceof ZodError) {
+    return error.issues[0]?.message ?? "Invalid runtime config.";
+  }
 
-const DEFAULT_NETWORK_FORM_STATE: NetworkFormState = {
-  chainId: String(DEFAULT_NETWORK_CONFIG.chainId),
-  rpcUrl: DEFAULT_NETWORK_CONFIG.rpcUrl,
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Invalid runtime config.";
 }
 
-let cachedNetworkSettingsRaw: string | null = null
-let cachedNetworkSettingsValue = DEFAULT_NETWORK_FORM_STATE
+type ConfiguredAssistantProps = {
+  runtimeConfig: RuntimeConfig;
+  onSaveRuntimeConfig: (runtimeConfig: RuntimeConfig) => void;
+  onDeleteAllSettings: () => void;
+};
 
-function loadInitialNetworkSettings(): NetworkFormState {
-  if (typeof window === "undefined") {
-    return DEFAULT_NETWORK_FORM_STATE
-  }
+function ConfiguredAssistant({
+  runtimeConfig,
+  onSaveRuntimeConfig,
+  onDeleteAllSettings,
+}: ConfiguredAssistantProps) {
+  const [debugEntries, setDebugEntries] = useState<DebugLogEntry[]>([]);
+  const [showDebugTrace, setShowDebugTrace] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsDraft, setSettingsDraft] = useState<RuntimeConfigDraft>(() =>
+    createRuntimeConfigDraft(runtimeConfig),
+  );
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [input, setInput] = useState("");
+  const { containerRef, endRef, isAtBottom, scrollToBottom } = useScrollToBottom();
 
-  const raw = window.localStorage.getItem(NETWORK_STORAGE_KEY)
-  if (!raw) {
-    cachedNetworkSettingsRaw = null
-    cachedNetworkSettingsValue = DEFAULT_NETWORK_FORM_STATE
-    return DEFAULT_NETWORK_FORM_STATE
-  }
-
-  if (raw === cachedNetworkSettingsRaw) {
-    return cachedNetworkSettingsValue
-  }
-
-  try {
-    const parsed = JSON.parse(raw) as Partial<NetworkFormState>
-    if (typeof parsed.chainId === "string" && typeof parsed.rpcUrl === "string") {
-      cachedNetworkSettingsRaw = raw
-      cachedNetworkSettingsValue = {
-        chainId: parsed.chainId,
-        rpcUrl: parsed.rpcUrl,
-      }
-      return cachedNetworkSettingsValue
-    }
-  } catch {
-    window.localStorage.removeItem(NETWORK_STORAGE_KEY)
-  }
-
-  cachedNetworkSettingsRaw = null
-  cachedNetworkSettingsValue = DEFAULT_NETWORK_FORM_STATE
-  return DEFAULT_NETWORK_FORM_STATE
-}
-
-function subscribeToNetworkSettings(onStoreChange: () => void) {
-  if (typeof window === "undefined") {
-    return () => undefined
-  }
-
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key === null || event.key === NETWORK_STORAGE_KEY) {
-      onStoreChange()
-    }
-  }
-
-  window.addEventListener("storage", handleStorage)
-  window.addEventListener(NETWORK_STORAGE_EVENT, onStoreChange)
-
-  return () => {
-    window.removeEventListener("storage", handleStorage)
-    window.removeEventListener(NETWORK_STORAGE_EVENT, onStoreChange)
-  }
-}
-
-function updateNetworkSettings(value: NetworkFormState) {
-  if (typeof window === "undefined") {
-    return
-  }
-
-  const serialized = JSON.stringify(value)
-  cachedNetworkSettingsRaw = serialized
-  cachedNetworkSettingsValue = value
-  window.localStorage.setItem(NETWORK_STORAGE_KEY, serialized)
-  window.dispatchEvent(new Event(NETWORK_STORAGE_EVENT))
-}
-
-function loadE2EChatMockScenario() {
-  if (typeof window === "undefined") {
-    return undefined
-  }
-
-  const value = window.localStorage.getItem(E2E_CHAT_MOCK_STORAGE_KEY)
-  return value?.trim() || undefined
-}
-
-function getNetworkLabel(value: NetworkFormState) {
-  return (
-    NETWORK_PRESETS.find((preset) => String(preset.chainId) === value.chainId)?.name ??
-    "Custom Network"
-  )
-}
-
-export default function Home() {
-  const [debugEntries, setDebugEntries] = useState<DebugLogEntry[]>([])
-  const [showDebugTrace, setShowDebugTrace] = useState(false)
   const appendDebugEntry = (entry: DebugLogEntry) => {
-    setDebugEntries((entries) => [...entries.slice(-23), entry])
-  }
-  const { messages, sendMessage, stop, status, error, clearError } = useChat<AssistantUIMessage>({
-    dataPartSchemas: assistantDataPartSchemas,
-    onData: (part) => {
-      if (part.type !== "data-debug") return
+    setDebugEntries((entries) => [...entries.slice(-23), entry]);
+  };
 
-      appendDebugEntry(part.data)
-      if (part.data.level === "error") {
-        setShowDebugTrace(true)
-      }
-    },
-    onError: (nextError) => {
-      appendDebugEntry(
-        createDebugLog({
-          level: "error",
-          stage: "error",
-          message: "Chat request failed",
-          detail: nextError.message || "Unknown chat error",
-        })
-      )
-      setShowDebugTrace(true)
-    },
-  })
-  const [input, setInput] = useState("")
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const networkSettings = useSyncExternalStore(
-    subscribeToNetworkSettings,
-    loadInitialNetworkSettings,
-    () => DEFAULT_NETWORK_FORM_STATE,
-  )
-  const { containerRef, endRef, isAtBottom, scrollToBottom } = useScrollToBottom()
+  const { messages, sendMessage, stop, status, error, clearError } =
+    useChat<AssistantUIMessage>({
+      dataPartSchemas: assistantDataPartSchemas,
+      onData: (part) => {
+        if (part.type !== "data-debug") return;
 
-  const isLoading = status === "submitted" || status === "streaming"
-  const isSubmitted = status === "submitted"
-  const activeNetworkLabel = getNetworkLabel(networkSettings)
+        appendDebugEntry(part.data);
+        if (part.data.level === "error") {
+          setShowDebugTrace(true);
+        }
+      },
+      onError: (nextError) => {
+        appendDebugEntry(
+          createDebugLog({
+            level: "error",
+            stage: "error",
+            message: "Chat request failed",
+            detail: nextError.message || "Unknown chat error",
+          }),
+        );
+        setShowDebugTrace(true);
+      },
+    });
+
+  const isLoading = status === "submitted" || status === "streaming";
+  const isSubmitted = status === "submitted";
+  const providerLabel = getProviderLabel(runtimeConfig.llm.provider);
+  const activeNetworkLabel = getNetworkLabel(runtimeConfig.network);
 
   const sendChatMessage = (text: string) => {
-    setDebugEntries([])
-    setShowDebugTrace(false)
+    setDebugEntries([]);
+    setShowDebugTrace(false);
     sendMessage(
       { text },
       {
         body: {
-          networkConfig: {
-            chainId: networkSettings.chainId,
-            rpcUrl: networkSettings.rpcUrl.trim(),
-          },
-          e2eMockScenario: loadE2EChatMockScenario(),
+          networkConfig: runtimeConfig.network,
+          runtimeConfig,
         },
       },
-    )
-  }
+    );
+  };
 
   const handleSubmit = () => {
-    if (!input.trim() || isLoading) return
-    clearError()
-    sendChatMessage(input)
-    setInput("")
-  }
+    if (!input.trim() || isLoading) return;
+    clearError();
+    sendChatMessage(input);
+    setInput("");
+  };
 
   const handleSuggestion = (suggestion: string) => {
-    clearError()
-    sendChatMessage(suggestion)
-  }
+    clearError();
+    sendChatMessage(suggestion);
+  };
+
+  const handleSaveSettings = () => {
+    try {
+      const nextConfig = parseRuntimeConfigDraft(settingsDraft);
+      onSaveRuntimeConfig(nextConfig);
+      setSettingsError(null);
+      setSettingsOpen(false);
+    } catch (error) {
+      setSettingsError(getValidationMessage(error));
+    }
+  };
+
+  const handleResetChanges = () => {
+    setSettingsDraft(createRuntimeConfigDraft(runtimeConfig));
+    setSettingsError(null);
+  };
+
+  const handleResetDefaults = () => {
+    setSettingsDraft(createRuntimeConfigDraft(createDefaultRuntimeConfig()));
+    setSettingsError(null);
+  };
 
   return (
     <div className="flex h-dvh flex-col bg-background">
@@ -197,46 +158,74 @@ export default function Home() {
             <EthereumIcon className="size-4 text-primary" />
           </div>
           <div>
-            <h1 className="font-serif text-sm font-semibold">Private Ethereum Assistant</h1>
+            <h1 className="font-serif text-sm font-semibold">
+              Private Ethereum Assistant
+            </h1>
             <p className="text-xs text-muted-foreground">
-              Local LLM &middot; {activeNetworkLabel} &middot; Safe + Railgun + Local Signing
+              {providerLabel} · {activeNetworkLabel} · Safe + Railgun + Browser Config
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <NetworkSettings
-            value={networkSettings}
-            onChange={updateNetworkSettings}
-            isOpen={settingsOpen}
-            onToggle={() => setSettingsOpen((open) => !open)}
-          />
-          <div className="flex items-center gap-2">
-            <span className="size-2 rounded-full bg-green-500" />
-            <span className="text-xs text-muted-foreground">Local</span>
+          <div className="flex items-center gap-2 rounded-full border px-3 py-1 text-xs">
+            <span
+              className={`size-2 rounded-full ${
+                runtimeConfig.llm.provider === "local"
+                  ? "bg-green-500"
+                  : "bg-amber-500"
+              }`}
+            />
+            <span data-testid="runtime-provider-label">{providerLabel}</span>
           </div>
+          <Button
+            data-testid="runtime-settings-trigger"
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => {
+              setSettingsDraft(createRuntimeConfigDraft(runtimeConfig));
+              setSettingsError(null);
+              setSettingsOpen(true);
+            }}
+          >
+            <Settings2 className="size-3.5" />
+            Settings
+          </Button>
           <ThemeToggle />
         </div>
       </header>
 
       <div ref={containerRef} className="relative flex-1 overflow-y-auto">
         <div ref={endRef} className="mx-auto max-w-3xl space-y-6 px-4 py-6">
-          {messages.length === 0 && !error && (
-            <ChatWelcome onSuggestionClick={handleSuggestion} />
-          )}
+          {messages.length === 0 && !error ? (
+            <ChatWelcome
+              onSuggestionClick={handleSuggestion}
+              providerLabel={providerLabel}
+            />
+          ) : null}
 
           {messages.map((message, index) => (
             <ChatMessage
               key={message.id}
               message={message}
-              isStreaming={isLoading && index === messages.length - 1 && message.role === "assistant"}
+              isStreaming={
+                isLoading &&
+                index === messages.length - 1 &&
+                message.role === "assistant"
+              }
               traceEntries={debugEntries}
-              showTrace={showDebugTrace && index === messages.length - 1 && message.role === "assistant"}
+              showTrace={
+                showDebugTrace &&
+                index === messages.length - 1 &&
+                message.role === "assistant"
+              }
               canToggleTrace={index === messages.length - 1 && message.role === "assistant"}
               onToggleTrace={() => setShowDebugTrace((visible) => !visible)}
             />
           ))}
 
-          {isSubmitted && (messages.length === 0 || messages[messages.length - 1].role === "user") && (
+          {isSubmitted &&
+          (messages.length === 0 || messages[messages.length - 1].role === "user") ? (
             <motion.div
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -259,25 +248,25 @@ export default function Home() {
                 <div className="rounded-2xl rounded-tl-sm bg-secondary/30 px-4 py-3">
                   <ThinkingIndicator />
                 </div>
-                {showDebugTrace && (
+                {showDebugTrace ? (
                   <ChatDebugPanel entries={debugEntries} isStreaming={isLoading} />
-                )}
+                ) : null}
               </div>
             </motion.div>
-          )}
+          ) : null}
 
-          {error && (
+          {error ? (
             <div className="mx-auto max-w-3xl space-y-3">
               <ChatError error={error} onDismiss={clearError} />
-              {debugEntries.length > 0 && (
+              {debugEntries.length > 0 ? (
                 <ChatDebugPanel entries={debugEntries} isStreaming={false} />
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
         </div>
 
         <AnimatePresence>
-          {!isAtBottom && (
+          {!isAtBottom ? (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -294,7 +283,7 @@ export default function Home() {
                 <ArrowDown className="size-4" />
               </Button>
             </motion.div>
-          )}
+          ) : null}
         </AnimatePresence>
       </div>
 
@@ -305,7 +294,185 @@ export default function Home() {
         onStop={stop}
         isLoading={isLoading}
         networkLabel={activeNetworkLabel}
+        providerLabel={providerLabel}
       />
+
+      <AnimatePresence>
+        {settingsOpen ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+          >
+            <motion.aside
+              initial={{ x: 32, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: 32, opacity: 0 }}
+              className="absolute right-0 top-0 h-full w-full max-w-2xl overflow-y-auto border-l bg-background shadow-2xl"
+            >
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-background/90 px-6 py-4 backdrop-blur">
+                <div>
+                  <h2 className="text-sm font-semibold">Runtime Settings</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Edit, rotate, reset, or delete all browser-stored settings.
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => setSettingsOpen(false)}
+                  aria-label="Close settings"
+                >
+                  <X className="size-4" />
+                </Button>
+              </div>
+
+              <div className="space-y-4 px-6 py-6">
+                <RuntimeConfigForm
+                  draft={settingsDraft}
+                  onChange={setSettingsDraft}
+                  mode="settings"
+                  validationMessage={settingsError}
+                />
+              </div>
+
+              <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-6 py-4 backdrop-blur">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    data-testid="runtime-settings-reset"
+                    type="button"
+                    variant="outline"
+                    onClick={handleResetChanges}
+                  >
+                    <RefreshCw className="size-3.5" />
+                    Reset changes
+                  </Button>
+                  <Button
+                    data-testid="runtime-settings-reset-defaults"
+                    type="button"
+                    variant="outline"
+                    onClick={handleResetDefaults}
+                  >
+                    Defaults
+                  </Button>
+                  <Button
+                    data-testid="runtime-settings-delete-all"
+                    type="button"
+                    variant="destructive"
+                    onClick={onDeleteAllSettings}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete all
+                  </Button>
+                </div>
+                <Button
+                  data-testid="runtime-settings-save"
+                  type="button"
+                  onClick={handleSaveSettings}
+                >
+                  Save settings
+                </Button>
+              </div>
+            </motion.aside>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
-  )
+  );
+}
+
+export default function Home() {
+  const runtimeConfig = useSyncExternalStore(
+    subscribeToStoredRuntimeConfig,
+    loadStoredRuntimeConfig,
+    () => null,
+  );
+  const [sessionKey, setSessionKey] = useState(0);
+  const [onboardingDraft, setOnboardingDraft] = useState<RuntimeConfigDraft>(() =>
+    createRuntimeConfigDraft(createDefaultRuntimeConfig()),
+  );
+  const [onboardingError, setOnboardingError] = useState<string | null>(null);
+
+  const handleSaveRuntimeConfig = (nextRuntimeConfig: RuntimeConfig) => {
+    saveStoredRuntimeConfig(nextRuntimeConfig);
+  };
+
+  const handleDeleteAllSettings = () => {
+    clearStoredRuntimeConfig();
+    setOnboardingDraft(createRuntimeConfigDraft(createDefaultRuntimeConfig()));
+    setOnboardingError(null);
+    setSessionKey((value) => value + 1);
+  };
+
+  const handleCompleteOnboarding = () => {
+    try {
+      const nextRuntimeConfig = parseRuntimeConfigDraft(onboardingDraft);
+      saveStoredRuntimeConfig(nextRuntimeConfig);
+      setOnboardingError(null);
+      setSessionKey((value) => value + 1);
+    } catch (error) {
+      setOnboardingError(getValidationMessage(error));
+    }
+  };
+
+  if (runtimeConfig === null) {
+    return (
+      <main
+        data-testid="runtime-onboarding-screen"
+        className="min-h-dvh bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_45%),linear-gradient(180deg,rgba(15,23,42,0.04),transparent_50%)] px-4 py-8"
+      >
+        <div className="mx-auto max-w-4xl space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-2xl bg-primary/10">
+                <EthereumIcon className="size-5 text-primary" />
+              </div>
+              <div>
+                <h1 className="font-serif text-2xl font-semibold tracking-tight">
+                  First-run onboarding
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  Configure the runtime once in the browser. No `.env.local` is required.
+                </p>
+              </div>
+            </div>
+            <ThemeToggle />
+          </div>
+
+          <div className="rounded-2xl border bg-background/80 p-4 text-sm text-muted-foreground shadow-sm backdrop-blur">
+            Recommended default: OpenRouter with `qwen/qwen3.5-27b`. You can switch to
+            Local later without redoing onboarding.
+          </div>
+
+          <RuntimeConfigForm
+            draft={onboardingDraft}
+            onChange={setOnboardingDraft}
+            mode="onboarding"
+            validationMessage={onboardingError}
+          />
+
+          <div className="flex justify-end">
+            <Button
+              data-testid="runtime-onboarding-submit"
+              type="button"
+              size="lg"
+              onClick={handleCompleteOnboarding}
+            >
+              Save and continue
+            </Button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <ConfiguredAssistant
+      key={sessionKey}
+      runtimeConfig={runtimeConfig}
+      onSaveRuntimeConfig={handleSaveRuntimeConfig}
+      onDeleteAllSettings={handleDeleteAllSettings}
+    />
+  );
 }

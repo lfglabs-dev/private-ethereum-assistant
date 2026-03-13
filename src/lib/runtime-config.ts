@@ -1,0 +1,401 @@
+import { isAddress } from "viem";
+import { z } from "zod";
+import { config } from "./config";
+import { DEFAULT_NETWORK_CONFIG, NETWORK_PRESETS, type NetworkConfig } from "./ethereum";
+
+export const RUNTIME_CONFIG_STORAGE_KEY =
+  "private-ethereum-assistant.runtime-config.v1";
+export const RUNTIME_CONFIG_STORAGE_EVENT =
+  "private-ethereum-assistant.runtime-config.changed";
+
+export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+export const OPENROUTER_DEFAULT_MODEL = "qwen/qwen3.5-27b";
+export const LOCAL_DEFAULT_MODEL = config.llm.model;
+
+let cachedRuntimeConfigRaw: string | null = null;
+let cachedRuntimeConfigValue: RuntimeConfig | null = null;
+
+export const llmProviderSchema = z.enum(["openrouter", "local"]);
+
+const positiveIntegerSchema = z.coerce.number().int().positive();
+const nonNegativeIntegerSchema = z.coerce.number().int().nonnegative();
+
+const addressSchema = z
+  .string()
+  .trim()
+  .refine((value) => isAddress(value), "Enter a valid 0x address.");
+
+const privateKeySchema = z
+  .string()
+  .trim()
+  .transform((value) => (value.startsWith("0x") ? value : `0x${value}`))
+  .refine(
+    (value) => /^0x[0-9a-fA-F]{64}$/.test(value),
+    "Enter a valid 32-byte private key.",
+  );
+
+const optionalPrivateKeySchema = z
+  .string()
+  .trim()
+  .transform((value) => {
+    if (!value) {
+      return "";
+    }
+
+    return value.startsWith("0x") ? value : `0x${value}`;
+  })
+  .refine(
+    (value) => value === "" || /^0x[0-9a-fA-F]{64}$/.test(value),
+    "Enter a valid 32-byte private key or leave it blank.",
+  );
+
+export const runtimeConfigSchema = z.object({
+  version: z.literal(1),
+  llm: z.object({
+    provider: llmProviderSchema,
+    localBaseUrl: z.string().trim().url(),
+    localModel: z.string().trim().min(1, "Enter a local model name."),
+    openRouterModel: z
+      .string()
+      .trim()
+      .min(1, "Enter an OpenRouter model name."),
+    timeoutMs: positiveIntegerSchema,
+  }),
+  network: z.object({
+    chainId: positiveIntegerSchema,
+    rpcUrl: z.string().trim().url(),
+  }),
+  safe: z.object({
+    address: addressSchema,
+    chainId: positiveIntegerSchema,
+    rpcUrl: z.string().trim().url(),
+    signerPrivateKey: optionalPrivateKeySchema,
+  }),
+  wallet: z.object({
+    eoaPrivateKey: privateKeySchema,
+  }),
+  railgun: z.object({
+    networkLabel: z.string().trim().min(1, "Enter a Railgun network label."),
+    chainId: positiveIntegerSchema,
+    rpcUrl: z.string().trim().url(),
+    explorerTxBaseUrl: z.string().trim().url(),
+    poiNodeUrls: z
+      .array(z.string().trim().url())
+      .min(1, "Enter at least one Railgun POI node URL."),
+    mnemonic: z.string().trim(),
+    walletCreationBlock: nonNegativeIntegerSchema,
+    scanTimeoutMs: positiveIntegerSchema,
+    pollingIntervalMs: positiveIntegerSchema,
+  }),
+});
+
+export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
+export type LlmProvider = z.infer<typeof llmProviderSchema>;
+
+export type RuntimeConfigDraft = {
+  llm: {
+    provider: LlmProvider;
+    localBaseUrl: string;
+    localModel: string;
+    openRouterModel: string;
+    timeoutMs: string;
+  };
+  network: {
+    chainId: string;
+    rpcUrl: string;
+  };
+  safe: {
+    address: string;
+    chainId: string;
+    rpcUrl: string;
+    signerPrivateKey: string;
+  };
+  wallet: {
+    eoaPrivateKey: string;
+  };
+  railgun: {
+    networkLabel: string;
+    chainId: string;
+    rpcUrl: string;
+    explorerTxBaseUrl: string;
+    poiNodeUrls: string;
+    mnemonic: string;
+    walletCreationBlock: string;
+    scanTimeoutMs: string;
+    pollingIntervalMs: string;
+  };
+};
+
+export function createDefaultRuntimeConfig(): RuntimeConfig {
+  return {
+    version: 1,
+    llm: {
+      provider: "openrouter",
+      localBaseUrl: config.llm.baseURL,
+      localModel: LOCAL_DEFAULT_MODEL,
+      openRouterModel: OPENROUTER_DEFAULT_MODEL,
+      timeoutMs: config.llm.timeoutMs,
+    },
+    network: {
+      chainId: DEFAULT_NETWORK_CONFIG.chainId,
+      rpcUrl: DEFAULT_NETWORK_CONFIG.rpcUrl,
+    },
+    safe: {
+      address: config.ethereum.safeAddress,
+      chainId: 8453,
+      rpcUrl: "https://mainnet.base.org",
+      signerPrivateKey: "",
+    },
+    wallet: {
+      eoaPrivateKey: "",
+    },
+    railgun: {
+      networkLabel: config.railgun.networkLabel,
+      chainId: config.railgun.chainId,
+      rpcUrl: config.railgun.rpcUrl,
+      explorerTxBaseUrl: config.railgun.explorerTxBaseUrl,
+      poiNodeUrls: config.railgun.poiNodeUrls,
+      mnemonic: config.railgun.mnemonic || "",
+      walletCreationBlock: config.railgun.walletCreationBlock,
+      scanTimeoutMs: config.railgun.scanTimeoutMs,
+      pollingIntervalMs: config.railgun.pollingIntervalMs,
+    },
+  } as RuntimeConfig;
+}
+
+export function getRuntimeConfigForNetwork(
+  networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG,
+): RuntimeConfig {
+  return {
+    ...createDefaultRuntimeConfig(),
+    network: {
+      chainId: networkConfig.chainId,
+      rpcUrl: networkConfig.rpcUrl,
+    },
+  };
+}
+
+export function createRuntimeConfigDraft(
+  runtimeConfig: RuntimeConfig = createDefaultRuntimeConfig(),
+): RuntimeConfigDraft {
+  return {
+    llm: {
+      provider: runtimeConfig.llm.provider,
+      localBaseUrl: runtimeConfig.llm.localBaseUrl,
+      localModel: runtimeConfig.llm.localModel,
+      openRouterModel: runtimeConfig.llm.openRouterModel,
+      timeoutMs: String(runtimeConfig.llm.timeoutMs),
+    },
+    network: {
+      chainId: String(runtimeConfig.network.chainId),
+      rpcUrl: runtimeConfig.network.rpcUrl,
+    },
+    safe: {
+      address: runtimeConfig.safe.address,
+      chainId: String(runtimeConfig.safe.chainId),
+      rpcUrl: runtimeConfig.safe.rpcUrl,
+      signerPrivateKey: runtimeConfig.safe.signerPrivateKey,
+    },
+    wallet: {
+      eoaPrivateKey: runtimeConfig.wallet.eoaPrivateKey,
+    },
+    railgun: {
+      networkLabel: runtimeConfig.railgun.networkLabel,
+      chainId: String(runtimeConfig.railgun.chainId),
+      rpcUrl: runtimeConfig.railgun.rpcUrl,
+      explorerTxBaseUrl: runtimeConfig.railgun.explorerTxBaseUrl,
+      poiNodeUrls: runtimeConfig.railgun.poiNodeUrls.join("\n"),
+      mnemonic: runtimeConfig.railgun.mnemonic,
+      walletCreationBlock: String(runtimeConfig.railgun.walletCreationBlock),
+      scanTimeoutMs: String(runtimeConfig.railgun.scanTimeoutMs),
+      pollingIntervalMs: String(runtimeConfig.railgun.pollingIntervalMs),
+    },
+  };
+}
+
+export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfig {
+  return runtimeConfigSchema.parse({
+    version: 1,
+    llm: {
+      provider: draft.llm.provider,
+      localBaseUrl: draft.llm.localBaseUrl,
+      localModel: draft.llm.localModel,
+      openRouterModel: draft.llm.openRouterModel,
+      timeoutMs: draft.llm.timeoutMs,
+    },
+    network: {
+      chainId: draft.network.chainId,
+      rpcUrl: draft.network.rpcUrl,
+    },
+    safe: {
+      address: draft.safe.address,
+      chainId: draft.safe.chainId,
+      rpcUrl: draft.safe.rpcUrl,
+      signerPrivateKey: draft.safe.signerPrivateKey,
+    },
+    wallet: {
+      eoaPrivateKey: draft.wallet.eoaPrivateKey,
+    },
+    railgun: {
+      networkLabel: draft.railgun.networkLabel,
+      chainId: draft.railgun.chainId,
+      rpcUrl: draft.railgun.rpcUrl,
+      explorerTxBaseUrl: draft.railgun.explorerTxBaseUrl,
+      poiNodeUrls: draft.railgun.poiNodeUrls
+        .split(/\n|,/)
+        .map((value) => value.trim())
+        .filter(Boolean),
+      mnemonic: draft.railgun.mnemonic,
+      walletCreationBlock: draft.railgun.walletCreationBlock,
+      scanTimeoutMs: draft.railgun.scanTimeoutMs,
+      pollingIntervalMs: draft.railgun.pollingIntervalMs,
+    },
+  });
+}
+
+export function getActiveModel(runtimeConfig: RuntimeConfig) {
+  return runtimeConfig.llm.provider === "local"
+    ? runtimeConfig.llm.localModel
+    : runtimeConfig.llm.openRouterModel;
+}
+
+export function getProviderLabel(provider: LlmProvider) {
+  return provider === "local" ? "Local" : "OpenRouter";
+}
+
+export function getActiveModelDraftValue(draft: RuntimeConfigDraft) {
+  return draft.llm.provider === "local"
+    ? draft.llm.localModel
+    : draft.llm.openRouterModel;
+}
+
+export function setActiveModelDraftValue(
+  draft: RuntimeConfigDraft,
+  value: string,
+): RuntimeConfigDraft {
+  return draft.llm.provider === "local"
+    ? {
+        ...draft,
+        llm: {
+          ...draft.llm,
+          localModel: value,
+        },
+      }
+    : {
+        ...draft,
+        llm: {
+          ...draft.llm,
+          openRouterModel: value,
+        },
+      };
+}
+
+export function getSuggestedModels(provider: LlmProvider) {
+  return provider === "local"
+    ? ["qwen3:8b", "qwen2.5:14b-instruct", "llama3.1:latest"]
+    : [
+        "qwen/qwen3.5-27b",
+        "openai/gpt-4o-mini",
+        "anthropic/claude-3.7-sonnet",
+      ];
+}
+
+export function getNetworkPresetId(networkConfig: NetworkConfig) {
+  return (
+    NETWORK_PRESETS.find(
+      (preset) =>
+        preset.chainId === networkConfig.chainId &&
+        preset.rpcUrl === networkConfig.rpcUrl,
+    )?.id || "custom"
+  );
+}
+
+export function applyNetworkPreset(
+  draft: RuntimeConfigDraft,
+  presetId: string,
+): RuntimeConfigDraft {
+  const preset = NETWORK_PRESETS.find((entry) => entry.id === presetId);
+  if (!preset) {
+    return draft;
+  }
+
+  return {
+    ...draft,
+    network: {
+      chainId: String(preset.chainId),
+      rpcUrl: preset.rpcUrl,
+    },
+  };
+}
+
+export function loadStoredRuntimeConfig() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const rawValue = window.localStorage.getItem(RUNTIME_CONFIG_STORAGE_KEY);
+  if (!rawValue) {
+    cachedRuntimeConfigRaw = null;
+    cachedRuntimeConfigValue = null;
+    return null;
+  }
+
+  if (rawValue === cachedRuntimeConfigRaw) {
+    return cachedRuntimeConfigValue;
+  }
+
+  try {
+    const parsed = runtimeConfigSchema.parse(JSON.parse(rawValue));
+    cachedRuntimeConfigRaw = rawValue;
+    cachedRuntimeConfigValue = parsed;
+    return parsed;
+  } catch {
+    window.localStorage.removeItem(RUNTIME_CONFIG_STORAGE_KEY);
+    cachedRuntimeConfigRaw = null;
+    cachedRuntimeConfigValue = null;
+    return null;
+  }
+}
+
+export function subscribeToStoredRuntimeConfig(onStoreChange: () => void) {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === null || event.key === RUNTIME_CONFIG_STORAGE_KEY) {
+      onStoreChange();
+    }
+  };
+
+  window.addEventListener("storage", handleStorage);
+  window.addEventListener(RUNTIME_CONFIG_STORAGE_EVENT, onStoreChange);
+
+  return () => {
+    window.removeEventListener("storage", handleStorage);
+    window.removeEventListener(RUNTIME_CONFIG_STORAGE_EVENT, onStoreChange);
+  };
+}
+
+export function saveStoredRuntimeConfig(runtimeConfig: RuntimeConfig) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const serialized = JSON.stringify(runtimeConfig);
+  cachedRuntimeConfigRaw = serialized;
+  cachedRuntimeConfigValue = runtimeConfig;
+  window.localStorage.setItem(RUNTIME_CONFIG_STORAGE_KEY, serialized);
+  window.dispatchEvent(new Event(RUNTIME_CONFIG_STORAGE_EVENT));
+}
+
+export function clearStoredRuntimeConfig() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem(RUNTIME_CONFIG_STORAGE_KEY);
+  cachedRuntimeConfigRaw = null;
+  cachedRuntimeConfigValue = null;
+  window.dispatchEvent(new Event(RUNTIME_CONFIG_STORAGE_EVENT));
+}

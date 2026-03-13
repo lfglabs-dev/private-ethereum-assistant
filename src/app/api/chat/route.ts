@@ -6,20 +6,19 @@ import {
   convertToModelMessages,
 } from "ai";
 import type { TextStreamPart } from "ai";
-import { model } from "@/lib/llm";
-import { config } from "@/lib/config";
 import { networkConfigSchema, DEFAULT_NETWORK_CONFIG } from "@/lib/ethereum";
 import { getSystemPrompt } from "@/lib/system-prompt";
 import { createTools } from "@/lib/tools";
+import { createRuntimeModel } from "@/lib/llm";
 import {
   AssistantUIMessage,
   createDebugLog,
 } from "@/lib/chat-stream";
 import {
-  buildE2EChatMockSseBody,
-  isE2EChatMockScenario,
-} from "@/lib/testing/e2e-chat-mocks";
-
+  getActiveModel,
+  getProviderLabel,
+  runtimeConfigSchema,
+} from "@/lib/runtime-config";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
@@ -66,37 +65,10 @@ function summarizeChunk(chunk: TextStreamPart<Record<string, never>>) {
 
 export async function POST(req: Request) {
   try {
-    const mockScenario = req.headers.get("x-e2e-mock-scenario");
-    if (
-      process.env.NODE_ENV !== "production" &&
-      mockScenario &&
-      isE2EChatMockScenario(mockScenario)
-    ) {
-      return new Response(buildE2EChatMockSseBody(mockScenario), {
-        headers: {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache, no-transform",
-          Connection: "keep-alive",
-        },
-      });
-    }
+    const { messages, networkConfig, runtimeConfig } = await req.json();
 
-    const { messages, networkConfig, e2eMockScenario } = await req.json();
-
-    if (
-      process.env.NODE_ENV !== "production" &&
-      typeof e2eMockScenario === "string" &&
-      isE2EChatMockScenario(e2eMockScenario)
-    ) {
-      return new Response(buildE2EChatMockSseBody(e2eMockScenario), {
-        headers: {
-          "Content-Type": "text/event-stream; charset=utf-8",
-          "Cache-Control": "no-cache, no-transform",
-          Connection: "keep-alive",
-        },
-      });
-    }
     const parsedNetworkConfig = networkConfigSchema.safeParse(networkConfig);
+    const parsedRuntimeConfig = runtimeConfigSchema.safeParse(runtimeConfig);
 
     if (networkConfig != null && !parsedNetworkConfig.success) {
       return new Response(
@@ -110,9 +82,30 @@ export async function POST(req: Request) {
       );
     }
 
+    if (!parsedRuntimeConfig.success) {
+      return new Response(
+        JSON.stringify({
+          error: parsedRuntimeConfig.error.issues[0]?.message ?? "Invalid runtime config.",
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
     const selectedNetworkConfig = parsedNetworkConfig.success
       ? parsedNetworkConfig.data
       : DEFAULT_NETWORK_CONFIG;
+    const selectedRuntimeConfig = {
+      ...parsedRuntimeConfig.data,
+      network: selectedNetworkConfig,
+    };
+    const activeModel = getActiveModel(selectedRuntimeConfig);
+    const providerLabel = getProviderLabel(selectedRuntimeConfig.llm.provider);
+    const model = createRuntimeModel(selectedRuntimeConfig, {
+      origin: new URL(req.url).origin,
+    });
 
     const stream = createUIMessageStream<AssistantUIMessage>({
       execute: async ({ writer }) => {
@@ -139,17 +132,17 @@ export async function POST(req: Request) {
         writeDebugLog({
           level: "info",
           stage: "request",
-          message: `Dispatching request to ${config.llm.model}`,
-          detail: `timeout=${Math.round(config.llm.timeoutMs / 1000)}s`,
+          message: `Dispatching request to ${providerLabel} · ${activeModel}`,
+          detail: `timeout=${Math.round(selectedRuntimeConfig.llm.timeoutMs / 1000)}s`,
         });
 
         const result = streamText({
           model,
-          system: getSystemPrompt(selectedNetworkConfig),
+          system: getSystemPrompt(selectedNetworkConfig, selectedRuntimeConfig),
           messages: await convertToModelMessages(messages),
-          tools: createTools(selectedNetworkConfig),
+          tools: createTools(selectedNetworkConfig, selectedRuntimeConfig),
           stopWhen: stepCountIs(8),
-          timeout: config.llm.timeoutMs,
+          timeout: selectedRuntimeConfig.llm.timeoutMs,
           experimental_onStart: () => {
             writeDebugLog({
               level: "info",
