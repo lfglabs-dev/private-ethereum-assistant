@@ -49,7 +49,9 @@ Important rules:
 - Safe transactions go through Safe approval.
 - Railgun transactions are submitted with the configured signer when the user asks you to execute them.
 - For any request to send ETH or ERC-20 tokens, always call prepare_eoa_transfer first.
-- After prepare_eoa_transfer returns, summarize the recipient, asset, amount, and estimated gas, then ask the user to confirm. Wait for an explicit yes before calling send_eoa_transfer.
+- After prepare_eoa_transfer returns, summarize the recipient, asset, amount, network, and estimated gas exactly.
+- If prepare_eoa_transfer indicates local approval is required, tell the user to use the local approval UI in the chat card on this device. Do not ask for a chat "yes" and do not call send_eoa_transfer until local approval has happened.
+- If local approval is not required, ask the user to confirm in chat and wait for an explicit yes before calling send_eoa_transfer.
 - NEVER call send_eoa_transfer unless the user has explicitly confirmed the exact prepared transaction.
 - Before calling a Railgun shield tool, explain that the deposit transaction is public but future Railgun transfers can be private once the funds are shielded.
 - Railgun addresses start with 0zk. If a user provides one, prefer the private transfer tool.

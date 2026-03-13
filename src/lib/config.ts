@@ -8,6 +8,15 @@ function getNumberEnv(name: string, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function getDecimalEnv(name: string, fallback: string) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    return fallback;
+  }
+
+  return /^\d+(\.\d+)?$/.test(value) ? value : fallback;
+}
+
 export const config = {
   llm: {
     baseURL: process.env.LLM_BASE_URL || "http://localhost:11434/v1",
@@ -18,6 +27,14 @@ export const config = {
     safeAddress: process.env.SAFE_ADDRESS || "0x4581812Df7500277e3fC72CF93f766DBBd32d371",
     rpcUrl: process.env.RPC_URL || "https://mainnet.base.org",
     chainId: Number(process.env.CHAIN_ID || "8453"),
+    localApprovalNativeThreshold: getDecimalEnv(
+      "EOA_LOCAL_APPROVAL_NATIVE_THRESHOLD",
+      "0.5",
+    ),
+    localApprovalErc20Threshold: getDecimalEnv(
+      "EOA_LOCAL_APPROVAL_ERC20_THRESHOLD",
+      "1000",
+    ),
   },
   railgun: {
     networkLabel: "Arbitrum",

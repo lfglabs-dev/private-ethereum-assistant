@@ -64,6 +64,12 @@ export async function ensureChatServer() {
       ...process.env,
       APP_MODE: "developer",
       NEXT_PUBLIC_APP_MODE: "developer",
+      EOA_LOCAL_APPROVAL_NATIVE_THRESHOLD:
+        process.env.E2E_LOCAL_APPROVAL_NATIVE_THRESHOLD ?? "0.00001",
+      RAILGUN_SCAN_TIMEOUT_MS:
+        process.env.E2E_RAILGUN_SCAN_TIMEOUT_MS ?? "30000",
+      RAILGUN_POLLING_INTERVAL_MS:
+        process.env.E2E_RAILGUN_POLLING_INTERVAL_MS ?? "2000",
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -115,6 +121,7 @@ export function createOpenRouterRuntimeConfig(
     network: networkConfig,
     wallet: {
       eoaPrivateKey: getWalletPrivateKey(),
+      approvalPolicy: runtimeConfig.wallet.approvalPolicy,
     },
   }
 }

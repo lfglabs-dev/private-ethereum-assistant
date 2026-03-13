@@ -23,7 +23,7 @@ export function getTools(
   const resolvedRuntimeConfig = resolveRuntimeConfig(networkConfig, runtimeConfig);
   const { prepareEoaTransfer, sendEoaTransfer } = createEoaTransferTools(
     resolvedRuntimeConfig.network,
-    resolvedRuntimeConfig.wallet.eoaPrivateKey,
+    resolvedRuntimeConfig.wallet,
   );
   const {
     getBalance,

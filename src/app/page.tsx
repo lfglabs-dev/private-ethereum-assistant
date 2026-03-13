@@ -250,6 +250,7 @@ function ConfiguredAssistant({
             <ChatMessage
               key={message.id}
               message={message}
+              runtimeConfig={runtimeConfig}
               isStreaming={
                 isLoading &&
                 index === messages.length - 1 &&
