@@ -1,8 +1,11 @@
 import type { Tool, ToolExecutionOptions } from "ai"
 import type { NetworkConfig } from "@/lib/ethereum"
-import { createDefaultRuntimeConfig } from "@/lib/runtime-config"
+import { createDefaultRuntimeConfig, type ActiveActor } from "@/lib/runtime-config"
 import type { Address, Hex } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
+
+process.env.RAILGUN_STORAGE_NAMESPACE ??= "railgun-e2e"
+process.env.RAILGUN_DERIVE_NAMESPACE_MNEMONIC ??= "1"
 
 export const ARBITRUM_CONFIG: NetworkConfig = {
   chainId: 42161,
@@ -35,7 +38,8 @@ export function getWalletAddress() {
 }
 
 export function createE2ERuntimeConfig(
-  networkConfig: NetworkConfig = ARBITRUM_CONFIG
+  networkConfig: NetworkConfig = ARBITRUM_CONFIG,
+  actor: ActiveActor = "eoa"
 ) {
   const runtimeConfig = createDefaultRuntimeConfig()
   const eoaPrivateKey = getWalletPrivateKey()
@@ -46,6 +50,9 @@ export function createE2ERuntimeConfig(
     wallet: {
       eoaPrivateKey,
       approvalPolicy: runtimeConfig.wallet.approvalPolicy,
+    },
+    actor: {
+      type: actor,
     },
     railgun: {
       ...runtimeConfig.railgun,
@@ -78,11 +85,45 @@ export async function executeTool<INPUT, OUTPUT>(
     throw new Error("Tool does not have an execute function.")
   }
 
-  const result = await tool.execute(input, createToolExecutionOptions())
+  const startedAt = Date.now()
+  const toolName = tool.execute.name || "anonymous_tool"
+  console.info(
+    `[e2e-tool] ${JSON.stringify({
+      event: "start",
+      input,
+      timestamp: new Date().toISOString(),
+      toolName,
+    })}`
+  )
+
+  let result: Awaited<ReturnType<NonNullable<typeof tool.execute>>>
+  try {
+    result = await tool.execute(input, createToolExecutionOptions())
+  } catch (error) {
+    console.error(
+      `[e2e-tool] ${JSON.stringify({
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error),
+        event: "error",
+        timestamp: new Date().toISOString(),
+        toolName,
+      })}`
+    )
+    throw error
+  }
+
   if (isAsyncIterable(result)) {
     throw new Error("Tool returned a stream. Use executeToolStream instead.")
   }
 
+  console.info(
+    `[e2e-tool] ${JSON.stringify({
+      durationMs: Date.now() - startedAt,
+      event: "success",
+      timestamp: new Date().toISOString(),
+      toolName,
+    })}`
+  )
   return result
 }
 
