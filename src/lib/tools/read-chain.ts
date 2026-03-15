@@ -18,6 +18,14 @@ import { getTrustWalletChainSlug } from "../trustwallet-assets";
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const symbolBytes32Abi = parseAbi(["function symbol() view returns (bytes32)"]);
 const nameBytes32Abi = parseAbi(["function name() view returns (bytes32)"]);
+const VERIFIED_TOKEN_QUERY_OVERRIDES: Partial<Record<number, Record<string, Address>>> = {
+  8453: {
+    USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  },
+  42161: {
+    USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  },
+};
 
 export const BASE_PORTFOLIO_TOKEN_ADDRESSES = [
   {
@@ -206,8 +214,12 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
       (value): value is string => Boolean(value?.trim())
     );
     const errors: string[] = [];
+    const overrideEntries = VERIFIED_TOKEN_QUERY_OVERRIDES[chainMetadata.id] ?? {};
 
-    if (!supportsTrustWalletTokenSearch && requested.length > 0) {
+    if (
+      !supportsTrustWalletTokenSearch &&
+      requested.some((value) => !overrideEntries[value.trim().toUpperCase()])
+    ) {
       errors.push(
         `Verified token search is not configured for ${chainMetadata.name}. Provide token contract addresses instead.`
       );
@@ -223,6 +235,12 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
     const seenCandidates = new Set<string>();
 
     for (const value of requested) {
+      const overrideAddress = overrideEntries[value.trim().toUpperCase()];
+      if (overrideAddress) {
+        resolved.push(overrideAddress);
+        continue;
+      }
+
       try {
         const resolution = await resolveTokenQuery({
           chainId: chainMetadata.id,

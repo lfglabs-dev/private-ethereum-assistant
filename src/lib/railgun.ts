@@ -78,6 +78,11 @@ const RAILGUN_NODE_PROVER_SCRIPT = path.join(
   "scripts",
   "railgun-fullprove.mjs",
 );
+const RAILGUN_NODE_VERIFY_SCRIPT = path.join(
+  process.cwd(),
+  "scripts",
+  "railgun-verify.mjs",
+);
 
 const TOKEN_ALIASES: Record<string, `0x${string}`> = {
   USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
@@ -689,6 +694,11 @@ const snarkJSGroth16 = groth16 as SnarkJSGroth16 & {
   verify: SnarkJSGroth16["verify"];
 };
 
+const stringifyRailgunJson = (value: unknown) =>
+  JSON.stringify(value, (_key, entryValue) =>
+    typeof entryValue === "bigint" ? entryValue.toString() : entryValue,
+  );
+
 const runNodeSnarkjsFullProve = async (
   formattedInputs: unknown,
   wasm: ArrayLike<number>,
@@ -707,7 +717,7 @@ const runNodeSnarkjsFullProve = async (
     railgunLog("info", "prover:node-subprocess-start", {
       tempDir,
     });
-    await fs.promises.writeFile(inputPath, JSON.stringify(formattedInputs));
+    await fs.promises.writeFile(inputPath, stringifyRailgunJson(formattedInputs));
     await fs.promises.writeFile(wasmPath, Buffer.from(Uint8Array.from(wasm)));
     await fs.promises.writeFile(zkeyPath, Buffer.from(Uint8Array.from(zkey)));
 
@@ -752,6 +762,81 @@ const runNodeSnarkjsFullProve = async (
   }
 };
 
+const runNodeSnarkjsVerify = async (
+  vkey: unknown,
+  publicSignals: unknown,
+  proof: unknown,
+) => {
+  await ensureContextDir();
+  const tempDir = await fs.promises.mkdtemp(
+    path.join(getRailgunStorageDir(), "node-verify-"),
+  );
+  const vkeyPath = path.join(tempDir, "vkey.json");
+  const publicSignalsPath = path.join(tempDir, "public-signals.json");
+  const proofPath = path.join(tempDir, "proof.json");
+  const outputPath = path.join(tempDir, "result.json");
+
+  try {
+    railgunLog("info", "prover:node-verify-start", {
+      tempDir,
+    });
+    await fs.promises.writeFile(vkeyPath, stringifyRailgunJson(vkey));
+    await fs.promises.writeFile(
+      publicSignalsPath,
+      stringifyRailgunJson(publicSignals),
+    );
+    await fs.promises.writeFile(proofPath, stringifyRailgunJson(proof));
+
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(
+        "node",
+        [
+          RAILGUN_NODE_VERIFY_SCRIPT,
+          vkeyPath,
+          publicSignalsPath,
+          proofPath,
+          outputPath,
+        ],
+        {
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stderr = "";
+
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      child.on("error", reject);
+      child.on("exit", (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+
+        railgunLog("error", "prover:node-verify-error", {
+          code,
+          stderr: stderr.trim(),
+        });
+        reject(
+          new Error(
+            `Node snarkjs verifier exited with code ${code}.${stderr ? ` ${stderr.trim()}` : ""}`,
+          ),
+        );
+      });
+    });
+
+    railgunLog("info", "prover:node-verify-success", {
+      tempDir,
+    });
+    const result = JSON.parse(await fs.promises.readFile(outputPath, "utf8")) as {
+      verified?: unknown;
+    };
+    return result.verified === true;
+  } finally {
+    await fs.promises.rm(tempDir, { force: true, recursive: true });
+  }
+};
+
 const getRailgunGroth16 = (): SnarkJSGroth16 => {
   if (!shouldUseNodeSnarkjsProver()) {
     return snarkJSGroth16;
@@ -767,7 +852,9 @@ const getRailgunGroth16 = (): SnarkJSGroth16 => {
         zkey as ArrayLike<number>,
       );
     },
-    verify: snarkJSGroth16.verify,
+    verify: async (vkey, publicSignals, proof) => {
+      return runNodeSnarkjsVerify(vkey, publicSignals, proof);
+    },
   } as SnarkJSGroth16;
 };
 
@@ -1030,6 +1117,14 @@ const shouldIgnoreCompletedUTXORescanError = (error: unknown) => {
   );
 };
 
+const shouldIgnorePOIRefreshError = (error: unknown) => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.message.includes("Failed to refresh POIs");
+};
+
 const syncWalletUTXOOnly = async (
   runtime: RailgunRuntime,
   reason: string,
@@ -1110,7 +1205,15 @@ const syncWalletState = async (
         });
         await waitForPrivateBalanceScans({ requireTxidComplete });
         if (refreshBalancesError) {
-          throw refreshBalancesError;
+          if (!shouldIgnorePOIRefreshError(refreshBalancesError)) {
+            throw refreshBalancesError;
+          }
+
+          railgunLog("warn", "wallet:refresh-balances-ignored-error", {
+            error: refreshBalancesError,
+            reason,
+            walletId: runtime.walletId,
+          });
         }
       } else {
         railgunLog("info", "wallet:rescan-utxo", {
@@ -1119,7 +1222,10 @@ const syncWalletState = async (
         try {
           await rescanFullUTXOMerkletreesAndWallets(RAILGUN_CHAIN, [runtime.walletId]);
         } catch (error) {
-          if (!shouldIgnoreCompletedUTXORescanError(error)) {
+          if (
+            !shouldIgnoreCompletedUTXORescanError(error) &&
+            !shouldIgnorePOIRefreshError(error)
+          ) {
             throw error;
           }
 
@@ -1979,23 +2085,25 @@ const buildUnshieldContext = async (
   const resolvedToken = await resolveToken(token);
   const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
   const recipientAddress = getAddress(recipient) as `0x${string}`;
+  const signerAddress = getSignerAccount().address as `0x${string}`;
   railgunLog("info", "unshield:context-build", {
     amount,
     recipient: recipientAddress,
+    signerAddress,
     token: resolvedToken.symbol,
     tokenAddress: resolvedToken.tokenAddress,
   });
 
   await syncWalletState(runtime, { reason: "unshield-context" });
-  const spendableBalance = await getShieldedBalanceForToken(runtime, resolvedToken);
-  const spendableBalanceRaw = await getSpendableShieldedBalanceRawForToken(
+  let spendableBalance = await getShieldedBalanceForToken(runtime, resolvedToken);
+  let spendableBalanceRaw = await getSpendableShieldedBalanceRawForToken(
     runtime,
     resolvedToken,
     { includeOptimistic: false },
   );
-  const recentOriginShield =
+  let recentOriginShield =
     spendableBalanceRaw < amountRaw
-      ? await findRecentOriginShield(resolvedToken, recipientAddress, amountRaw)
+      ? await findRecentOriginShield(resolvedToken, signerAddress, amountRaw)
       : undefined;
 
   if (spendableBalanceRaw < amountRaw && !recentOriginShield) {
@@ -2444,7 +2552,6 @@ async function executeUnshield(
         ...wrappedAmount,
         recipientAddress: prepared.recipient,
       };
-      const useWrappedNativeUnshieldFallback = prepared.token.isNative;
 
       await syncWalletState(prepared.runtime, { reason: "unshield-preflight" });
       stages.push({
@@ -2581,40 +2688,6 @@ async function executeUnshield(
         status: "completed",
         detail: txHash,
       });
-
-      let unwrapTxHash: `0x${string}` | undefined;
-      if (useWrappedNativeUnshieldFallback) {
-        railgunLog("info", "operation:unshield-unwrap:start", {
-          amountRaw: prepared.amountRaw,
-          recipient: prepared.recipient,
-          tokenAddress: prepared.token.tokenAddress,
-        });
-        const walletClient = getWalletClient();
-        unwrapTxHash = await walletClient.writeContract({
-          account: getSignerAccount(),
-          address: prepared.token.tokenAddress,
-          abi: [
-            {
-              inputs: [{ name: "wad", type: "uint256" }],
-              name: "withdraw",
-              outputs: [],
-              stateMutability: "nonpayable",
-              type: "function",
-            },
-          ],
-          functionName: "withdraw",
-          args: [prepared.amountRaw],
-        });
-        await publicClient.waitForTransactionReceipt({ hash: unwrapTxHash });
-        railgunLog("info", "operation:unshield-unwrap:confirmed", {
-          txHash: unwrapTxHash,
-        });
-        stages.push({
-          label: "Wrapped ETH unwrapped",
-          status: "completed",
-          detail: unwrapTxHash,
-        });
-      }
 
       if (prepared.originShieldTxid) {
         await consumeRecentOriginShield(prepared.originShieldTxid, prepared.amountRaw);
@@ -3014,25 +3087,20 @@ export async function railgunTransfer(
       }
 
       const tokenSelector = resolvedToken.isNative ? "ETH" : resolvedToken.tokenAddress;
-      const prepared = await buildTransferContext(
-        normalizedRecipient,
-        tokenSelector,
-        amount,
-      );
       if (
         requiresLocalApproval(
           "transfer",
-          prepared.amountRaw,
-          prepared.token.decimals,
+          amountRaw,
+          resolvedToken.decimals,
         )
       ) {
         const capturedConfig = cloneRailgunToolRuntimeConfig(currentConfig);
         return createPendingApprovalResult(
           "transfer",
-          prepared.runtime,
-          prepared.token,
-          prepared.amount,
-          prepared.amountRaw,
+          runtime,
+          resolvedToken,
+          amount,
+          amountRaw,
           async () => {
             setRailgunToolRuntimeConfig(capturedConfig);
             try {
@@ -3040,17 +3108,26 @@ export async function railgunTransfer(
                 await buildTransferContext(
                   normalizedRecipient,
                   tokenSelector,
-                  prepared.amount,
+                  amount,
                 ),
               );
             } catch (error) {
-              return buildErrorResult("transfer", error);
+              return buildErrorResult("transfer", error, {
+                amount,
+                recipient: normalizedRecipient,
+                token: resolvedToken.symbol,
+              });
             }
           },
-          prepared.recipient,
+          normalizedRecipient,
         );
       }
 
+      const prepared = await buildTransferContext(
+        normalizedRecipient,
+        tokenSelector,
+        amount,
+      );
       return await executeTransfer(prepared);
     } catch (error) {
       return buildErrorResult("transfer", error, { amount, recipient, token });
