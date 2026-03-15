@@ -6,7 +6,6 @@ import {
 } from "./config"
 
 const tools = createTools(ARBITRUM_CONFIG, createE2ERuntimeConfig(ARBITRUM_CONFIG))
-const DEFAULT_TOP_UP_AMOUNT = 0.0001
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
@@ -44,13 +43,13 @@ function getEthShieldedBalance(result: unknown) {
 }
 
 function getTopUpAmount(requiredAmount: number, topUpAmount?: string) {
-  const requestedTopUp = topUpAmount ? Number.parseFloat(topUpAmount) : DEFAULT_TOP_UP_AMOUNT
+  const requestedTopUp = topUpAmount ? Number.parseFloat(topUpAmount) : requiredAmount
   const normalizedTopUp =
     Number.isFinite(requestedTopUp) && requestedTopUp > 0
       ? requestedTopUp
-      : DEFAULT_TOP_UP_AMOUNT
+      : requiredAmount
 
-  return Math.max(requiredAmount * 2, normalizedTopUp).toString()
+  return Math.max(requiredAmount, normalizedTopUp).toString()
 }
 
 export async function ensureRailgunShieldedEthBalance(

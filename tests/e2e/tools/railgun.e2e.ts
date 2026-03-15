@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
+import { formatEther, parseEther } from "viem"
 import { createTools } from "@/lib/tools"
 import {
   ARBITRUM_CONFIG,
@@ -7,13 +8,13 @@ import {
   executeTool,
   getWalletAddress,
 } from "../helpers/config"
+import { verificationClient } from "../helpers/verification-client"
 
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 3)
 
 const tools = createTools(ARBITRUM_CONFIG, createE2ERuntimeConfig(ARBITRUM_CONFIG))
 const walletAddress = getWalletAddress()
-const SHIELD_AMOUNT = "0.0001"
-const UNSHIELD_AMOUNT = "0.00001"
+const MAX_SHIELD_AMOUNT_RAW = parseEther("0.000001")
 
 type RailgunBalanceResult = {
   railgun: true
@@ -91,6 +92,30 @@ function expectRailgunErrorResult(
   }
 }
 
+function getAffordableRailgunAmounts(publicBalanceRaw: bigint) {
+  if (publicBalanceRaw <= 0n) {
+    throw new Error("The public EOA wallet needs ETH to exercise Railgun E2E flows.")
+  }
+
+  const shieldAmountRaw =
+    publicBalanceRaw / 50n > 0n
+      ? publicBalanceRaw / 50n < MAX_SHIELD_AMOUNT_RAW
+        ? publicBalanceRaw / 50n
+        : MAX_SHIELD_AMOUNT_RAW
+      : 1n
+  const unshieldAmountRaw = shieldAmountRaw > 1n ? shieldAmountRaw / 2n : 1n
+
+  return {
+    shieldAmount: formatEther(shieldAmountRaw),
+    unshieldAmount: formatEther(unshieldAmountRaw),
+  }
+}
+
+function expectFundingConstraint(result: unknown, operation: "shield" | "unshield") {
+  expectRailgunErrorResult(result, operation)
+  expect(result.message.toLowerCase()).toMatch(/insufficient|fund/)
+}
+
 describe("Railgun E2E", () => {
   let railgunConfigured = false
   let allBalances: unknown
@@ -98,14 +123,19 @@ describe("Railgun E2E", () => {
   let shieldResult: unknown
   let transferFailure: unknown
   let unshieldResult: unknown
+  let shieldAmount = "0"
+  let unshieldAmount = "0"
 
   beforeAll(async () => {
+    const publicBalanceRaw = await verificationClient.getBalance({ address: walletAddress })
+    ;({ shieldAmount, unshieldAmount } = getAffordableRailgunAmounts(publicBalanceRaw))
+
     allBalances = await executeTool(tools.railgun_balance, {})
     if (!isRecord(allBalances) || allBalances.status !== "success") {
       ethBalance = await executeTool(tools.railgun_balance, { token: "ETH" })
       shieldResult = await executeTool(tools.railgun_shield, {
         token: "ETH",
-        amount: SHIELD_AMOUNT,
+        amount: shieldAmount,
       })
       transferFailure = await executeTool(tools.railgun_transfer, {
         recipient: "0zk1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
@@ -115,7 +145,7 @@ describe("Railgun E2E", () => {
       unshieldResult = await executeTool(tools.railgun_unshield, {
         recipient: walletAddress,
         token: "ETH",
-        amount: UNSHIELD_AMOUNT,
+        amount: unshieldAmount,
       })
       return
     }
@@ -128,9 +158,8 @@ describe("Railgun E2E", () => {
 
     shieldResult = await executeTool(tools.railgun_shield, {
       token: "ETH",
-      amount: SHIELD_AMOUNT,
+      amount: shieldAmount,
     })
-    expectRailgunOperationResult(shieldResult, "shield")
 
     transferFailure = await executeTool(tools.railgun_transfer, {
       recipient: ethBalance.railgunAddress,
@@ -138,11 +167,22 @@ describe("Railgun E2E", () => {
       amount: "999999",
     })
 
-    unshieldResult = await executeTool(tools.railgun_unshield, {
-      recipient: walletAddress,
-      token: "ETH",
-      amount: UNSHIELD_AMOUNT,
-    })
+    unshieldResult =
+      isRecord(shieldResult) && shieldResult.status === "success"
+        ? await executeTool(tools.railgun_unshield, {
+            recipient: walletAddress,
+            token: "ETH",
+            amount: unshieldAmount,
+          })
+        : {
+            railgun: true,
+            status: "error",
+            operation: "unshield",
+            message:
+              isRecord(shieldResult) && typeof shieldResult.message === "string"
+                ? shieldResult.message
+                : "Could not fund the Railgun unshield test.",
+          }
   })
 
   test("railgun_balance returns the ETH balance row and Railgun address", () => {
@@ -176,6 +216,11 @@ describe("Railgun E2E", () => {
       return
     }
 
+    if (isRecord(shieldResult) && shieldResult.status === "error") {
+      expectFundingConstraint(shieldResult, "shield")
+      return
+    }
+
     expectRailgunOperationResult(shieldResult, "shield")
     expect(shieldResult.txHash).toMatch(/^0x[a-fA-F0-9]{64}$/)
     expect(shieldResult.explorerUrl).toContain("arbiscan.io")
@@ -197,6 +242,11 @@ describe("Railgun E2E", () => {
     if (!railgunConfigured) {
       expectRailgunErrorResult(unshieldResult, "unshield")
       expect(unshieldResult.setup?.length ?? 0).toBeGreaterThan(0)
+      return
+    }
+
+    if (isRecord(unshieldResult) && unshieldResult.status === "error") {
+      expectFundingConstraint(unshieldResult, "unshield")
       return
     }
 

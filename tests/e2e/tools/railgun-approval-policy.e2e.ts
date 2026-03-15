@@ -23,8 +23,8 @@ const runtimeConfig = {
 }
 const tools = createTools(ARBITRUM_CONFIG, runtimeConfig)
 const SHIELD_AMOUNT = "0.000001"
-const TRANSFER_AMOUNT = "0.0000001"
-const UNSHIELD_AMOUNT = "0.0000001"
+const TRANSFER_AMOUNT = "0.0000006"
+const UNSHIELD_AMOUNT = "0.0000006"
 
 type RailgunApprovalResult = {
   railgun: true

@@ -4,7 +4,7 @@ import { ARBITRUM_CONFIG, createE2ERuntimeConfig } from "./config"
 export const BALANCE_ROUTING_PRIVACY_GUIDANCE =
   "Shielding is public on Arbitrum, but once confirmed the refreshed private balance can fund the retried Railgun action."
 
-export const BALANCE_ROUTING_ETH_AMOUNT = "0.001"
+export const BALANCE_ROUTING_ETH_AMOUNT = "0.0003"
 
 export function createBalanceRoutingRuntimeConfig(
   networkConfig: NetworkConfig = ARBITRUM_CONFIG,

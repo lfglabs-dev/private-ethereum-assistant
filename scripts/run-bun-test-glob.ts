@@ -3,6 +3,7 @@ export {};
 const args = process.argv.slice(2);
 
 let timeout = "120000";
+let maxConcurrency: string | undefined;
 const patterns: string[] = [];
 
 for (let index = 0; index < args.length; index += 1) {
@@ -13,6 +14,16 @@ for (let index = 0; index < args.length; index += 1) {
       throw new Error("Missing value for --timeout.");
     }
     timeout = next;
+    index += 1;
+    continue;
+  }
+
+  if (arg === "--max-concurrency") {
+    const next = args[index + 1];
+    if (!next) {
+      throw new Error("Missing value for --max-concurrency.");
+    }
+    maxConcurrency = next;
     index += 1;
     continue;
   }
@@ -38,7 +49,14 @@ if (files.length === 0) {
 }
 
 const proc = Bun.spawn({
-  cmd: ["bun", "test", "--timeout", timeout, ...files.map((file) => `./${file}`)],
+  cmd: [
+    "bun",
+    "test",
+    "--timeout",
+    timeout,
+    ...(maxConcurrency ? ["--max-concurrency", maxConcurrency] : []),
+    ...files.map((file) => `./${file}`),
+  ],
   cwd: process.cwd(),
   env: process.env,
   stdout: "inherit",

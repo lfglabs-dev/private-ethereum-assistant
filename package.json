@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "bunx eslint .",
     "test": "bun test src",
-    "test:e2e:tools": "bun run scripts/run-bun-test-glob.ts --timeout 120000 'tests/e2e/tools/*.e2e.ts'",
+    "test:e2e:tools": "bun run scripts/run-bun-test-glob.ts --timeout 120000 --max-concurrency 1 'tests/e2e/tools/*.e2e.ts'",
     "test:e2e:llm": "bun run scripts/run-bun-test-glob.ts --timeout 120000 'tests/e2e/llm/*.e2e.ts'",
     "test:e2e:browser": "bun run tests/e2e/browser/run-browser-tests.ts"
   },
