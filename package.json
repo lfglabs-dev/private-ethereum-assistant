@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "bun run scripts/dev.ts",
+    "local": "bun run scripts/local.ts",
     "build": "next build",
     "start": "next start",
     "lint": "bunx eslint .",

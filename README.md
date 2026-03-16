@@ -4,106 +4,143 @@ Private Ethereum Assistant is a local-first Next.js chat app for interacting wit
 
 It can:
 - read balances, transactions, and ENS data on the selected network
-- prepare and send normal wallet transactions from a configured EOA
-- inspect and propose Safe transactions
-- run Railgun test flows on Arbitrum
+- prepare and send normal wallet transactions from a configured EOA (Externally Owned Account — a standard Ethereum wallet controlled by a private key)
+- inspect and propose Safe (multisig) transactions
+- run Railgun privacy test flows on Arbitrum
 
-## Runtime configuration
+## Prerequisites
 
-The app uses UI onboarding for runtime settings, with secrets saved server-side.
+Install the following before starting:
 
-Stored in browser local storage:
-- selected LLM provider
-- local model base URL
-- provider-specific model names
-- selected RPC and chain ID
-- Safe address, Safe RPC, and chain ID
-- wallet approval thresholds
-- Railgun RPC, POI nodes, explorer URL, mnemonic, and timing settings
+| Tool | What it does | Install |
+|------|-------------|---------|
+| [Bun](https://bun.sh) | JavaScript runtime and package manager | `curl -fsSL https://bun.sh/install \| bash` |
+| [Ollama](https://ollama.com) | Local LLM server (Normal mode only) | Download from ollama.com or `brew install ollama` |
+| [dotenvx](https://dotenvx.com) | Encrypted env loader (Developer mode only) | `brew install dotenvx/brew/dotenvx` |
 
-Stored in `.env.local` on the machine running the app:
-- `EOA_PRIVATE_KEY`
-- `SAFE_SIGNER_PRIVATE_KEY`
-- `SAFE_API_KEY`
-
-Security note:
-- `.env.local` private keys are still sensitive
-- use dedicated low-value wallets
-- `Delete all` in settings clears browser prefs only
-
-## LLM providers
-
-The app supports two interchangeable runtime backends:
-
-### OpenRouter
-
-Use `OpenRouter` when you want the practical default backend.
-
-Runtime behavior:
-- base URL is `https://openrouter.ai/api/v1`
-- auth uses the developer/test key from `.env.tianjin`
-- the recommended model is `qwen/qwen3.5-27b`
-- prompts and tool outputs leave the machine for inference
-- Ollama is not required when you are running in developer mode with OpenRouter
-
-### Local
-
-Use `Local` for Ollama, LM Studio, or any other OpenAI-compatible local endpoint.
-
-Runtime behavior:
-- enter the local base URL in onboarding or settings
-- choose the local model name separately from the OpenRouter model
-- no repo env editing is needed to switch back and forth
+The project runs on macOS. On Linux, everything works except the automatic browser-open step (you will need to open `http://localhost:3000` manually).
 
 ## Getting started
 
-1. Install dependencies:
+Install dependencies first (one-time):
 
 ```bash
 bun install --frozen-lockfile
 ```
 
-2. Start the app with the developer/test secrets from `.env.tianjin`:
+Then choose **one** of the two modes below.
+
+### Normal mode (recommended for first-time users)
+
+Normal mode runs the LLM locally via Ollama. No external API keys are needed.
+
+1. Start the app:
+
+```bash
+bun run local
+```
+
+2. The launcher will automatically:
+   - start Ollama if it is not already running
+   - pull the default model (`qwen3:8b`) if not already downloaded
+   - start the Next.js dev server on `http://localhost:3000`
+   - open the browser
+
+3. Complete the onboarding wizard in the browser:
+   - **Provider:** select `Local`
+   - **Base URL:** `http://localhost:11434/v1` (pre-filled for Ollama)
+   - **Model:** `qwen3:8b`
+   - **Keys:** paste your EOA private key (the hex private key of the Ethereum wallet you want the assistant to use)
+
+You can change any of these later in the settings panel.
+
+### Developer mode
+
+Developer mode uses OpenRouter (a cloud LLM gateway) instead of a local model. It loads encrypted API keys from the repo file `.env.tianjin` via dotenvx. You need the dotenvx decryption key (ask a team member if you don't have it).
+
+1. Start the app:
 
 ```bash
 dotenvx run -f .env.tianjin -- bun run dev -- --developer-mode
 ```
 
-3. Open the app.
+2. Open `http://localhost:3000` in your browser.
 
-4. Complete onboarding in the UI.
+3. Complete the onboarding wizard. The OpenRouter key is injected automatically; you still need to provide your EOA private key in the Keys step.
 
-Recommended first-run path:
-- choose `OpenRouter` in developer mode for the default repo-backed setup
-- switch to `Local` only when you want to test your own Ollama or LM Studio endpoint
-- enter your EOA private key in the `Keys` step
-- confirm or edit the default Safe, network, and Railgun values
+## Runtime configuration
 
-## Safe and Railgun notes
+The app uses a UI onboarding wizard for runtime settings. Secrets are saved server-side.
 
-### Safe
+**Stored in browser local storage** (non-sensitive preferences):
+- selected LLM provider and model names
+- local model base URL
+- selected RPC endpoint and chain ID
+- Safe address, Safe RPC, and chain ID
+- wallet approval thresholds
+- Railgun RPC, POI (Proof of Innocence) nodes, explorer URL, mnemonic, and timing settings
+
+**Stored in `.env.local` on the machine** (sensitive — never committed):
+- `EOA_PRIVATE_KEY` — the Ethereum wallet private key
+- `SAFE_SIGNER_PRIVATE_KEY` — the Safe multisig signer key (optional)
+- `SAFE_API_KEY` — Safe Transaction Service API key (optional)
+
+**Security notes:**
+- `.env.local` private keys are sensitive — use dedicated low-value wallets
+- "Delete all" in settings clears browser preferences only, not `.env.local`
+
+## LLM providers
+
+The app supports two interchangeable backends. You can switch between them at any time in settings.
+
+### OpenRouter
+
+Cloud-based inference via [OpenRouter](https://openrouter.ai). Use this when you want the practical default backend (Developer mode).
+
+- Base URL: `https://openrouter.ai/api/v1`
+- Auth: uses the developer/test key from `.env.tianjin`
+- Recommended model: `qwen/qwen3.5-27b`
+- Prompts and tool outputs leave your machine for inference
+- Ollama is not required
+
+### Local
+
+Fully offline inference via Ollama, LM Studio, or any OpenAI-compatible local server.
+
+- The launcher (`bun run local`) manages Ollama automatically when using the default `localhost:11434` endpoint
+- If you use a different local server, make sure it is running before starting the app
+- Enter your server's base URL and model name in onboarding or settings
+- No repo env editing is needed to switch between Local and OpenRouter
+
+## Safe and Railgun
+
+### Safe (multisig wallet)
+
+[Safe](https://safe.global) is a smart-contract wallet requiring multiple signatures to execute transactions.
 
 - Safe config is independent from the selected read/send network
-- the app can inspect the configured Safe without a signer key
-- proposing from the app requires a Safe owner key and `SAFE_API_KEY` only if you want automatic signing/submission
-- leaving the Safe signer key blank keeps the flow manual in the Safe UI
+- The app can inspect a configured Safe without a signer key
+- Proposing transactions requires a Safe owner key; `SAFE_API_KEY` is only needed for automatic signing/submission to the Safe Transaction Service
+- Leaving the Safe signer key blank keeps the flow manual (you confirm in the Safe UI)
 
-### Railgun
+### Railgun (privacy)
 
-- Railgun settings are edited in the same runtime settings UI
-- the default Railgun network remains Arbitrum
-- leaving the Railgun mnemonic blank derives one from the configured EOA key for testing
-- shielding is public; later Railgun transfers can be private
+[Railgun](https://railgun.org) enables private transfers on EVM chains using zero-knowledge proofs.
+
+- Railgun settings are edited in the same settings UI
+- The default Railgun network is Arbitrum
+- Leaving the Railgun mnemonic blank derives one from your configured EOA key (for testing only)
+- Shielding (depositing into Railgun) is a public on-chain transaction; subsequent Railgun-to-Railgun transfers are private
 
 ## Testing
 
-Unit tests are intentionally limited to schema and serialization logic:
+Unit tests cover schema and serialization logic:
 
 ```bash
 bun test
 ```
 
-Browser E2E uses the onboarding flow and OpenRouter:
+Browser E2E tests use the onboarding flow with OpenRouter (requires `.env.tianjin`):
 
 ```bash
 dotenvx run -f .env.tianjin -- bun test:e2e:browser
@@ -112,12 +149,12 @@ dotenvx run -f .env.tianjin -- bun test:e2e:browser
 The browser suite verifies:
 - first-run onboarding
 - OpenRouter-backed chat success
-- provider switching between `OpenRouter` and `Local`
+- provider switching between OpenRouter and Local
 - persistence across reload
 - edit flow
 - delete-all flow
 
-Tool-level E2E tests remain available separately:
+Tool-level E2E tests:
 
 ```bash
 dotenvx run -f .env.tianjin -- bun test:e2e:tools
@@ -125,16 +162,16 @@ dotenvx run -f .env.tianjin -- bun test:e2e:tools
 
 ## Troubleshooting
 
-If OpenRouter requests fail:
+**OpenRouter requests fail:**
 - confirm you started the app with `dotenvx run -f .env.tianjin`
 - confirm `.env.tianjin` contains a valid `OPEN_ROUTER_KEY`
-- if startup says `Missing local dependencies`, run `bun install --frozen-lockfile` once in the repo root
+- if startup says "Missing local dependencies", run `bun install --frozen-lockfile`
 
-If Local requests fail:
-- confirm your local model server is running
-- confirm the Local base URL includes the correct `/v1` path when required
-- confirm the configured local model name matches the model exposed by your server
+**Local requests fail:**
+- confirm your local model server is running (`ollama serve` or equivalent)
+- confirm the Local base URL matches the API root exposed by your server
+- confirm the model name matches an available model (`ollama list` to check)
 
-If onboarding keeps reappearing:
-- check whether the browser profile blocks local storage
-- open DevTools and confirm local storage is available for the app origin
+**Onboarding keeps reappearing:**
+- check whether your browser profile blocks local storage
+- open DevTools > Application > Local Storage and confirm it is writable for the app origin
