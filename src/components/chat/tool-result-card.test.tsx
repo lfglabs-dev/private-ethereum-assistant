@@ -78,4 +78,52 @@ describe("ToolResultCard", () => {
     expect(html).toContain("Wrapped Ether")
     expect(html).toContain("Confirm the contract address")
   })
+
+  test("renders railgun freshness and background indexing badges", () => {
+    const balanceHtml = renderToStaticMarkup(
+      <ToolResultCard
+        result={{
+          railgun: true,
+          status: "success",
+          operation: "balance",
+          network: "Arbitrum",
+          railgunAddress: "0zk1example",
+          scan: {},
+          balances: [{ tokenAddress: "0x1", symbol: "ETH", amount: "1.2", rawAmount: "1200000000000000000" }],
+          freshness: {
+            source: "cache",
+            updatedAt: "2026-03-15T00:00:00.000Z",
+            ageMs: 15_000,
+            refreshing: true,
+          },
+        }}
+      />,
+    )
+
+    const actionHtml = renderToStaticMarkup(
+      <ToolResultCard
+        result={{
+          railgun: true,
+          status: "success",
+          operation: "shield",
+          network: "Arbitrum",
+          railgunAddress: "0zk1example",
+          token: "ETH",
+          amount: "0.1",
+          summary: "Shielded",
+          privacyImpact: "public deposit",
+          privacyNote: "Deposit is public.",
+          txHash: "0x1234",
+          explorerUrl: "https://arbiscan.io/tx/0x1234",
+          stages: [],
+          scan: {},
+          balanceIndexing: "pending",
+        }}
+      />,
+    )
+
+    expect(balanceHtml).toContain("Snapshot")
+    expect(balanceHtml).toContain("Refreshing in background")
+    expect(actionHtml).toContain("Private balance indexing in background")
+  })
 })

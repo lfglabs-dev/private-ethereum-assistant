@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useChat } from "@ai-sdk/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDown, RefreshCw, Settings2, Trash2, X } from "lucide-react";
@@ -142,6 +142,46 @@ function ConfiguredAssistant({
   const providerLabel = getProviderLabel(runtimeConfig.llm.provider);
   const activeNetworkLabel = getNetworkLabel(runtimeConfig.network);
   const settingsEnabled = appMode !== "developer";
+
+  useEffect(() => {
+    const hasRailgunCredential =
+      runtimeConfig.wallet.eoaPrivateKey.trim().length > 0 ||
+      runtimeConfig.railgun.mnemonic.trim().length > 0;
+
+    if (!hasRailgunCredential) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const warmRailgun = async () => {
+      try {
+        await fetch("/api/railgun-warm", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            runtimeConfig,
+          }),
+        });
+      } catch {
+        if (!cancelled) {
+          // Ignore warm-up failures here and let on-demand actions report errors.
+        }
+      }
+    };
+
+    void warmRailgun();
+    const intervalId = window.setInterval(() => {
+      void warmRailgun();
+    }, 60_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [runtimeConfig]);
 
   const sendChatMessage = (text: string) => {
     setDebugEntries([]);
