@@ -181,12 +181,15 @@ async function click(selector: string) {
   await runAgentBrowser(["click", selector]);
 }
 
-async function selectActor(actor: "eoa" | "safe" | "railgun") {
-  await click('[data-testid="runtime-settings-trigger"]');
-  await runAgentBrowser(["wait", `[data-testid="runtime-actor-${actor}"]`]);
-  await click(`[data-testid="runtime-actor-${actor}"]`);
-  await click('[data-testid="runtime-settings-save"]');
-  await waitForBodyCondition((text) => text.includes(`Actor ${actor.toUpperCase()}`), 30_000);
+async function selectMode(mode: "eoa" | "safe" | "railgun") {
+  const labelByMode = {
+    eoa: "EOA",
+    safe: "Safe",
+    railgun: "Private",
+  } as const;
+
+  await click(`[data-testid="runtime-mode-picker-${mode}"]`);
+  await waitForBodyCondition((text) => text.includes(`Mode ${labelByMode[mode]}`), 30_000);
 }
 
 async function submitMessage(message: string) {
@@ -255,7 +258,8 @@ async function waitForBodyCondition(
 async function ensureDeveloperModeReady() {
   await openHome();
   await runAgentBrowser(["wait", '[data-testid="chat-input"]']);
-  await expectText('[data-testid="runtime-provider-label"]', ["OpenRouter"]);
+  await runAgentBrowser(["wait", '[data-testid="runtime-mode-picker"]']);
+  await expectText("body", ["OpenRouter", "Mode EOA"]);
 }
 
 async function waitForPageErrors(testName: string) {
@@ -309,6 +313,17 @@ async function main() {
       await expectText("body", ["Private Ethereum Assistant", "OpenRouter"]);
     },
     "developer-shell.png",
+  );
+
+  await runTest(
+    "Top-right mode picker switches modes manually",
+    async () => {
+      await ensureDeveloperModeReady();
+      await selectMode("safe");
+      await selectMode("railgun");
+      await selectMode("eoa");
+    },
+    "mode-picker.png",
   );
 
   await runTest(
@@ -407,6 +422,7 @@ async function main() {
     "Railgun balances render in chat",
     async () => {
       await ensureDeveloperModeReady();
+      await selectMode("railgun");
       await submitMessage("Show my Railgun balance");
       const bodyText = await waitForBodyCondition(
         (text) =>
@@ -427,6 +443,7 @@ async function main() {
     "High-value Railgun shields require local approval and can be approved",
     async () => {
       await ensureDeveloperModeReady();
+      await selectMode("railgun");
       await submitMessage(
         "I understand the Railgun deposit is public. Shield 0.000001 ETH into Railgun now.",
       );
@@ -450,6 +467,7 @@ async function main() {
     "High-value Railgun unshields can be rejected locally without submission",
     async () => {
       await ensureDeveloperModeReady();
+      await selectMode("railgun");
       await submitMessage(
         `I understand this exits the privacy pool. Unshield 0.0000001 ETH to ${E2E_WALLET_ADDRESS}.`,
       );
@@ -475,6 +493,7 @@ async function main() {
     "Railgun private shortfalls recommend shielding in chat",
     async () => {
       await ensureDeveloperModeReady();
+      await selectMode("railgun");
       await submitMessage(
         `Send ${BALANCE_ROUTING_ETH_AMOUNT} ETH to vitalik.eth from my private balance.`,
       );
@@ -498,6 +517,7 @@ async function main() {
     async () => {
       await ensureRailgunShieldedEthBalance("0.00001");
       await ensureDeveloperModeReady();
+      await selectMode("railgun");
       await submitMessage("Send 0.00001 ETH to vitalik.eth from my private balance.");
       await waitForText(
         '[data-testid="result-railgun-unshield"]',
@@ -516,9 +536,30 @@ async function main() {
   );
 
   await runTest(
-    "Safe info renders in chat",
+    "Out-of-mode requests show a confirmation widget and replay after confirmation",
     async () => {
       await ensureDeveloperModeReady();
+      await submitMessage("Show Safe wallet info");
+      await waitForText('[data-testid="mode-switch-card"]', [
+        "Switch to Safe mode",
+        "Requested: Safe",
+      ]);
+      await click('[data-testid="mode-switch-confirm"]');
+      await waitForBodyCondition((text) => text.includes("Mode Safe"), 30_000);
+      await waitForText('[data-testid="result-safe-info"]', [
+        "Safe Info",
+        "Threshold",
+        "Owners",
+      ]);
+    },
+    "mode-switch-confirmation.png",
+  );
+
+  await runTest(
+    "Safe info renders in chat when Safe mode is active",
+    async () => {
+      await ensureDeveloperModeReady();
+      await selectMode("safe");
       await submitMessage("Show Safe wallet info");
       await waitForText('[data-testid="result-safe-info"]', [
         "Safe Info",
@@ -534,7 +575,7 @@ async function main() {
     "Safe swap flow renders the CoW swap card",
     async () => {
       await ensureDeveloperModeReady();
-      await selectActor("safe");
+      await selectMode("safe");
       await submitMessage("Swap 0.001 ETH for USDC.");
       await waitForText(
         '[data-testid="result-swap"]',
@@ -547,19 +588,17 @@ async function main() {
   );
 
   await runTest(
-    "Railgun swap requests explain the unsupported private route",
+    "Private-mode swap requests ask for an EOA mode switch",
     async () => {
       await ensureDeveloperModeReady();
-      await selectActor("railgun");
+      await selectMode("railgun");
       await submitMessage("Swap 0.001 ETH for USDC.");
-      await waitForText(
-        '[data-testid="result-swap"]',
-        ["RAILGUN", "unsupported", "public CoW route", "EOA"],
-        120_000,
-      );
-      await waitForAssistantAnswer(["Railgun", "unsupported", "EOA"], 120_000);
+      await waitForText('[data-testid="mode-switch-card"]', [
+        "Switch to EOA mode",
+        "Requested: EOA",
+      ]);
     },
-    "railgun-swap-unsupported.png",
+    "railgun-swap-mode-switch.png",
   );
 
   await runTest(

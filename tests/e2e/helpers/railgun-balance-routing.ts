@@ -9,7 +9,7 @@ export const BALANCE_ROUTING_ETH_AMOUNT = "0.0003"
 export function createBalanceRoutingRuntimeConfig(
   networkConfig: NetworkConfig = ARBITRUM_CONFIG,
 ) {
-  const runtimeConfig = createE2ERuntimeConfig(networkConfig)
+  const runtimeConfig = createE2ERuntimeConfig(networkConfig, "railgun")
 
   return {
     ...runtimeConfig,

@@ -32,16 +32,22 @@ setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 6)
 const VITALIK_ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 const walletAddress = getWalletAddress()
 const runtimeConfig = createOpenRouterRuntimeConfig(ARBITRUM_CONFIG)
-const safeSwapRuntimeConfig = {
+const safeModeRuntimeConfig = {
   ...runtimeConfig,
   actor: {
     type: "safe" as const,
   },
 }
-const railgunSwapRuntimeConfig = {
+const privateModeRuntimeConfig = {
   ...runtimeConfig,
   actor: {
     type: "railgun" as const,
+  },
+}
+const safeSwapRuntimeConfig = {
+  ...runtimeConfig,
+  actor: {
+    type: "safe" as const,
   },
 }
 const balanceRoutingRuntimeConfig = createBalanceRoutingRuntimeConfig(ARBITRUM_CONFIG)
@@ -50,6 +56,9 @@ const longRunningRuntimeConfig = {
   llm: {
     ...runtimeConfig.llm,
     timeoutMs: Math.max(runtimeConfig.llm.timeoutMs, 420_000),
+  },
+  actor: {
+    type: "railgun" as const,
   },
 }
 
@@ -83,6 +92,23 @@ function expectTextToContain(text: string, expected: string[]) {
   for (const fragment of expected) {
     expect(text).toContain(fragment)
   }
+}
+
+function findModeSwitch(
+  modeSwitches: Array<{
+    requestedMode: string
+    originalRequest: string
+  }>,
+  requestedMode: string,
+) {
+  const modeSwitch = modeSwitches.find((entry) => entry.requestedMode === requestedMode)
+  if (!modeSwitch) {
+    throw new Error(
+      `Expected a ${requestedMode} mode switch. Saw: ${modeSwitches.map((entry) => entry.requestedMode).join(", ")}`,
+    )
+  }
+
+  return modeSwitch
 }
 
 describe("LLM tool routing E2E", () => {
@@ -200,20 +226,53 @@ describe("LLM tool routing E2E", () => {
     expect(result.text.toLowerCase()).toMatch(/approval|approve/)
   })
 
-  test("LLM queries Safe info", async () => {
+  test("LLM requests a Safe mode switch instead of taking the EOA path", async () => {
+    const result = await sendChatPrompt({
+      prompt: "Send 0.001 ETH from my Safe to vitalik.eth.",
+      runtimeConfig,
+    })
+
+    expect(result.toolCalls).toHaveLength(0)
+    const modeSwitch = findModeSwitch(result.modeSwitches, "safe")
+    expect(modeSwitch.originalRequest).toBe("Send 0.001 ETH from my Safe to vitalik.eth.")
+  })
+
+  test("LLM routes Safe-mode sends through ENS resolution and Safe proposal", async () => {
+    const result = await sendChatPrompt({
+      prompt: "Send 0.001 ETH from my Safe to vitalik.eth.",
+      runtimeConfig: safeModeRuntimeConfig,
+    })
+
+    findToolCall(result.toolCalls, "resolve_ens")
+    findToolCall(result.toolCalls, "propose_transaction")
+    expect(result.text.toLowerCase()).toMatch(/safe|sign|proposal/)
+  })
+
+  test("LLM requests an EOA mode switch from Safe mode when the user asks for the EOA path", async () => {
+    const result = await sendChatPrompt({
+      prompt: "Send 0.001 ETH from my EOA to vitalik.eth.",
+      runtimeConfig: safeModeRuntimeConfig,
+    })
+
+    expect(result.toolCalls).toHaveLength(0)
+    const modeSwitch = findModeSwitch(result.modeSwitches, "eoa")
+    expect(modeSwitch.originalRequest).toBe("Send 0.001 ETH from my EOA to vitalik.eth.")
+  })
+
+  test("LLM queries Safe info in Safe mode", async () => {
     const result = await sendChatPrompt({
       prompt: "Show me info about our Safe wallet.",
-      runtimeConfig,
+      runtimeConfig: safeModeRuntimeConfig,
     })
 
     findToolCall(result.toolCalls, "get_safe_info")
     expect(result.text).toMatch(/owner|threshold|balance/i)
   })
 
-  test("LLM lists pending Safe transactions", async () => {
+  test("LLM lists pending Safe transactions in Safe mode", async () => {
     const result = await sendChatPrompt({
       prompt: "Are there any pending Safe transactions?",
-      runtimeConfig,
+      runtimeConfig: safeModeRuntimeConfig,
     })
 
     findToolCall(result.toolCalls, "get_pending_transactions")
@@ -241,31 +300,20 @@ describe("LLM tool routing E2E", () => {
     expect(result.text.toLowerCase()).toMatch(/safe|swap|usdc/)
   })
 
-  test("LLM routes Railgun swap prompts through swap_tokens", async () => {
+  test("LLM requests an EOA mode switch for swaps from Private mode", async () => {
     const result = await sendChatPrompt({
       prompt: "Swap 0.001 ETH for USDC.",
-      runtimeConfig: railgunSwapRuntimeConfig,
+      runtimeConfig: privateModeRuntimeConfig,
     })
 
-    const toolCall = findToolCall(result.toolCalls, "swap_tokens")
-    expect(isRecord(toolCall.input) ? toolCall.input.sellToken : undefined).toBe("ETH")
-    expect(isRecord(toolCall.input) ? toolCall.input.buyToken : undefined).toBe("USDC")
-    expect(isRecord(toolCall.input) ? toolCall.input.amount : undefined).toBe("0.001")
-
-    if (!isRecord(toolCall.output)) {
-      throw new Error("Expected swap_tokens to return a swap result.")
-    }
-
-    expect(toolCall.output.kind).toBe("swap_result")
-    expect(toolCall.output.actor).toBe("railgun")
-    expect(toolCall.output.status).toBe("unsupported")
-    expect(result.text.toLowerCase()).toMatch(/railgun|unsupported|eoa/)
+    expect(result.toolCalls).toHaveLength(0)
+    findModeSwitch(result.modeSwitches, "eoa")
   })
 
   test("LLM checks the Railgun balance", async () => {
     const result = await sendChatPrompt({
       prompt: "What is my shielded Railgun balance?",
-      runtimeConfig,
+      runtimeConfig: privateModeRuntimeConfig,
     })
 
     const toolCall = findToolCall(result.toolCalls, "railgun_balance")
@@ -279,7 +327,7 @@ describe("LLM tool routing E2E", () => {
     const result = await sendChatPrompt({
       prompt:
         "I understand the Railgun deposit is public. Shield 0.000001 ETH into Railgun now.",
-      runtimeConfig,
+      runtimeConfig: privateModeRuntimeConfig,
     })
 
     const toolCall = findToolCall(result.toolCalls, "railgun_shield")

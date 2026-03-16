@@ -12,10 +12,11 @@ import {
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 3)
 
 const walletAddress = getWalletAddress()
+const baseRuntimeConfig = createE2ERuntimeConfig(ARBITRUM_CONFIG, "railgun")
 const runtimeConfig = {
-  ...createE2ERuntimeConfig(ARBITRUM_CONFIG),
+  ...baseRuntimeConfig,
   railgun: {
-    ...createE2ERuntimeConfig(ARBITRUM_CONFIG).railgun,
+    ...baseRuntimeConfig.railgun,
     shieldApprovalThreshold: "0.0000005",
     transferApprovalThreshold: "0.0000005",
     unshieldApprovalThreshold: "0.0000005",

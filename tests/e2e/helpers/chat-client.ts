@@ -10,6 +10,7 @@ import {
   createDefaultRuntimeConfig,
   type RuntimeConfig,
 } from "@/lib/runtime-config"
+import type { ModeSwitchRequiredResult } from "@/lib/mode"
 import { ARBITRUM_CONFIG, getWalletPrivateKey } from "./config"
 
 const APP_URL = process.env.E2E_APP_URL ?? "http://127.0.0.1:3100"
@@ -32,6 +33,7 @@ export type ChatExchange = {
   assistantMessage: AssistantUIMessage
   text: string
   toolCalls: ToolCallSnapshot[]
+  modeSwitches: ModeSwitchRequiredResult[]
 }
 
 async function readProcessOutput(
@@ -188,6 +190,21 @@ function getToolCalls(message: AssistantUIMessage): ToolCallSnapshot[] {
   })
 }
 
+function getModeSwitches(message: AssistantUIMessage): ModeSwitchRequiredResult[] {
+  return message.parts.flatMap((part) => {
+    if (part.type !== "data-modeSwitchRequired") {
+      return []
+    }
+
+    const data = "data" in part ? part.data : undefined
+    if (typeof data !== "object" || data === null) {
+      return []
+    }
+
+    return [data as ModeSwitchRequiredResult]
+  })
+}
+
 async function readAssistantMessage(
   stream: ReadableStream,
 ): Promise<AssistantUIMessage> {
@@ -243,5 +260,6 @@ export async function sendChatPrompt({
     assistantMessage,
     text: getText(assistantMessage),
     toolCalls: getToolCalls(assistantMessage),
+    modeSwitches: getModeSwitches(assistantMessage),
   }
 }

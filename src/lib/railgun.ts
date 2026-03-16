@@ -898,9 +898,9 @@ const getRailgunGroth16 = (): SnarkJSGroth16 => {
       );
     },
     verify: async (
-      vkey: unknown,
-      publicSignals: unknown,
-      proof: unknown,
+      vkey: Parameters<SnarkJSGroth16["verify"]>[0],
+      publicSignals: Parameters<SnarkJSGroth16["verify"]>[1],
+      proof: Parameters<SnarkJSGroth16["verify"]>[2],
     ) => {
       return runNodeSnarkjsVerify(vkey, publicSignals, proof);
     },
@@ -2990,7 +2990,7 @@ export async function railgunBalance(
         ? Math.max(Date.now() - Date.parse(cachedSnapshot.updatedAt), 0)
         : Number.POSITIVE_INFINITY;
       const shouldUseCached =
-        Boolean(cachedSnapshot) &&
+        cachedSnapshot != null &&
         cachedSnapshot.railgunAddress === runtime.railgunAddress &&
         cachedSnapshot.chainId === currentConfig.chainId;
 

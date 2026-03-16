@@ -598,11 +598,11 @@ function buildExecutionSummary(
   const baseSummary = `Swap ${amount} ${sellToken.symbol} for ${buyToken.symbol} on ${chainName}`;
 
   if (actor === "safe") {
-    return `${baseSummary} through the Safe actor`;
+    return `${baseSummary} in Safe mode`;
   }
 
   if (actor === "railgun") {
-    return `${baseSummary} from the Railgun actor`;
+    return `${baseSummary} in Private mode`;
   }
 
   return baseSummary;
@@ -617,7 +617,7 @@ export function createSwapTools(
 
   const swapTokens = tool({
     description:
-      "Plan and execute a CoW-backed swap behind one actor-aware abstraction. Use this for prompts like 'Swap 1 ETH for USDC'. The tool resolves tokens, fetches a CoW quote, then executes differently for EOA, Safe, and Railgun.",
+      "Plan and execute a CoW-backed swap behind one mode-aware abstraction. Use this for prompts like 'Swap 1 ETH for USDC'. The tool resolves tokens, fetches a CoW quote, then executes differently for EOA, Safe, and Private mode.",
     inputSchema: swapInputSchema,
     execute: async ({ sellToken, buyToken, amount }): Promise<SwapResult> => {
       const context = getActorChainContext(runtimeConfig);
@@ -841,7 +841,7 @@ export function createSwapTools(
                 label: "Check private routing",
                 status: "error",
                 detail:
-                  "Private Railgun swap routing is not supported yet. Use the EOA actor for the same public route.",
+                  "Private Railgun swap routing is not supported yet. Switch to EOA mode for the same public route.",
               },
             ],
           });
@@ -853,7 +853,7 @@ export function createSwapTools(
             adapter: "cow",
             summary,
             message:
-              "Private Railgun swap execution is not supported yet. The quote below is a public CoW route; switch the actor to EOA to execute it.",
+              "Private Railgun swap execution is not supported yet. The quote below is a public CoW route; switch to EOA mode to execute it.",
             chain: {
               id: context.chain.id,
               name: context.chain.name,

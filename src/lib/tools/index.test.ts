@@ -1,0 +1,88 @@
+import { describe, expect, test } from "bun:test";
+import { createDefaultRuntimeConfig } from "../runtime-config";
+import { detectModeSwitchRequired } from "../mode";
+import { getTools } from "./index";
+
+function createRuntimeConfig(mode: "eoa" | "safe" | "railgun") {
+  const runtimeConfig = createDefaultRuntimeConfig();
+
+  return {
+    ...runtimeConfig,
+    actor: {
+      type: mode,
+    },
+  };
+}
+
+describe("mode-scoped tool registry", () => {
+  test("EOA mode exposes only EOA execution tools plus universal reads", () => {
+    const tools = getTools(createRuntimeConfig("eoa").network, createRuntimeConfig("eoa"));
+
+    expect(Object.keys(tools)).toEqual(
+      expect.arrayContaining([
+        "prepare_eoa_transfer",
+        "send_eoa_transfer",
+        "swap_tokens",
+        "get_balance",
+        "resolve_ens",
+      ]),
+    );
+    expect(Object.keys(tools)).not.toContain("get_safe_info");
+    expect(Object.keys(tools)).not.toContain("railgun_balance");
+  });
+
+  test("Safe mode exposes only Safe execution tools plus universal reads", () => {
+    const tools = getTools(createRuntimeConfig("safe").network, createRuntimeConfig("safe"));
+
+    expect(Object.keys(tools)).toEqual(
+      expect.arrayContaining([
+        "get_safe_info",
+        "get_pending_transactions",
+        "propose_transaction",
+        "swap_tokens",
+        "get_balance",
+      ]),
+    );
+    expect(Object.keys(tools)).not.toContain("prepare_eoa_transfer");
+    expect(Object.keys(tools)).not.toContain("railgun_balance");
+  });
+
+  test("Private mode exposes only Railgun execution tools plus universal reads", () => {
+    const tools = getTools(
+      createRuntimeConfig("railgun").network,
+      createRuntimeConfig("railgun"),
+    );
+
+    expect(Object.keys(tools)).toEqual(
+      expect.arrayContaining([
+        "railgun_balance",
+        "railgun_balance_route",
+        "railgun_shield",
+        "railgun_transfer",
+        "railgun_unshield",
+        "get_balance",
+      ]),
+    );
+    expect(Object.keys(tools)).not.toContain("prepare_eoa_transfer");
+    expect(Object.keys(tools)).not.toContain("get_safe_info");
+    expect(Object.keys(tools)).not.toContain("swap_tokens");
+  });
+
+  test("clear out-of-mode requests return a structured mode-switch result", () => {
+    expect(
+      detectModeSwitchRequired(
+        "Send 0.001 ETH from my Safe to vitalik.eth.",
+        "eoa",
+      ),
+    ).toEqual({
+      kind: "mode_switch_required",
+      currentMode: "eoa",
+      requestedMode: "safe",
+      originalRequest: "Send 0.001 ETH from my Safe to vitalik.eth.",
+      reason: "This request targets your configured Safe.",
+      summary: "Switch to Safe mode to continue",
+      message:
+        "This request needs Safe mode. Confirm the mode change and I'll replay it with the Safe toolset.",
+    });
+  });
+});
