@@ -9,7 +9,7 @@ export const RUNTIME_CONFIG_STORAGE_EVENT =
   "private-ethereum-assistant.runtime-config.changed";
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-export const OPENROUTER_DEFAULT_MODEL = "qwen/qwen3.5-27b";
+export const OPENROUTER_DEFAULT_MODEL = "mistralai/mistral-large";
 export const LOCAL_DEFAULT_MODEL = config.llm.model;
 export const DEVELOPER_MODE_PLACEHOLDER_PRIVATE_KEY =
   `0x${"0".repeat(64)}` as const;
@@ -251,6 +251,10 @@ export function createDeveloperDisplayRuntimeConfig(): RuntimeConfig {
       ...runtimeConfig.wallet,
       eoaPrivateKey: DEVELOPER_MODE_PLACEHOLDER_PRIVATE_KEY,
     },
+    railgun: {
+      ...runtimeConfig.railgun,
+      mnemonic: "",
+    },
   };
 }
 
@@ -267,6 +271,20 @@ export function createDeveloperRuntimeConfig(): RuntimeConfig {
     wallet: {
       ...displayRuntimeConfig.wallet,
       eoaPrivateKey: developerWalletPrivateKey,
+    },
+    railgun: {
+      ...displayRuntimeConfig.railgun,
+      mnemonic: "",
+    },
+  };
+}
+
+function normalizeDeveloperRuntimeConfig(runtimeConfig: RuntimeConfig): RuntimeConfig {
+  return {
+    ...runtimeConfig,
+    railgun: {
+      ...runtimeConfig.railgun,
+      mnemonic: "",
     },
   };
 }
@@ -323,10 +341,12 @@ export function mergeDeveloperDisplayRuntimeConfig(
   overrides?: RuntimeConfig | null,
   networkConfig?: NetworkConfig,
 ) {
-  return mergeRuntimeConfigOverrides(
-    createDeveloperDisplayRuntimeConfig(),
-    overrides,
-    networkConfig,
+  return normalizeDeveloperRuntimeConfig(
+    mergeRuntimeConfigOverrides(
+      createDeveloperDisplayRuntimeConfig(),
+      overrides,
+      networkConfig,
+    ),
   );
 }
 
@@ -334,7 +354,9 @@ export function mergeDeveloperRuntimeConfig(
   overrides?: RuntimeConfig | null,
   networkConfig?: NetworkConfig,
 ) {
-  return mergeRuntimeConfigOverrides(createDeveloperRuntimeConfig(), overrides, networkConfig);
+  return normalizeDeveloperRuntimeConfig(
+    mergeRuntimeConfigOverrides(createDeveloperRuntimeConfig(), overrides, networkConfig),
+  );
 }
 
 export function getRuntimeConfigForNetwork(
@@ -448,6 +470,25 @@ export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfi
   });
 }
 
+export function validateRuntimeConfigDraftForAppMode(
+  draft: RuntimeConfigDraft,
+  appMode: AppMode,
+): RuntimeConfig {
+  const runtimeConfig = parseRuntimeConfigDraft(draft);
+
+  if (appMode === "developer") {
+    return normalizeDeveloperRuntimeConfig(runtimeConfig);
+  }
+
+  if (appMode === "standard" && runtimeConfig.railgun.mnemonic.trim().length === 0) {
+    throw new Error(
+      "Generate or import a Railgun mnemonic before continuing. If you lose it, you can lose access to shielded Railgun funds.",
+    );
+  }
+
+  return runtimeConfig;
+}
+
 export function getActiveModel(runtimeConfig: RuntimeConfig) {
   return runtimeConfig.llm.provider === "local"
     ? runtimeConfig.llm.localModel
@@ -489,7 +530,7 @@ export function getSuggestedModels(provider: LlmProvider) {
   return provider === "local"
     ? ["qwen3:8b", "qwen2.5:14b-instruct", "llama3.1:latest"]
     : [
-        "qwen/qwen3.5-27b",
+        "mistralai/mistral-large",
         "openai/gpt-4o-mini",
         "anthropic/claude-3.7-sonnet",
       ];

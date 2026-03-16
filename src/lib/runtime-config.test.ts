@@ -7,6 +7,7 @@ import {
   getActiveModel,
   parseRuntimeConfigDraft,
   stripRuntimeConfigSecrets,
+  validateRuntimeConfigDraftForAppMode,
 } from "./runtime-config";
 
 describe("runtime-config helpers", () => {
@@ -35,6 +36,24 @@ describe("runtime-config helpers", () => {
     expect(runtimeConfig.railgun.privacyGuidanceText.length).toBeGreaterThan(0);
     expect(runtimeConfig.actor.type).toBe("eoa");
     expect(getActiveModel(runtimeConfig)).toBe("qwen/qwen3.5-27b");
+  });
+
+  test("standard mode requires an explicit Railgun mnemonic", () => {
+    const draft = createRuntimeConfigDraft(createDefaultRuntimeConfig());
+    draft.railgun.mnemonic = "";
+
+    expect(() => validateRuntimeConfigDraftForAppMode(draft, "standard")).toThrow(
+      "Generate or import a Railgun mnemonic before continuing. If you lose it, you can lose access to shielded Railgun funds.",
+    );
+  });
+
+  test("developer mode ignores any Railgun mnemonic draft value", () => {
+    const draft = createRuntimeConfigDraft(createDefaultRuntimeConfig());
+    draft.railgun.mnemonic = "test test test test test test test test test test test junk";
+
+    const runtimeConfig = validateRuntimeConfigDraftForAppMode(draft, "developer");
+
+    expect(runtimeConfig.railgun.mnemonic).toBe("");
   });
 
   test("preserves provider-specific models when switching", () => {
@@ -76,6 +95,7 @@ describe("runtime-config helpers", () => {
       expect(runtimeConfig.safe.signerPrivateKey).toBe(
         "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       );
+      expect(runtimeConfig.railgun.mnemonic).toBe("");
     } finally {
       if (originalEoaPrivateKey === undefined) {
         delete process.env.EOA_PRIVATE_KEY;
