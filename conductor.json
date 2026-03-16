@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "setup": "if ! command -v bun >/dev/null; then echo 'bun is required (https://bun.sh)'; exit 1; fi; if ! command -v ollama >/dev/null; then echo 'Ollama is required (https://ollama.com/download)'; exit 1; fi; ollama pull ${LLM_MODEL:-qwen3:8b} && bun install",
+    "setup": "if ! command -v bun >/dev/null; then echo 'bun is required (https://bun.sh)'; exit 1; fi; if [ ! -d node_modules/next ] || [ ! -d node_modules/typescript ]; then bun install --frozen-lockfile; else echo 'Dependencies already installed'; fi",
     "run": "dotenvx run -f .env.tianjin -- bun run dev -- --developer-mode"
   }
 }
