@@ -79,7 +79,7 @@ describe("ToolResultCard", () => {
     expect(html).toContain("Confirm the contract address")
   })
 
-  test("renders actor-aware swap plans", () => {
+  test("renders mode-aware swap plans", () => {
     const html = renderToStaticMarkup(
       <ToolResultCard
         result={{
@@ -87,7 +87,7 @@ describe("ToolResultCard", () => {
           status: "manual_action_required",
           actor: "safe",
           adapter: "cow",
-          summary: "Swap 1 ETH for USDC through the Safe actor",
+          summary: "Swap 1 ETH for USDC in Safe mode",
           message: "Continue in the Safe UI for approval and signing.",
           chain: {
             id: 8453,
@@ -153,7 +153,7 @@ describe("ToolResultCard", () => {
       />,
     )
 
-    expect(html).toContain("Swap 1 ETH for USDC through the Safe actor")
+    expect(html).toContain("Swap 1 ETH for USDC in Safe mode")
     expect(html).toContain("manual action required")
     expect(html).toContain("Continue in Safe")
     expect(html).toContain("2500")

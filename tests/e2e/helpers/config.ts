@@ -37,9 +37,9 @@ export function getWalletAddress() {
   return privateKeyToAccount(getWalletPrivateKey()).address
 }
 
-export function createE2ERuntimeConfig(
+export function createE2ERuntimeConfig<M extends ActiveActor = "eoa">(
   networkConfig: NetworkConfig = ARBITRUM_CONFIG,
-  actor: ActiveActor = "eoa"
+  actor: M = "eoa" as M
 ) {
   const runtimeConfig = createDefaultRuntimeConfig()
   const eoaPrivateKey = getWalletPrivateKey()

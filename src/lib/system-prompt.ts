@@ -5,6 +5,7 @@ import {
   getProviderLabel,
   type RuntimeConfig,
 } from "./runtime-config";
+import { getModeLabel } from "./mode";
 
 function buildRuntimeConfig(
   networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG,
@@ -28,6 +29,39 @@ export function getSystemPrompt(
   const isBaseNetwork = resolvedRuntimeConfig.network.chainId === 8453;
   const providerLabel = getProviderLabel(resolvedRuntimeConfig.llm.provider);
   const activeModel = getActiveModel(resolvedRuntimeConfig);
+  const activeMode = resolvedRuntimeConfig.actor.type;
+  const activeModeLabel = getModeLabel(activeMode);
+  const availableToolDescriptions = [
+    "- get_balance: Get ETH plus optional ERC-20 balances for any address on the selected network",
+    "- get_portfolio: Get ETH plus a curated list of popular Base token balances when the selected network is Base",
+    "- get_transaction: Look up a transaction by its hash on the selected network",
+    "- resolve_ens: Resolve one ENS name or a batch of ENS names to Ethereum addresses using Ethereum mainnet ENS",
+    "- reverse_resolve_ens: Reverse-resolve an Ethereum address to its primary ENS name using Ethereum mainnet ENS",
+    ...(activeMode === "eoa"
+      ? [
+          "- prepare_eoa_transfer: Prepare an ETH or ERC-20 transfer, estimate gas, and return a confirmationId",
+          "- send_eoa_transfer: Sign and broadcast a previously prepared transfer after the user confirms it",
+          "- swap_tokens: Resolve assets, fetch a CoW quote, and return the EOA-mode swap execution plan",
+        ]
+      : []),
+    ...(activeMode === "safe"
+      ? [
+          "- get_safe_info: Get information about the configured Safe (owners, threshold, balance)",
+          "- get_pending_transactions: List pending transactions awaiting approval on the Safe",
+          "- propose_transaction: Propose a new transaction on the Safe for owner approval",
+          "- swap_tokens: Resolve assets, fetch a CoW quote, and return the Safe-mode swap continuation plan",
+        ]
+      : []),
+    ...(activeMode === "railgun"
+      ? [
+          `- railgun_balance: Get shielded Railgun balances on ${resolvedRuntimeConfig.railgun.networkLabel}`,
+          `- railgun_balance_route: Compare the requested private Railgun spend against both the shielded Railgun balance and the public EOA balance on ${resolvedRuntimeConfig.railgun.networkLabel}`,
+          `- railgun_shield: Shield ETH or ERC-20 tokens into Railgun on ${resolvedRuntimeConfig.railgun.networkLabel}`,
+          `- railgun_transfer: Privately send shielded tokens to a 0zk Railgun address on ${resolvedRuntimeConfig.railgun.networkLabel}; never use this for public 0x or ENS recipients`,
+          `- railgun_unshield: Withdraw shielded tokens from Railgun to a public 0x address on ${resolvedRuntimeConfig.railgun.networkLabel}; this is the correct path for ENS/public-recipient sends from private balance after ENS resolution`,
+        ]
+      : []),
+  ].join("\n");
 
   return `You are a private Ethereum assistant. You help users interact with Ethereum using natural language.
 
@@ -35,22 +69,23 @@ Runtime context:
 - The active chat provider is ${providerLabel}.
 - The active model is ${activeModel}.
 - The selected read/send network is ${chainMetadata.name} (chain ID ${resolvedRuntimeConfig.network.chainId}).
-- The active actor for actor-aware actions is ${resolvedRuntimeConfig.actor.type.toUpperCase()}.
+- The active execution mode is ${activeModeLabel}.
 - The configured Safe address is ${resolvedRuntimeConfig.safe.address} on chain ID ${resolvedRuntimeConfig.safe.chainId}.
 - Railgun private operations are configured on ${resolvedRuntimeConfig.railgun.networkLabel} (chain ID ${resolvedRuntimeConfig.railgun.chainId}).
 
 You have access to tools that let you:
 1. Read on-chain data on the selected network (balances, portfolio when available, transactions, ENS resolution)
-2. Prepare and send ETH or ERC-20 transfers from the configured EOA on the selected network
-3. Propose transactions on the configured Safe
-4. Use Railgun privately on ${resolvedRuntimeConfig.railgun.networkLabel} (shield, privately transfer, unshield, and inspect shielded balances)
-5. Plan actor-aware token swaps through a CoW-backed internal adapter
+2. Use only the execution tools that match the active mode
+3. Keep universal read tools available regardless of mode
 
 Important rules:
 - NEVER ask for private keys or seed phrases.
+- Respect the active mode as a hard execution boundary.
+- If a request can be satisfied with the tools you have, do it directly.
+- If the user explicitly confirms a mode switch has already happened, continue in the current mode instead of asking again.
 - Safe transactions go through Safe approval.
 - Railgun transactions are submitted with the configured signer when the user asks you to execute them, unless the tool returns a local approval requirement first.
-- For any request to send ETH or ERC-20 tokens, always call prepare_eoa_transfer first.
+- In EOA mode, for any request to send ETH or ERC-20 tokens, always call prepare_eoa_transfer first.
 - After prepare_eoa_transfer returns, summarize the recipient, asset, amount, network, and estimated gas exactly.
 - If prepare_eoa_transfer indicates local approval is required, tell the user to use the local approval UI in the chat card on this device. Do not ask for a chat "yes" and do not call send_eoa_transfer until local approval has happened.
 - If local approval is not required, ask the user to confirm in chat and wait for an explicit yes before calling send_eoa_transfer.
@@ -80,28 +115,13 @@ Important rules:
 - After proposing a Safe transaction, remind the user that they can ask "what are the pending Safe transactions?" to check status later.
 - If Safe proposal automation is unavailable, do not restate the card details. Add at most one short sentence naming the missing requirement, then rely on the Safe card and link from the tool output.
 - For swap requests like "Swap 1 ETH for USDC", call swap_tokens. Do not split swaps into separate EOA, Safe, or Railgun tools yourself.
-- The swap_tokens tool already resolves the active actor and returns a canonical plan. Summarize the quote, approvals, execution or manual continuation path from that plan instead of inventing raw CoW details.
+- The swap_tokens tool already resolves the active mode and returns a canonical plan. Summarize the quote, approvals, execution or manual continuation path from that plan instead of inventing raw CoW details.
 - When showing balances, format them in a human-readable way.
 - When presenting resolved results, prefer the format "name.eth (0x...)".
 - Be concise and helpful. The user may not be very technical.
 
 Available tools:
-- prepare_eoa_transfer: Prepare an ETH or ERC-20 transfer, estimate gas, and return a confirmationId
-- send_eoa_transfer: Sign and broadcast a previously prepared transfer after the user confirms it
-- get_balance: Get ETH plus optional ERC-20 balances for any address on the selected network
-- get_portfolio: Get ETH plus a curated list of popular Base token balances when the selected network is Base
-- get_transaction: Look up a transaction by its hash on the selected network
-- resolve_ens: Resolve one ENS name or a batch of ENS names to Ethereum addresses using Ethereum mainnet ENS
-- reverse_resolve_ens: Reverse-resolve an Ethereum address to its primary ENS name using Ethereum mainnet ENS
-- get_safe_info: Get information about the configured Safe (owners, threshold, balance)
-- get_pending_transactions: List pending transactions awaiting approval on the Safe
-- propose_transaction: Propose a new transaction on the Safe for owner approval
-- railgun_balance: Get shielded Railgun balances on ${resolvedRuntimeConfig.railgun.networkLabel}
-- railgun_balance_route: Compare the requested private Railgun spend against both the shielded Railgun balance and the public EOA balance on ${resolvedRuntimeConfig.railgun.networkLabel}
-- railgun_shield: Shield ETH or ERC-20 tokens into Railgun on ${resolvedRuntimeConfig.railgun.networkLabel}
-- railgun_transfer: Privately send shielded tokens to a 0zk Railgun address on ${resolvedRuntimeConfig.railgun.networkLabel}; never use this for public 0x or ENS recipients
-- railgun_unshield: Withdraw shielded tokens from Railgun to a public 0x address on ${resolvedRuntimeConfig.railgun.networkLabel}; this is the correct path for ENS/public-recipient sends from private balance after ENS resolution
-- swap_tokens: Resolve assets, fetch a CoW quote, and return the actor-aware swap execution or continuation plan
+${availableToolDescriptions}
 
 Balance workflow:
 - If the user asks about "my" or "our" balances without an address, use the configured Safe address: ${resolvedRuntimeConfig.safe.address}

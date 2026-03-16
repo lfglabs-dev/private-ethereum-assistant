@@ -40,6 +40,12 @@ import {
   type RuntimeConfigDraft,
 } from "@/lib/runtime-config";
 import { getNetworkLabel } from "@/lib/ethereum";
+import {
+  getExecutionModeOptions,
+  getModeLabel,
+  type ExecutionMode,
+  type ModeSwitchRequiredResult,
+} from "@/lib/mode";
 
 const STANDARD_ONBOARDING_STEPS = [
   {
@@ -58,8 +64,8 @@ const STANDARD_ONBOARDING_STEPS = [
     sections: ["wallet"] as const,
   },
   {
-    title: "Safe and Railgun",
-    description: "Choose the active actor, then finish the Safe and Railgun settings.",
+    title: "Mode, Safe, and Private",
+    description: "Choose the active mode, then finish the Safe and Private settings.",
     sections: ["actor", "safe", "railgun"] as const,
   },
 ];
@@ -101,6 +107,7 @@ function ConfiguredAssistant({
   onDeleteAllSettings,
 }: ConfiguredAssistantProps) {
   const [debugEntries, setDebugEntries] = useState<DebugLogEntry[]>([]);
+  const [pendingModeSwitchKey, setPendingModeSwitchKey] = useState<string | null>(null);
   const [showDebugTrace, setShowDebugTrace] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsDraft, setSettingsDraft] = useState<RuntimeConfigDraft>(() =>
@@ -118,11 +125,16 @@ function ConfiguredAssistant({
     useChat<AssistantUIMessage>({
       dataPartSchemas: assistantDataPartSchemas,
       onData: (part) => {
-        if (part.type !== "data-debug") return;
+        if (part.type === "data-debug") {
+          appendDebugEntry(part.data);
+          if (part.data.level === "error") {
+            setShowDebugTrace(true);
+          }
+          return;
+        }
 
-        appendDebugEntry(part.data);
-        if (part.data.level === "error") {
-          setShowDebugTrace(true);
+        if (part.type === "data-modeSwitchRequired") {
+          return;
         }
       },
       onError: (nextError) => {
@@ -142,7 +154,8 @@ function ConfiguredAssistant({
   const isSubmitted = status === "submitted";
   const providerLabel = getProviderLabel(runtimeConfig.llm.provider);
   const activeNetworkLabel = getNetworkLabel(runtimeConfig.network);
-  const activeActorLabel = runtimeConfig.actor.type.toUpperCase();
+  const activeModeLabel = getModeLabel(runtimeConfig.actor.type);
+  const executionModeOptions = getExecutionModeOptions();
   const settingsEnabled = true;
   const settingsProviderOptions: Array<"openrouter" | "local"> =
     appMode === "developer" ? ["openrouter", "local"] : ["local"];
@@ -151,15 +164,22 @@ function ConfiguredAssistant({
       ? (["model", "network", "actor", "safe", "railgun"] as const)
       : undefined;
 
-  const sendChatMessage = (text: string) => {
+  const sendChatMessage = (
+    text: string,
+    nextRuntimeConfig: RuntimeConfig = runtimeConfig,
+    clearPendingModeSwitch = true,
+  ) => {
     setDebugEntries([]);
     setShowDebugTrace(false);
+    if (clearPendingModeSwitch) {
+      setPendingModeSwitchKey(null);
+    }
     sendMessage(
       { text },
       {
         body: {
-          networkConfig: runtimeConfig.network,
-          runtimeConfig,
+          networkConfig: nextRuntimeConfig.network,
+          runtimeConfig: nextRuntimeConfig,
         },
       },
     );
@@ -204,6 +224,38 @@ function ConfiguredAssistant({
     setSettingsError(null);
   };
 
+  const handleModeChange = (nextMode: ExecutionMode) => {
+    if (nextMode === runtimeConfig.actor.type) {
+      return;
+    }
+
+    onSaveRuntimeConfig({
+      ...runtimeConfig,
+      actor: {
+        type: nextMode,
+      },
+    });
+    setPendingModeSwitchKey(null);
+  };
+
+  const handleConfirmModeSwitch = async (request: ModeSwitchRequiredResult) => {
+    const requestKey = `${request.requestedMode}:${request.originalRequest}`;
+    setPendingModeSwitchKey(requestKey);
+
+    const nextRuntimeConfig = {
+      ...runtimeConfig,
+      actor: {
+        type: request.requestedMode,
+      },
+    };
+
+    onSaveRuntimeConfig(nextRuntimeConfig);
+    setSettingsDraft(createRuntimeConfigDraft(nextRuntimeConfig));
+    clearError();
+    sendChatMessage(request.originalRequest, nextRuntimeConfig, false);
+    setPendingModeSwitchKey(null);
+  };
+
   return (
     <div className="flex h-dvh flex-col bg-background">
       <header className="flex items-center justify-between border-b px-6 py-3">
@@ -216,20 +268,35 @@ function ConfiguredAssistant({
               Private Ethereum Assistant
             </h1>
             <p className="text-xs text-muted-foreground">
-              {providerLabel} · {activeNetworkLabel} · Actor {activeActorLabel}
+              {providerLabel} · {activeNetworkLabel} · Mode {activeModeLabel}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 rounded-full border px-3 py-1 text-xs">
-            <span
-              className={`size-2 rounded-full ${
-                runtimeConfig.llm.provider === "local"
-                  ? "bg-green-500"
-                  : "bg-amber-500"
-              }`}
-            />
-            <span data-testid="runtime-provider-label">{providerLabel}</span>
+          <div
+            data-testid="runtime-mode-picker"
+            className="flex items-center gap-1 rounded-full border p-1 text-xs"
+            aria-label="Execution mode"
+          >
+            {executionModeOptions.map((modeOption) => {
+              const isActive = runtimeConfig.actor.type === modeOption.value;
+
+              return (
+                <button
+                  key={modeOption.value}
+                  type="button"
+                  data-testid={`runtime-mode-picker-${modeOption.value}`}
+                  className={`rounded-full px-2.5 py-1 transition-colors ${
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-secondary"
+                  }`}
+                  onClick={() => handleModeChange(modeOption.value)}
+                >
+                  {modeOption.label}
+                </button>
+              );
+            })}
           </div>
           {settingsEnabled ? (
             <Button
@@ -265,6 +332,8 @@ function ConfiguredAssistant({
               key={message.id}
               message={message}
               runtimeConfig={runtimeConfig}
+              onConfirmModeSwitch={handleConfirmModeSwitch}
+              pendingModeSwitchKey={pendingModeSwitchKey}
               isStreaming={
                 isLoading &&
                 index === messages.length - 1 &&

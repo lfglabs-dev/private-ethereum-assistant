@@ -1,4 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
+import { createDefaultRuntimeConfig } from "@/lib/runtime-config"
 import { createTools } from "@/lib/tools"
 import {
   ARBITRUM_CONFIG,
@@ -9,7 +10,14 @@ import {
 
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS)
 
-const tools = createTools(ARBITRUM_CONFIG)
+const safeRuntimeConfig = {
+  ...createDefaultRuntimeConfig(),
+  network: ARBITRUM_CONFIG,
+  actor: {
+    type: "safe" as const,
+  },
+}
+const tools = createTools(ARBITRUM_CONFIG, safeRuntimeConfig)
 
 describe("Safe E2E", () => {
   test("get_safe_info returns owners, threshold, and ETH balance", async () => {

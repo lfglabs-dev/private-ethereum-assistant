@@ -10,7 +10,9 @@ import { MarkdownRenderer } from "@/components/ui/markdown-renderer"
 import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
 import { ToolResultCard } from "@/components/chat/tool-result-card"
 import { MessageActions } from "@/components/chat/message-actions"
-import type { DebugLogEntry } from "@/lib/chat-stream"
+import { ModeSwitchCard } from "@/components/chat/mode-switch-card"
+import type { DebugLogEntry, AssistantUIMessage } from "@/lib/chat-stream"
+import type { ModeSwitchRequiredResult } from "@/lib/mode"
 import type { RuntimeConfig } from "@/lib/runtime-config"
 
 type Part = { type: string; [key: string]: unknown }
@@ -38,6 +40,13 @@ function getTextContent(parts: Part[] | undefined): string {
     .join("\n")
 }
 
+function getModeSwitchData(part: Part) {
+  if (part.type !== "data-modeSwitchRequired") return null
+  const data = part.data
+  if (typeof data !== "object" || data === null) return null
+  return data as ModeSwitchRequiredResult
+}
+
 function getToolLabel(toolName: string): string {
   switch (toolName) {
     case "railgun_balance":
@@ -51,20 +60,22 @@ function getToolLabel(toolName: string): string {
     case "railgun_unshield":
       return "Generating Railgun unshield proof"
     case "swap_tokens":
-      return "Planning actor-aware CoW swap"
+      return "Planning mode-aware CoW swap"
     default:
       return `Running ${toolName}`
   }
 }
 
 interface ChatMessageProps {
-  message: UIMessage
+  message: UIMessage | AssistantUIMessage
   isStreaming?: boolean
   traceEntries?: DebugLogEntry[]
   showTrace?: boolean
   canToggleTrace?: boolean
   onToggleTrace?: () => void
   runtimeConfig?: RuntimeConfig
+  onConfirmModeSwitch?: (request: ModeSwitchRequiredResult) => void | Promise<void>
+  pendingModeSwitchKey?: string | null
 }
 
 export function ChatMessage({
@@ -75,12 +86,17 @@ export function ChatMessage({
   canToggleTrace = false,
   onToggleTrace,
   runtimeConfig,
+  onConfirmModeSwitch,
+  pendingModeSwitchKey = null,
 }: ChatMessageProps) {
   const isUser = message.role === "user"
   const parts = message.parts as Part[] | undefined
 
   const hasContent = parts?.some(
-    (p) => (p.type === "text" && String(p.text || "").trim()) || getToolOutput(p),
+    (p) =>
+      (p.type === "text" && String(p.text || "").trim()) ||
+      getToolOutput(p) ||
+      getModeSwitchData(p),
   )
   const showTracePanel = !isUser && showTrace
   const assistantAvatar = (
@@ -180,6 +196,21 @@ export function ChatMessage({
                       </div>
                     )}
                   </motion.div>
+                )
+              }
+
+              const modeSwitchRequest = getModeSwitchData(part)
+              if (modeSwitchRequest && onConfirmModeSwitch) {
+                const requestKey =
+                  `${modeSwitchRequest.requestedMode}:${modeSwitchRequest.originalRequest}`
+
+                return (
+                  <ModeSwitchCard
+                    key={i}
+                    request={modeSwitchRequest}
+                    onConfirm={onConfirmModeSwitch}
+                    isPending={pendingModeSwitchKey === requestKey}
+                  />
                 )
               }
 

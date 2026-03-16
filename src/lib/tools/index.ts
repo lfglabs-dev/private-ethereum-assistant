@@ -9,6 +9,56 @@ import {
   getRuntimeConfigForNetwork,
   type RuntimeConfig,
 } from "../runtime-config";
+import { type ExecutionMode } from "../mode";
+
+type EoaToolSet = ReturnType<typeof createEoaTransferTools>;
+type ReadToolSet = ReturnType<typeof createReadChainTools>;
+type SafeToolSet = ReturnType<typeof createSafeTools>;
+type RailgunToolSet = ReturnType<typeof createRailgunTools>;
+type SwapToolSet = ReturnType<typeof createSwapTools>;
+
+type UniversalToolRegistry = {
+  get_balance: ReadToolSet["getBalance"];
+  get_portfolio: ReadToolSet["getPortfolio"];
+  get_transaction: ReadToolSet["getTransaction"];
+  resolve_ens: ReadToolSet["resolveEns"];
+  reverse_resolve_ens: ReadToolSet["reverseResolveEns"];
+};
+
+export type EoaToolRegistry = UniversalToolRegistry & {
+  prepare_eoa_transfer: EoaToolSet["prepareEoaTransfer"];
+  send_eoa_transfer: EoaToolSet["sendEoaTransfer"];
+  swap_tokens: SwapToolSet["swapTokens"];
+};
+
+export type SafeToolRegistry = UniversalToolRegistry & {
+  get_safe_info: SafeToolSet["getSafeInfo"];
+  get_pending_transactions: SafeToolSet["getPendingTransactions"];
+  propose_transaction: SafeToolSet["proposeTransaction"];
+  swap_tokens: SwapToolSet["swapTokens"];
+};
+
+export type PrivateToolRegistry = UniversalToolRegistry & {
+  railgun_balance: RailgunToolSet["getRailgunBalance"];
+  railgun_balance_route: RailgunToolSet["routeRailgunBalance"];
+  railgun_shield: RailgunToolSet["railgunShieldTokens"];
+  railgun_transfer: RailgunToolSet["railgunPrivateTransfer"];
+  railgun_unshield: RailgunToolSet["railgunWithdraw"];
+};
+
+export type ToolRegistry = EoaToolRegistry | SafeToolRegistry | PrivateToolRegistry;
+
+type RuntimeConfigForMode<M extends ExecutionMode> = RuntimeConfig & {
+  actor: {
+    type: M;
+  };
+};
+
+type ToolRegistryForMode<M extends ExecutionMode> = M extends "safe"
+  ? SafeToolRegistry
+  : M extends "railgun"
+    ? PrivateToolRegistry
+    : EoaToolRegistry;
 
 function resolveRuntimeConfig(
   networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG,
@@ -17,11 +67,20 @@ function resolveRuntimeConfig(
   return runtimeConfig ?? getRuntimeConfigForNetwork(networkConfig);
 }
 
+export function getTools<M extends ExecutionMode>(
+  networkConfig: NetworkConfig,
+  runtimeConfig: RuntimeConfigForMode<M>,
+): ToolRegistryForMode<M>;
+export function getTools(
+  networkConfig?: NetworkConfig,
+  runtimeConfig?: RuntimeConfig,
+): ToolRegistry;
 export function getTools(
   networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG,
   runtimeConfig?: RuntimeConfig,
-) {
+): ToolRegistry {
   const resolvedRuntimeConfig = resolveRuntimeConfig(networkConfig, runtimeConfig);
+  const activeMode = resolvedRuntimeConfig.actor.type as ExecutionMode;
   const { prepareEoaTransfer, sendEoaTransfer } = createEoaTransferTools(
     resolvedRuntimeConfig.network,
     resolvedRuntimeConfig.wallet,
@@ -47,30 +106,55 @@ export function getTools(
   });
   const { swapTokens } = createSwapTools(resolvedRuntimeConfig);
 
-  return {
-    prepare_eoa_transfer: prepareEoaTransfer,
-    send_eoa_transfer: sendEoaTransfer,
+  const universalTools = {
     get_balance: getBalance,
     get_portfolio: getPortfolio,
     get_transaction: getTransaction,
     resolve_ens: resolveEns,
     reverse_resolve_ens: reverseResolveEns,
-    get_safe_info: getSafeInfo,
-    get_pending_transactions: getPendingTransactions,
-    propose_transaction: proposeTransaction,
-    railgun_balance: getRailgunBalance,
-    railgun_balance_route: routeRailgunBalance,
-    railgun_shield: railgunShieldTokens,
-    railgun_transfer: railgunPrivateTransfer,
-    railgun_unshield: railgunWithdraw,
-    swap_tokens: swapTokens,
   };
+
+  if (activeMode === "safe") {
+    return {
+      ...universalTools,
+      get_safe_info: getSafeInfo,
+      get_pending_transactions: getPendingTransactions,
+      propose_transaction: proposeTransaction,
+      swap_tokens: swapTokens,
+    } satisfies SafeToolRegistry;
+  }
+
+  if (activeMode === "railgun") {
+    return {
+      ...universalTools,
+      railgun_balance: getRailgunBalance,
+      railgun_balance_route: routeRailgunBalance,
+      railgun_shield: railgunShieldTokens,
+      railgun_transfer: railgunPrivateTransfer,
+      railgun_unshield: railgunWithdraw,
+    } satisfies PrivateToolRegistry;
+  }
+
+  return {
+    ...universalTools,
+    prepare_eoa_transfer: prepareEoaTransfer,
+    send_eoa_transfer: sendEoaTransfer,
+    swap_tokens: swapTokens,
+  } satisfies EoaToolRegistry;
 }
 
+export function createTools<M extends ExecutionMode>(
+  networkConfig: NetworkConfig,
+  runtimeConfig: RuntimeConfigForMode<M>,
+): ToolRegistryForMode<M>;
+export function createTools(
+  networkConfig?: NetworkConfig,
+  runtimeConfig?: RuntimeConfig,
+): ToolRegistry;
 export function createTools(
   networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG,
   runtimeConfig?: RuntimeConfig,
-) {
+): ToolRegistry {
   return getTools(networkConfig, runtimeConfig);
 }
 

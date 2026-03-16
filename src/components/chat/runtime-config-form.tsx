@@ -16,6 +16,7 @@ import {
   type RuntimeConfigDraft,
 } from "@/lib/runtime-config";
 import { NETWORK_PRESETS } from "@/lib/ethereum";
+import { getExecutionModeOptions } from "@/lib/mode";
 
 type RuntimeConfigSection =
   | "warning"
@@ -35,23 +36,7 @@ type RuntimeConfigFormProps = {
   sections?: readonly RuntimeConfigSection[];
 };
 
-const ACTOR_OPTIONS = [
-  {
-    id: "eoa",
-    label: "EOA",
-    description: "Sign and place swaps from the configured EOA.",
-  },
-  {
-    id: "safe",
-    label: "Safe",
-    description: "Plan swaps for the configured Safe approval flow.",
-  },
-  {
-    id: "railgun",
-    label: "Railgun",
-    description: "Explain private-swap limits and public fallback next steps.",
-  },
-] as const;
+const MODE_OPTIONS = getExecutionModeOptions();
 
 function updateDraftSection<K extends keyof RuntimeConfigDraft>(
   draft: RuntimeConfigDraft,
@@ -305,23 +290,23 @@ export function RuntimeConfigForm({
       {visibleSections.has("actor") ? (
       <Card>
         <CardHeader>
-          <CardTitle>Active Actor</CardTitle>
+          <CardTitle>Execution Mode</CardTitle>
           <CardDescription>
-            Swaps route through this actor-specific execution path.
+            This is the active execution boundary for sends, Safe actions, swaps, and private flows.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-2 sm:grid-cols-3">
-          {ACTOR_OPTIONS.map((actor) => {
-            const isActive = draft.actor.type === actor.id;
+          {MODE_OPTIONS.map((modeOption) => {
+            const isActive = draft.actor.type === modeOption.value;
             return (
               <button
-                key={actor.id}
+                key={modeOption.value}
                 type="button"
-                data-testid={`runtime-actor-${actor.id}`}
+                data-testid={`runtime-mode-${modeOption.value}`}
                 onClick={() =>
                   onChange(
                     updateDraftSection(draft, "actor", {
-                      type: actor.id,
+                      type: modeOption.value,
                     }),
                   )
                 }
@@ -331,8 +316,10 @@ export function RuntimeConfigForm({
                     : "border-border bg-background hover:bg-muted"
                 }`}
               >
-                <div className="text-sm font-medium">{actor.label}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{actor.description}</div>
+                <div className="text-sm font-medium">{modeOption.label}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {modeOption.description}
+                </div>
               </button>
             );
           })}

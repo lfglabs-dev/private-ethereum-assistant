@@ -852,7 +852,11 @@ const getRailgunGroth16 = (): SnarkJSGroth16 => {
         zkey as ArrayLike<number>,
       );
     },
-    verify: async (vkey, publicSignals, proof) => {
+    verify: async (
+      vkey: Parameters<SnarkJSGroth16["verify"]>[0],
+      publicSignals: Parameters<SnarkJSGroth16["verify"]>[1],
+      proof: Parameters<SnarkJSGroth16["verify"]>[2],
+    ) => {
       return runNodeSnarkjsVerify(vkey, publicSignals, proof);
     },
   } as SnarkJSGroth16;

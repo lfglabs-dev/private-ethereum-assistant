@@ -14,6 +14,7 @@ import {
   AssistantUIMessage,
   createDebugLog,
 } from "@/lib/chat-stream";
+import { detectModeSwitchRequired } from "@/lib/mode";
 import {
   createDeveloperDisplayRuntimeConfig,
   mergeDeveloperRuntimeConfig,
@@ -64,6 +65,37 @@ function summarizeChunk(chunk: TextStreamPart<Record<string, never>>) {
         message: "Received raw provider chunk",
       };
   }
+}
+
+function getLastUserMessageText(messages: unknown) {
+  if (!Array.isArray(messages)) {
+    return "";
+  }
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const entry = messages[index];
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+
+    const role = "role" in entry ? entry.role : undefined;
+    const parts = "parts" in entry ? entry.parts : undefined;
+    if (role !== "user" || !Array.isArray(parts)) {
+      continue;
+    }
+
+    return parts
+      .filter(
+        (part): part is { type: string; text?: string } =>
+          typeof part === "object" && part !== null && "type" in part,
+      )
+      .filter((part) => part.type === "text")
+      .map((part) => String(part.text ?? ""))
+      .join("\n")
+      .trim();
+  }
+
+  return "";
 }
 
 export async function POST(req: Request) {
@@ -143,6 +175,36 @@ export async function POST(req: Request) {
         network: selectedNetworkConfig,
       };
     }
+
+    const lastUserMessageText = getLastUserMessageText(messages);
+    const modeSwitchRequired = detectModeSwitchRequired(
+      lastUserMessageText,
+      selectedRuntimeConfig.actor.type,
+    );
+
+    if (modeSwitchRequired) {
+      const stream = createUIMessageStream<AssistantUIMessage>({
+        execute: async ({ writer }) => {
+          writer.write({
+            type: "data-debug",
+            data: createDebugLog({
+              level: "info",
+              stage: "response",
+              message: "Mode switch required before execution planning",
+              detail: `${modeSwitchRequired.currentMode} -> ${modeSwitchRequired.requestedMode}`,
+            }),
+            transient: true,
+          });
+          writer.write({
+            type: "data-modeSwitchRequired",
+            data: modeSwitchRequired,
+          });
+        },
+      });
+
+      return createUIMessageStreamResponse({ stream });
+    }
+
     const activeModel = getActiveModel(selectedRuntimeConfig);
     const providerLabel = getProviderLabel(selectedRuntimeConfig.llm.provider);
     const model = createRuntimeModel(selectedRuntimeConfig, {
