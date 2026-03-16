@@ -1,13 +1,8 @@
 import { tool } from "ai";
 import { z } from "zod";
-import {
-  railgunBalance,
-  railgunBalanceRoute,
-  railgunShield,
-  railgunTransfer,
-  railgunUnshield,
-  type RailgunToolRuntimeConfig,
-} from "@/lib/railgun";
+import type { RailgunToolRuntimeConfig } from "@/lib/railgun";
+
+const loadRailgunModule = () => import("@/lib/railgun");
 
 export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
   const getRailgunBalance = tool({
@@ -21,7 +16,10 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
           "Optional token selector. Supported shortcuts: ETH, USDC, or a 0x token address.",
         ),
     }),
-    execute: async ({ token }) => railgunBalance(token, runtimeConfig),
+    execute: async ({ token }) => {
+      const { railgunBalance } = await loadRailgunModule();
+      return railgunBalance(token, runtimeConfig);
+    },
   });
 
   const routeRailgunBalance = tool({
@@ -36,8 +34,10 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
         .describe("ETH, USDC, or a token contract address on the configured network."),
       amount: z.string().describe("Human-readable token amount, like '0.1' or '25'."),
     }),
-    execute: async ({ action, token, amount }) =>
-      railgunBalanceRoute(action, token, amount, runtimeConfig),
+    execute: async ({ action, token, amount }) => {
+      const { railgunBalanceRoute } = await loadRailgunModule();
+      return railgunBalanceRoute(action, token, amount, runtimeConfig);
+    },
   });
 
   const railgunShieldTokens = tool({
@@ -49,8 +49,10 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
         .describe("ETH, USDC, or a token contract address on the configured network."),
       amount: z.string().describe("Human-readable token amount, like '0.1' or '25'."),
     }),
-    execute: async ({ token, amount }) =>
-      railgunShield(token, amount, runtimeConfig),
+    execute: async ({ token, amount }) => {
+      const { railgunShield } = await loadRailgunModule();
+      return railgunShield(token, amount, runtimeConfig);
+    },
   });
 
   const railgunPrivateTransfer = tool({
@@ -65,8 +67,10 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
         .describe("ETH, USDC, or a token contract address on the configured network."),
       amount: z.string().describe("Human-readable token amount, like '0.1' or '25'."),
     }),
-    execute: async ({ recipient, token, amount }) =>
-      railgunTransfer(recipient, token, amount, runtimeConfig),
+    execute: async ({ recipient, token, amount }) => {
+      const { railgunTransfer } = await loadRailgunModule();
+      return railgunTransfer(recipient, token, amount, runtimeConfig);
+    },
   });
 
   const railgunWithdraw = tool({
@@ -81,8 +85,10 @@ export function createRailgunTools(runtimeConfig: RailgunToolRuntimeConfig) {
         .describe("ETH, USDC, or a token contract address on the configured network."),
       amount: z.string().describe("Human-readable token amount, like '0.1' or '25'."),
     }),
-    execute: async ({ recipient, token, amount }) =>
-      railgunUnshield(recipient, token, amount, runtimeConfig),
+    execute: async ({ recipient, token, amount }) => {
+      const { railgunUnshield } = await loadRailgunModule();
+      return railgunUnshield(recipient, token, amount, runtimeConfig);
+    },
   });
 
   return {

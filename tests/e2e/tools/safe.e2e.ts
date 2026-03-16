@@ -5,6 +5,7 @@ import {
   ARBITRUM_CONFIG,
   E2E_TEST_TIMEOUT_MS,
   executeTool,
+  getWalletPrivateKey,
   retry,
 } from "../helpers/config"
 
@@ -54,8 +55,12 @@ describe("Safe E2E", () => {
 
     expect(["proposed", "manual_creation_required"]).toContain(result.status)
     expect(result.safeUILink).toContain("app.safe.global")
-    expect(result.transaction?.to).toBe(recipient)
-    expect(result.transaction?.value).toBe("0.0001 ETH")
+    if (!("transaction" in result) || !result.transaction) {
+      throw new Error("Expected Safe proposal result to include transaction details.")
+    }
+
+    expect(result.transaction.to).toBe(recipient)
+    expect(result.transaction.value).toBe("0.0001 ETH")
   })
 
   test("propose_transaction rejects unresolved ENS names", async () => {
@@ -71,4 +76,30 @@ describe("Safe E2E", () => {
       /resolve ens|resolved 0x|valid 0x/
     )
   })
+
+  if (process.env.SAFE_API_KEY && process.env.EOA_PRIVATE_KEY) {
+    test("swap_tokens can propose a Safe-native swap transaction", async () => {
+      const swapTools = createTools(ARBITRUM_CONFIG, {
+        ...safeRuntimeConfig,
+        safe: {
+          ...safeRuntimeConfig.safe,
+          signerPrivateKey: getWalletPrivateKey(),
+        },
+      })
+
+      const result = await retry(() =>
+        executeTool(swapTools.swap_tokens, {
+          sellToken: "ETH",
+          buyToken: "USDC",
+          amount: "0.0001",
+        }),
+      )
+
+      expect(result.kind).toBe("swap_result")
+      expect(result.actor).toBe("safe")
+      expect(result.status).toBe("proposed")
+      expect(result.execution?.safeTxHash).toMatch(/^0x[a-fA-F0-9]{64}$/)
+      expect(result.execution?.safeUILink).toContain("app.safe.global")
+    })
+  }
 })
