@@ -35,12 +35,12 @@ import {
   getProviderLabel,
   loadStoredRuntimeConfig,
   mergeDeveloperDisplayRuntimeConfig,
-  parseRuntimeConfigDraft,
   saveStoredRuntimeConfig,
   subscribeToStoredRuntimeConfig,
   type AppMode,
   type RuntimeConfig,
   type RuntimeConfigDraft,
+  validateRuntimeConfigDraftForAppMode,
 } from "@/lib/runtime-config";
 import { getNetworkLabel } from "@/lib/ethereum";
 import {
@@ -283,7 +283,7 @@ function ConfiguredAssistant({
     }
 
     try {
-      const nextConfig = parseRuntimeConfigDraft(settingsDraft);
+      const nextConfig = validateRuntimeConfigDraftForAppMode(settingsDraft, appMode);
       onSaveRuntimeConfig(nextConfig);
       setSettingsError(null);
       setSettingsOpen(false);
@@ -541,6 +541,7 @@ function ConfiguredAssistant({
               <div className="space-y-4 px-6 py-6">
                 <RuntimeConfigForm
                   ref={settingsFormRef}
+                  appMode={appMode}
                   draft={settingsDraft}
                   onChange={setSettingsDraft}
                   mode="settings"
@@ -624,7 +625,10 @@ export default function Home() {
 
   const handleCompleteOnboarding = () => {
     try {
-      const nextRuntimeConfig = parseRuntimeConfigDraft(onboardingDraft);
+      const nextRuntimeConfig = validateRuntimeConfigDraftForAppMode(
+        onboardingDraft,
+        appMode,
+      );
       saveStoredRuntimeConfig(nextRuntimeConfig);
       setOnboardingError(null);
       setOnboardingStep(0);
@@ -682,6 +686,7 @@ export default function Home() {
 
           <RuntimeConfigForm
             ref={onboardingFormRef}
+            appMode={appMode}
             draft={onboardingDraft}
             onChange={setOnboardingDraft}
             mode="onboarding"

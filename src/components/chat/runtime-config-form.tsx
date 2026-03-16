@@ -4,8 +4,11 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useRef,
   useState,
 } from "react";
+import { generateMnemonic } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english";
 import { ShieldAlert, Sparkles, Wallet } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,6 +21,7 @@ import {
   getProviderLabel,
   getSuggestedModels,
   setActiveModelDraftValue,
+  type AppMode,
   type LlmProvider,
   type RuntimeConfigDraft,
 } from "@/lib/runtime-config";
@@ -49,6 +53,7 @@ type EnvSecretDraft = {
 type SaveKeysResult = { ok: true } | { ok: false; message: string };
 
 type RuntimeConfigFormProps = {
+  appMode: AppMode;
   draft: RuntimeConfigDraft;
   onChange: (nextValue: RuntimeConfigDraft) => void;
   mode: "onboarding" | "settings";
@@ -108,6 +113,7 @@ function FieldStatusBadge({ configured }: { configured: boolean }) {
 export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConfigFormProps>(
   function RuntimeConfigForm(
     {
+      appMode,
       draft,
       onChange,
       mode,
@@ -125,11 +131,15 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
     const selectedPresetId = getSelectedPresetId(draft);
     const activeModel = getActiveModelDraftValue(draft);
     const suggestedModels = getSuggestedModels(draft.llm.provider);
+    const railgunMnemonicRef = useRef<HTMLTextAreaElement | null>(null);
     const [envStatus, setEnvStatus] = useState<EnvSecretStatus>(EMPTY_ENV_STATUS);
     const [keysDraft, setKeysDraft] = useState<EnvSecretDraft>(EMPTY_ENV_SECRET_DRAFT);
     const [editingKeys, setEditingKeys] = useState(false);
     const [keyMessage, setKeyMessage] = useState<string | null>(null);
     const [isLoadingEnvStatus, setIsLoadingEnvStatus] = useState(false);
+    const [didGenerateRailgunMnemonic, setDidGenerateRailgunMnemonic] = useState(false);
+    const isDeveloperMode = appMode === "developer";
+    const hasRailgunMnemonic = draft.railgun.mnemonic.trim().length > 0;
 
     const loadEnvStatus = async () => {
       setIsLoadingEnvStatus(true);
@@ -246,6 +256,26 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
       (message, index, values): message is string =>
         typeof message === "string" && values.indexOf(message) === index,
     );
+
+    const updateRailgunMnemonic = (mnemonic: string) => {
+      onChange(
+        updateDraftSection(draft, "railgun", {
+          ...draft.railgun,
+          mnemonic,
+        }),
+      );
+    };
+
+    const handleGenerateRailgunMnemonic = () => {
+      updateRailgunMnemonic(generateMnemonic(wordlist));
+      setDidGenerateRailgunMnemonic(true);
+    };
+
+    const handleImportRailgunMnemonic = () => {
+      setDidGenerateRailgunMnemonic(false);
+      railgunMnemonicRef.current?.focus();
+      railgunMnemonicRef.current?.select();
+    };
 
     return (
       <div className="space-y-4">
@@ -771,10 +801,54 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
             <CardHeader>
               <CardTitle>Railgun Settings</CardTitle>
               <CardDescription>
-                These settings are used only for private Railgun operations.
+                {isDeveloperMode
+                  ? "These settings are used only for private Railgun operations."
+                  : "Railgun uses a separate private wallet. Generate or import its recovery phrase before you shield funds."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {isDeveloperMode ? (
+                <div className="rounded-xl border bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">
+                  Developer mode hardcodes the Railgun wallet to the configured EOA
+                  private key. The mnemonic is not editable here.
+                </div>
+              ) : (
+                <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">
+                      Save the Railgun recovery phrase before shielding.
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Railgun is a separate private wallet from your public EOA. If you
+                      lose this mnemonic, you can lose access to shielded Railgun funds.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleGenerateRailgunMnemonic}
+                    >
+                      {hasRailgunMnemonic ? "Generate new mnemonic" : "Generate mnemonic"}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleImportRailgunMnemonic}
+                    >
+                      Import existing mnemonic
+                    </Button>
+                  </div>
+                  {didGenerateRailgunMnemonic ? (
+                    <p className="text-xs text-foreground">
+                      A new Railgun mnemonic was generated below. Back it up now before
+                      continuing.
+                    </p>
+                  ) : null}
+                </div>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block space-y-1">
                   <span className="text-xs text-muted-foreground">Network label</span>
@@ -879,25 +953,36 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
                 />
               </label>
 
-              <label className="block space-y-1">
-                <span className="text-xs text-muted-foreground">
-                  Railgun mnemonic (optional)
-                </span>
-                <Textarea
-                  data-testid="runtime-railgun-mnemonic"
-                  value={draft.railgun.mnemonic}
-                  onChange={(event) =>
-                    onChange(
-                      updateDraftSection(draft, "railgun", {
-                        ...draft.railgun,
-                        mnemonic: event.target.value,
-                      }),
-                    )
-                  }
-                  rows={2}
-                  placeholder="Leave blank to derive one from the EOA key for testing"
-                />
-              </label>
+              {isDeveloperMode ? (
+                <div className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">
+                    Railgun mnemonic source
+                  </span>
+                  <div className="rounded-xl border bg-secondary/20 px-3 py-2 text-sm text-muted-foreground">
+                    Fixed to the EOA private key configured for developer mode.
+                  </div>
+                  <span className="text-xs text-muted-foreground">
+                    Developer mode always derives the same Railgun wallet from that EOA
+                    key. Switch to standard mode if you want a dedicated Railgun mnemonic.
+                  </span>
+                </div>
+              ) : (
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">Railgun mnemonic</span>
+                  <Textarea
+                    ref={railgunMnemonicRef}
+                    data-testid="runtime-railgun-mnemonic"
+                    value={draft.railgun.mnemonic}
+                    onChange={(event) => updateRailgunMnemonic(event.target.value)}
+                    rows={2}
+                    placeholder="Generate a new Railgun mnemonic or paste an existing one"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    This phrase controls your private Railgun balance. Store it in a
+                    password manager or offline backup before using Railgun.
+                  </span>
+                </label>
+              )}
 
               <div className="grid gap-4 sm:grid-cols-3">
                 <label className="block space-y-1">

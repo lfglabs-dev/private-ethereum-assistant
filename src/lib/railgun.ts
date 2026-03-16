@@ -10,6 +10,7 @@ import {
 } from "@railgun-community/engine";
 import {
   ArtifactStore,
+  awaitWalletScan,
   balanceForERC20Token,
   createRailgunWallet,
   fullWalletForID,
@@ -29,7 +30,6 @@ import {
   populateShield,
   populateShieldBaseToken,
   refreshBalances,
-  rescanFullUTXOMerkletreesAndWallets,
   setBatchListCallback,
   setOnTXIDMerkletreeScanCallback,
   setOnUTXOMerkletreeScanCallback,
@@ -68,7 +68,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrum } from "viem/chains";
 import { config } from "./config";
-import type { RuntimeConfig } from "./runtime-config";
+import { getAppMode, type RuntimeConfig } from "./runtime-config";
 
 const RAILGUN_NETWORK = NetworkName.Arbitrum;
 const RAILGUN_TXID_VERSION = TXIDVersion.V2_PoseidonMerkle;
@@ -331,7 +331,6 @@ const RAILGUN_APPROVAL_TTL_MS = 10 * 60 * 1000;
 const RAILGUN_RECENT_SHIELD_TTL_MS = 24 * 60 * 60 * 1000;
 const RAILGUN_SYNC_FRESH_MS = 5 * 60 * 1000;
 const RAILGUN_BALANCE_CACHE_MAX_AGE_MS = 60 * 1000;
-const RAILGUN_NEW_WALLET_LOOKBACK_BLOCKS = 10_000n;
 const pendingRailgunApprovals = new Map<string, PendingRailgunApproval>();
 const optimisticShieldedBalances = new Map<string, bigint>();
 let backgroundRefreshPromise: Promise<void> | undefined;
@@ -939,7 +938,7 @@ const getRailgunGroth16 = (): SnarkJSGroth16 => {
 };
 
 const clearRailgunSecrets = () => [
-  "Set a dedicated Railgun mnemonic in Settings, or leave it blank to derive one from the configured EOA private key for testing.",
+  "Standard mode uses a dedicated Railgun mnemonic. Developer mode always derives Railgun from the configured EOA private key.",
   "Set an EOA private key in Settings if you want the assistant to submit Arbitrum transactions on your behalf.",
   "Optionally change the Railgun RPC URL and POI node URLs in settings if you want custom infrastructure.",
 ];
@@ -983,6 +982,26 @@ const getWalletClient = () =>
   });
 
 const deriveRailgunMnemonic = () => {
+  if (getAppMode() === "developer") {
+    const privateKey = currentConfig.signerPrivateKey.trim();
+    if (!privateKey) {
+      throw new Error(
+        "Developer mode requires an EOA private key to derive the Railgun wallet.",
+      );
+    }
+
+    if (process.env.RAILGUN_DERIVE_NAMESPACE_MNEMONIC === "1") {
+      const namespaceEntropy = keccak256(
+        stringToHex(
+          `railgun-test-wallet:${privateKey}:${getRailgunStorageNamespace()}`,
+        ),
+      );
+      return Mnemonic.fromEntropy(ByteUtils.strip0x(namespaceEntropy));
+    }
+
+    return Mnemonic.fromEntropy(ByteUtils.strip0x(privateKey));
+  }
+
   const explicitMnemonic = currentConfig.mnemonic.trim();
   if (explicitMnemonic) {
     return explicitMnemonic;
@@ -1074,32 +1093,16 @@ const saveWalletMeta = async (meta: WalletMeta) => {
 
 const resolveWalletCreationBlock = async (existingMeta: WalletMeta | null) => {
   const configuredCreationBlock = currentConfig.walletCreationBlock;
-  const usingExplicitMnemonic = currentConfig.mnemonic.trim().length > 0;
-
-  if (existingMeta || usingExplicitMnemonic) {
-    railgunLog("info", "runtime:wallet-creation-block", {
-      configuredCreationBlock,
-      mode: existingMeta ? "existing-wallet" : "explicit-mnemonic",
-      resolvedCreationBlock: configuredCreationBlock,
-    });
-    return configuredCreationBlock;
-  }
-
-  const latestBlock = await publicClient.getBlockNumber();
-  const lookbackStart =
-    latestBlock > RAILGUN_NEW_WALLET_LOOKBACK_BLOCKS
-      ? latestBlock - RAILGUN_NEW_WALLET_LOOKBACK_BLOCKS
-      : 0n;
-  const resolvedCreationBlock = Math.max(
-    configuredCreationBlock,
-    Number(lookbackStart),
-  );
+  const hasExplicitMnemonic = currentConfig.mnemonic.trim().length > 0;
+  const resolvedCreationBlock = configuredCreationBlock;
 
   railgunLog("info", "runtime:wallet-creation-block", {
     configuredCreationBlock,
-    latestBlock,
-    lookbackBlocks: RAILGUN_NEW_WALLET_LOOKBACK_BLOCKS,
-    mode: "derived-mnemonic-new-wallet",
+    mode: existingMeta
+      ? "existing-wallet"
+      : hasExplicitMnemonic
+        ? "explicit-mnemonic"
+        : "derived-mnemonic",
     resolvedCreationBlock,
   });
 
@@ -1190,26 +1193,38 @@ const resetScanProgressForSync = () => {
   runtimeLogState.poiBatch = "";
 };
 
+const waitForWalletScanCompletion = async (
+  runtime: RailgunRuntime,
+  reason: string,
+) => {
+  railgunLog("info", "wallet:await-scan-event", {
+    railgunAddress: runtime.railgunAddress,
+    reason,
+    scanTimeoutMs: currentConfig.scanTimeoutMs,
+    walletId: runtime.walletId,
+  });
+
+  await Promise.race([
+    awaitWalletScan(runtime.walletId, RAILGUN_CHAIN),
+    new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Railgun wallet scan timed out before balances were decrypted.")),
+        currentConfig.scanTimeoutMs,
+      ),
+    ),
+  ]);
+
+  railgunLog("info", "wallet:scan-event-complete", {
+    railgunAddress: runtime.railgunAddress,
+    reason,
+    walletId: runtime.walletId,
+  });
+};
+
 const shouldSkipFreshSync = (force: boolean) =>
   !force &&
   lastCompletedSyncAtMs > 0 &&
   Date.now() - lastCompletedSyncAtMs < RAILGUN_SYNC_FRESH_MS;
-
-const shouldUseIncrementalSync = (reason: string) =>
-  lastCompletedSyncAtMs > 0 && reason.endsWith("post-transaction");
-
-const shouldIgnoreCompletedUTXORescanError = (error: unknown) => {
-  if (!(error instanceof Error)) {
-    return false;
-  }
-
-  return (
-    runtimeState.utxoScan?.scanStatus === "Complete" &&
-    error.message.includes(
-      "Cannot re-scan railgun txids. Must get UTXO history first.",
-    )
-  );
-};
 
 const shouldIgnorePOIRefreshError = (error: unknown) => {
   if (!(error instanceof Error)) {
@@ -1252,53 +1267,33 @@ const syncWalletState = async (
     },
     async () => {
       resetScanProgressForSync();
-      if (shouldUseIncrementalSync(reason)) {
-        railgunLog("info", "wallet:refresh-balances", {
+      const walletScanPromise = waitForWalletScanCompletion(runtime, reason);
+      railgunLog("info", "wallet:refresh-balances", {
+        reason,
+        walletId: runtime.walletId,
+      });
+      let refreshBalancesError: unknown;
+      void refreshBalances(RAILGUN_CHAIN, [runtime.walletId]).catch((error) => {
+        refreshBalancesError = error;
+        railgunLog("warn", "wallet:refresh-balances-background-error", {
+          error,
           reason,
           walletId: runtime.walletId,
         });
-        let refreshBalancesError: unknown;
-        void refreshBalances(RAILGUN_CHAIN, [runtime.walletId]).catch((error) => {
-          refreshBalancesError = error;
-          railgunLog("warn", "wallet:refresh-balances-background-error", {
-            error,
-            reason,
-            walletId: runtime.walletId,
-          });
-        });
-        await waitForPrivateBalanceScans({ requireTxidComplete });
-        if (refreshBalancesError) {
-          if (!shouldIgnorePOIRefreshError(refreshBalancesError)) {
-            throw refreshBalancesError;
-          }
-
-          railgunLog("warn", "wallet:refresh-balances-ignored-error", {
-            error: refreshBalancesError,
-            reason,
-            walletId: runtime.walletId,
-          });
+      });
+      await walletScanPromise;
+      if (refreshBalancesError) {
+        if (!shouldIgnorePOIRefreshError(refreshBalancesError)) {
+          throw refreshBalancesError;
         }
-      } else {
-        railgunLog("info", "wallet:rescan-utxo", {
+
+        railgunLog("warn", "wallet:refresh-balances-ignored-error", {
+          error: refreshBalancesError,
+          reason,
           walletId: runtime.walletId,
         });
-        try {
-          await rescanFullUTXOMerkletreesAndWallets(RAILGUN_CHAIN, [runtime.walletId]);
-        } catch (error) {
-          if (
-            !shouldIgnoreCompletedUTXORescanError(error) &&
-            !shouldIgnorePOIRefreshError(error)
-          ) {
-            throw error;
-          }
-
-          railgunLog("warn", "wallet:rescan-utxo-ignored-error", {
-            error,
-            walletId: runtime.walletId,
-          });
-        }
       }
-      if (!shouldUseIncrementalSync(reason)) {
+      if (requireTxidComplete) {
         railgunLog("info", "wallet:wait-for-private-balances", {
           requireTxidComplete,
           scanTimeoutMs: currentConfig.scanTimeoutMs,
