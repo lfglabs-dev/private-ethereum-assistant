@@ -23,6 +23,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { getChainMetadata, type NetworkConfig } from "../ethereum";
 import { resolveTokenMetadata, resolveTokenQuery } from "../token-metadata";
 import { type RuntimeConfig } from "../runtime-config";
+import { buildTrustWalletTokenPaths } from "../trustwallet-assets";
 import { getSafeUiLink } from "./safe";
 
 const SWAP_APP_CODE = "PrivateEthereumAssistant";
@@ -92,6 +93,7 @@ type ResolvedSwapToken = {
   name?: string;
   decimals: number;
   displayAddress?: Address;
+  iconUrl?: string;
   source: "native" | "verified" | "onchain";
 };
 
@@ -124,14 +126,20 @@ type SwapPlan = {
   sell: {
     amount: string;
     symbol: string;
+    name?: string;
     address: string;
+    iconUrl?: string;
     kind: "native" | "erc20";
+    source: "native" | "verified" | "onchain";
   };
   buy: {
     amount: string;
     symbol: string;
+    name?: string;
     address: string;
+    iconUrl?: string;
     kind: "native" | "erc20";
+    source: "native" | "verified" | "onchain";
   };
   quote: SwapQuoteSummary;
   steps: SwapPlanStep[];
@@ -306,6 +314,7 @@ async function resolveSwapToken(options: {
         kind: "native",
         address: getAddress(EVM_NATIVE_CURRENCY_ADDRESS),
         symbol: context.chain.nativeSymbol,
+        name: context.chain.nativeName,
         decimals: 18,
         source: "native",
       },
@@ -324,6 +333,10 @@ async function resolveSwapToken(options: {
         symbol: alias.symbol,
         name: alias.name,
         decimals: alias.decimals,
+        iconUrl: buildTrustWalletTokenPaths(
+          context.networkConfig.chainId,
+          alias.address,
+        )?.logoUrl,
         source: "verified",
       },
     };
@@ -346,6 +359,7 @@ async function resolveSwapToken(options: {
         symbol: token.symbol,
         name: token.name,
         decimals: token.decimals ?? 18,
+        iconUrl: token.iconUrl,
         source: token.source === "trustwallet" ? "verified" : "onchain",
       },
     };
@@ -380,6 +394,7 @@ async function resolveSwapToken(options: {
       symbol: resolution.token.symbol,
       name: resolution.token.name,
       decimals: resolution.token.decimals ?? 18,
+      iconUrl: resolution.token.iconUrl,
       source: "verified",
     },
   };
@@ -444,14 +459,20 @@ function buildPlan(args: {
     sell: {
       amount: args.requestedSellAmount,
       symbol: args.sellToken.symbol,
+      name: args.sellToken.name,
       address: args.sellToken.address,
+      iconUrl: args.sellToken.iconUrl,
       kind: args.sellToken.kind,
+      source: args.sellToken.source,
     },
     buy: {
       amount: args.quote.buyAmount,
       symbol: args.buyToken.symbol,
+      name: args.buyToken.name,
       address: args.buyToken.address,
+      iconUrl: args.buyToken.iconUrl,
       kind: args.buyToken.kind,
+      source: args.buyToken.source,
     },
     quote: args.quote,
     steps: args.steps,
@@ -586,7 +607,6 @@ function buildExecutionSummary(
 
   return baseSummary;
 }
-
 export function createSwapTools(
   runtimeConfig: RuntimeConfig,
   dependencies: SwapToolDependencies = {},
