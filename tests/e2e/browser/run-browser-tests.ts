@@ -24,6 +24,9 @@ const DEV_PORT = new URL(APP_URL).port || "3000";
 const SESSION = `private-ethereum-assistant-e2e-${Date.now()}`;
 const SCREENSHOT_DIR = join(process.cwd(), "tests/e2e/browser/screenshots");
 const E2E_WALLET_PRIVATE_KEY = process.env.EOA_PRIVATE_KEY ?? "";
+const HAS_SAFE_AUTOMATION = Boolean(
+  process.env.SAFE_API_KEY && E2E_WALLET_PRIVATE_KEY,
+);
 const E2E_WALLET_ADDRESS = E2E_WALLET_PRIVATE_KEY
   ? privateKeyToAccount(
       (E2E_WALLET_PRIVATE_KEY.startsWith("0x")
@@ -576,11 +579,22 @@ async function main() {
       await ensureDeveloperModeReady();
       await selectMode("safe");
       await submitMessage("Swap 0.001 ETH for USDC.");
-      await waitForText(
-        '[data-testid="result-swap"]',
-        ["SAFE", "manual action required", "Continue in Safe", "USDC"],
-        120_000,
-      );
+      await waitForText('[data-testid="result-swap"]', ["SAFE", "USDC"], 120_000);
+
+      if (HAS_SAFE_AUTOMATION) {
+        await waitForText(
+          '[data-testid="result-swap"]',
+          ["proposed", "Sign on Safe", "Safe Tx:"],
+          120_000,
+        );
+      } else {
+        await waitForText(
+          '[data-testid="result-swap"]',
+          ["manual action required", "Configure Safe API key"],
+          120_000,
+        );
+      }
+
       await waitForAssistantAnswer(["Safe", "swap", "USDC"], 120_000);
     },
     "safe-swap-card.png",

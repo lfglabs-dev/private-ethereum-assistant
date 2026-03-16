@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
-import leveldown from "leveldown";
+import { fileURLToPath } from "node:url";
 import { groth16 } from "snarkjs";
 import {
   ByteUtils,
@@ -72,20 +73,44 @@ import type { RuntimeConfig } from "./runtime-config";
 const RAILGUN_NETWORK = NetworkName.Arbitrum;
 const RAILGUN_TXID_VERSION = TXIDVersion.V2_PoseidonMerkle;
 const RAILGUN_CHAIN = NETWORK_CONFIG[RAILGUN_NETWORK].chain;
-const RAILGUN_NODE_PROVER_SCRIPT = path.join(
-  process.cwd(),
-  "scripts",
-  "railgun-fullprove.mjs",
-);
-const RAILGUN_NODE_VERIFY_SCRIPT = path.join(
-  process.cwd(),
-  "scripts",
-  "railgun-verify.mjs",
-);
+const runtimeRequire = createRequire(path.join(process.cwd(), "package.json"));
 
 const TOKEN_ALIASES: Record<string, `0x${string}`> = {
   USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
 };
+
+type LeveldownFactory = (location: string) => unknown;
+
+let cachedLeveldown: LeveldownFactory | null = null;
+
+function getRailgunScriptPath(scriptName: "railgun-fullprove.mjs" | "railgun-verify.mjs") {
+  const relativePath =
+    scriptName === "railgun-fullprove.mjs"
+      ? "../../scripts/railgun-fullprove.mjs"
+      : "../../scripts/railgun-verify.mjs";
+
+  return fileURLToPath(new URL(relativePath, import.meta.url));
+}
+
+function loadLeveldown(): LeveldownFactory {
+  if (cachedLeveldown) {
+    return cachedLeveldown;
+  }
+
+  const moduleName = ["level", "down"].join("");
+  const loadedModule = runtimeRequire(moduleName) as {
+    default?: LeveldownFactory;
+  } | LeveldownFactory;
+
+  cachedLeveldown =
+    typeof loadedModule === "function"
+      ? loadedModule
+      : loadedModule.default ?? (() => {
+          throw new Error("Could not load leveldown.");
+        });
+
+  return cachedLeveldown;
+}
 
 type WalletMeta = {
   fingerprint: string;
@@ -769,7 +794,13 @@ const runNodeSnarkjsFullProve = async (
     await new Promise<void>((resolve, reject) => {
       const child = spawn(
         "node",
-        [RAILGUN_NODE_PROVER_SCRIPT, inputPath, wasmPath, zkeyPath, outputPath],
+        [
+          getRailgunScriptPath("railgun-fullprove.mjs"),
+          inputPath,
+          wasmPath,
+          zkeyPath,
+          outputPath,
+        ],
         {
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -836,7 +867,7 @@ const runNodeSnarkjsVerify = async (
       const child = spawn(
         "node",
         [
-          RAILGUN_NODE_VERIFY_SCRIPT,
+          getRailgunScriptPath("railgun-verify.mjs"),
           vkeyPath,
           publicSignalsPath,
           proofPath,
@@ -1368,6 +1399,7 @@ const initializeRailgun = async (): Promise<RailgunRuntime> => {
       });
 
       if (!engineStarted) {
+        const leveldown = loadLeveldown();
         railgunLog("info", "engine:start", {
           dbPath: getRailgunDbPath(),
           poiNodeUrls: currentConfig.poiNodeUrls,

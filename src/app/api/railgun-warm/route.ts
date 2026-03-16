@@ -1,4 +1,3 @@
-import { warmRailgun } from "@/lib/railgun";
 import { mergeRuntimeConfigWithEnvSecrets } from "@/lib/env-secrets";
 import {
   createDeveloperRuntimeConfig,
@@ -11,6 +10,7 @@ export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
+    const { warmRailgun } = await import("@/lib/railgun");
     let selectedRuntimeConfig;
     const appMode = getAppMode();
 

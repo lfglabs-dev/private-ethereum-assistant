@@ -132,11 +132,11 @@ describe("ToolResultCard", () => {
       <ToolResultCard
         result={{
           kind: "swap_result",
-          status: "manual_action_required",
+          status: "proposed",
           actor: "safe",
           adapter: "cow",
           summary: "Swap 1 ETH for USDC in Safe mode",
-          message: "Continue in the Safe UI for approval and signing.",
+          message: "Safe swap transaction proposed.",
           chain: {
             id: 8453,
             name: "Base",
@@ -153,7 +153,7 @@ describe("ToolResultCard", () => {
             type: "swap",
             actor: "safe",
             adapter: "cow",
-            executionPath: "safe_manual",
+            executionPath: "safe_proposed",
             chain: {
               id: 8453,
               name: "Base",
@@ -193,13 +193,15 @@ describe("ToolResultCard", () => {
               },
               {
                 key: "proposal",
-                label: "Continue in Safe",
-                status: "pending",
-                detail: "Open the Safe UI and use the native CoW swap flow with this quote context.",
+                label: "Safe transaction proposed",
+                status: "complete",
+                detail: "Safe bundle ready with 2 actions.",
               },
             ],
           },
           execution: {
+            safeTxHash: "0xsafeproposal",
+            actionCount: 2,
             safeAddress: "0x4581812Df7500277e3fC72CF93f766DBBd32d371",
             safeUILink: "https://app.safe.global/transactions/queue?safe=base:0x4581812Df7500277e3fC72CF93f766DBBd32d371",
           },
@@ -208,7 +210,7 @@ describe("ToolResultCard", () => {
     )
 
     expect(html).toContain("Swap 1 ETH for USDC in Safe mode")
-    expect(html).toContain("manual action required")
+    expect(html).toContain("proposed")
     expect(html).toContain("You pay")
     expect(html).toContain("You receive")
     expect(html).toContain("-1 ETH")
@@ -218,7 +220,8 @@ describe("ToolResultCard", () => {
     expect(html).toContain("USD Coin")
     expect(html).toContain("verified quote")
     expect(html).toContain("USDC token icon")
-    expect(html).toContain("Continue in Safe")
+    expect(html).toContain("Sign on Safe")
+    expect(html).toContain("Safe Tx:")
   })
 
   test("renders swap execution links", () => {

@@ -18,7 +18,12 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { EthereumIcon } from "@/components/icons/ethereum-icon"
+import {
+  ActionDetailRow,
+  ActionResultCard,
+  ActionStepList,
+} from "@/components/ui/action-result"
+import { TokenAvatar } from "@/components/ui/token-avatar"
 import type { RuntimeConfig } from "@/lib/runtime-config"
 import { cn } from "@/lib/utils"
 
@@ -155,18 +160,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
 
-function getTokenAvatarStyles(seed: string) {
-  let hash = 0
-  for (const char of seed) {
-    hash = (hash * 31 + char.charCodeAt(0)) % 360
-  }
-
-  return {
-    backgroundColor: `hsl(${hash} 72% 92%)`,
-    color: `hsl(${hash} 55% 28%)`,
-  }
-}
-
 function getExplorerTxUrl(chainId: number, hash?: string) {
   if (!hash) return null
   const explorerBaseUrl = CHAIN_EXPLORER_BY_ID[chainId]
@@ -183,54 +176,6 @@ function getSourceLabel(source: unknown) {
   if (source === "verified" || source === "trustwallet") return "verified"
   if (source === "native") return "native"
   return "on-chain"
-}
-
-function TokenAvatar({
-  symbol,
-  address,
-  iconUrl,
-  isNative = false,
-}: {
-  symbol: string
-  address: string
-  iconUrl?: string
-  isNative?: boolean
-}) {
-  const [showFallback, setShowFallback] = useState(false)
-  const initials = symbol.slice(0, 2).toUpperCase() || "??"
-
-  if (isNative && symbol.toUpperCase() === "ETH") {
-    return (
-      <div className="flex size-10 items-center justify-center rounded-full border border-border/60 bg-background text-sky-500">
-        <EthereumIcon aria-label={`${symbol} native token icon`} className="size-5" />
-      </div>
-    )
-  }
-
-  if (iconUrl && !showFallback) {
-    return (
-      <div className="size-10 overflow-hidden rounded-full border border-border/60 bg-background">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={iconUrl}
-          alt={`${symbol} token icon`}
-          className="size-full object-cover"
-          loading="lazy"
-          onError={() => setShowFallback(true)}
-        />
-      </div>
-    )
-  }
-
-  return (
-    <div
-      aria-label={`${symbol} fallback icon`}
-      className="flex size-10 items-center justify-center rounded-full border border-border/60 text-[11px] font-semibold uppercase"
-      style={getTokenAvatarStyles(address || symbol)}
-    >
-      {initials}
-    </div>
-  )
 }
 
 function TokenRow({
@@ -460,6 +405,10 @@ function SwapTokenPanel({
 function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
   const tx = (data.transaction as Record<string, string | undefined>) ?? {}
   const signers = Array.isArray(data.signers) ? (data.signers as string[]) : []
+  const bundledTransactions = Array.isArray(data.transactions)
+    ? data.transactions.filter(isRecord)
+    : []
+  const actionCount = typeof data.actionCount === "number" ? data.actionCount : bundledTransactions.length
   const status = String(data.status ?? "")
   const currentConfirmations = Number(data.currentConfirmations ?? 0)
   const requiredConfirmations = Number(data.requiredConfirmations ?? 0)
@@ -483,14 +432,12 @@ function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
   const ctaLabel = status === "proposed" ? "Sign on Safe" : "Open Safe"
 
   return (
-    <Card size="sm" className={accentClass}>
-      <CardHeader className="pb-0">
-        <div className="flex items-center gap-2">
-          <ArrowUpRight className={`size-4 ${iconClass}`} />
-          <CardTitle className={`text-sm ${titleClass}`}>{title}</CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <ActionResultCard
+      title={title}
+      icon={<ArrowUpRight className={`size-4 ${iconClass}`} />}
+      className={accentClass}
+      titleClassName={titleClass}
+    >
         {"summary" in data && (
           <p className="text-sm font-medium">{String(data.summary)}</p>
         )}
@@ -502,40 +449,38 @@ function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
         )}
         <div className="space-y-1 text-sm">
           {safeAddress && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Safe:</span>
-              <span className="font-mono text-xs">{shortenAddress(safeAddress)}</span>
-            </div>
+            <ActionDetailRow
+              label="Safe:"
+              value={shortenAddress(safeAddress)}
+              valueClassName="font-mono text-xs"
+            />
           )}
-          <div className="flex gap-2">
-            <span className="text-muted-foreground">Type:</span>
-            <span>{String(tx.type ?? "Transaction")}</span>
-          </div>
-          <div className="flex gap-2">
-            <span className="text-muted-foreground">To:</span>
-            <span className="truncate font-mono text-xs">{String(tx.to ?? "Unknown")}</span>
-          </div>
-          <div className="flex gap-2">
-            <span className="text-muted-foreground">Value:</span>
-            <span>{String(tx.value ?? "0 ETH")}</span>
-          </div>
+          <ActionDetailRow label="Type:" value={String(tx.type ?? "Transaction")} />
+          <ActionDetailRow
+            label="To:"
+            value={String(tx.to ?? "Unknown")}
+            valueClassName="truncate font-mono text-xs"
+          />
+          <ActionDetailRow label="Value:" value={String(tx.value ?? "0 ETH")} />
           {tx.tokenAmount && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Amount:</span>
-              <span>{String(tx.tokenAmount)}</span>
-            </div>
+            <ActionDetailRow label="Amount:" value={String(tx.tokenAmount)} />
           )}
           {tx.data && tx.data !== "0x" && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Data:</span>
-              <span className="truncate font-mono text-xs">{String(tx.data)}</span>
-            </div>
+            <ActionDetailRow
+              label="Data:"
+              value={String(tx.data)}
+              valueClassName="truncate font-mono text-xs"
+            />
+          )}
+          {actionCount > 1 && (
+            <ActionDetailRow label="Actions:" value={String(actionCount)} />
           )}
           {safeTxHash && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Safe Tx:</span>
-              <span className="truncate font-mono text-xs">{safeTxHash}</span>
-            </div>
+            <ActionDetailRow
+              label="Safe Tx:"
+              value={safeTxHash}
+              valueClassName="truncate font-mono text-xs"
+            />
           )}
           {requiredConfirmations > 0 && (
             <div className="flex items-center justify-between gap-2 pt-1">
@@ -564,12 +509,28 @@ function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
             </div>
           )}
           {proposerAddress && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Signer:</span>
-              <span className="font-mono text-xs">{shortenAddress(proposerAddress)}</span>
-            </div>
+            <ActionDetailRow
+              label="Signer:"
+              value={shortenAddress(proposerAddress)}
+              valueClassName="font-mono text-xs"
+            />
           )}
         </div>
+        {bundledTransactions.length > 1 && (
+          <div className="space-y-2 rounded-md bg-background/50 p-3">
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+              Bundled actions
+            </p>
+            {bundledTransactions.map((transaction, index) => (
+              <div key={`${String(transaction.to)}-${index}`} className="space-y-1 text-xs">
+                <p className="font-medium">{String(transaction.type ?? "Transaction")}</p>
+                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                  {String(transaction.to ?? "")}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
         {"pendingTransactionsHint" in data && (
           <p className="text-xs text-muted-foreground">{String(data.pendingTransactionsHint)}</p>
         )}
@@ -584,8 +545,7 @@ function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
             <ExternalLink className="size-3" />
           </a>
         )}
-      </CardContent>
-    </Card>
+    </ActionResultCard>
   )
 }
 
@@ -792,9 +752,26 @@ function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
   const approvalSummary = data.approval?.summary
 
   return (
-    <Card
-      data-testid={isLocalApproval ? "result-local-approval" : isAborted ? "result-transaction-aborted" : "result-transaction-preview"}
-      size="sm"
+    <ActionResultCard
+      testId={isLocalApproval ? "result-local-approval" : isAborted ? "result-transaction-aborted" : "result-transaction-preview"}
+      title={isAborted ? "Transfer Aborted" : isLocalApproval ? "Local Approval Required" : "Ready to Confirm"}
+      icon={
+        <Wallet className={`size-4 ${isAborted ? "text-destructive" : isLocalApproval ? "text-orange-500" : "text-amber-500"}`} />
+      }
+      badge={
+        <Badge
+          variant="outline"
+          className={
+            isAborted
+              ? "border-destructive/30 text-destructive"
+              : isLocalApproval
+                ? "border-orange-500/30 text-orange-600"
+                : "border-amber-500/30 text-amber-600"
+          }
+        >
+          {isAborted ? "Rejected" : isLocalApproval ? "Awaiting local approval" : "Awaiting confirmation"}
+        </Badge>
+      }
       className={
         isAborted
           ? "border-destructive/20 bg-destructive/5"
@@ -802,111 +779,58 @@ function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
             ? "border-orange-500/20 bg-orange-500/5"
             : "border-amber-500/20 bg-amber-500/5"
       }
+      titleClassName={isAborted ? "text-destructive" : isLocalApproval ? "text-orange-600" : "text-amber-500"}
     >
-      <CardHeader className="pb-0">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Wallet className={`size-4 ${isAborted ? "text-destructive" : isLocalApproval ? "text-orange-500" : "text-amber-500"}`} />
-            <CardTitle className={`text-sm ${isAborted ? "text-destructive" : isLocalApproval ? "text-orange-600" : "text-amber-500"}`}>
-              {isAborted ? "Transfer Aborted" : isLocalApproval ? "Local Approval Required" : "Ready to Confirm"}
-            </CardTitle>
-          </div>
-          <Badge
-            variant="outline"
-            className={
-              isAborted
-                ? "border-destructive/30 text-destructive"
-                : isLocalApproval
-                  ? "border-orange-500/30 text-orange-600"
-                  : "border-amber-500/30 text-amber-600"
-            }
-          >
-            {isAborted ? "Rejected" : isLocalApproval ? "Awaiting local approval" : "Awaiting confirmation"}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
         <p>{data.summary}</p>
         {approvalSummary ? (
           <div className="space-y-2 rounded-md bg-background/60 p-3" data-testid="approval-summary">
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Recipient:</span>
-              <span className="break-all">{approvalSummary.recipient}</span>
-            </div>
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Asset:</span>
-              <span className="break-all">{approvalSummary.asset}</span>
-            </div>
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Amount:</span>
-              <span>{approvalSummary.amount}</span>
-            </div>
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Network:</span>
-              <span>{approvalSummary.network}</span>
-            </div>
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Estimated gas:</span>
-              <span>{approvalSummary.estimatedGas}</span>
-            </div>
+            <ActionDetailRow label="Recipient:" value={approvalSummary.recipient} />
+            <ActionDetailRow label="Asset:" value={approvalSummary.asset} />
+            <ActionDetailRow label="Amount:" value={approvalSummary.amount} />
+            <ActionDetailRow label="Network:" value={approvalSummary.network} />
+            <ActionDetailRow label="Estimated gas:" value={approvalSummary.estimatedGas} />
           </div>
         ) : null}
         <div className="space-y-1.5">
-          <div className="flex gap-2">
-            <span className="text-muted-foreground">Network:</span>
-            <span>{data.chain.name}</span>
-          </div>
+          <ActionDetailRow label="Network:" value={data.chain.name} />
           {data.sender && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">From:</span>
-              <span className="truncate font-mono text-xs">{data.sender}</span>
-            </div>
+            <ActionDetailRow
+              label="From:"
+              value={data.sender}
+              valueClassName="truncate font-mono text-xs"
+            />
           )}
           {data.recipient && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">To:</span>
-              <span className="truncate font-mono text-xs">{data.recipient}</span>
-            </div>
+            <ActionDetailRow
+              label="To:"
+              value={data.recipient}
+              valueClassName="truncate font-mono text-xs"
+            />
           )}
           {data.resolvedEnsName && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">ENS:</span>
-              <span>{data.resolvedEnsName}</span>
-            </div>
+            <ActionDetailRow label="ENS:" value={data.resolvedEnsName} />
           )}
           {data.asset && data.amount && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Amount:</span>
-              <span>
-                {data.amount} {data.asset.symbol}
-              </span>
-            </div>
+            <ActionDetailRow
+              label="Amount:"
+              value={`${data.amount} ${data.asset.symbol}`}
+            />
           )}
           {data.gasEstimate && (
             <>
-              <div className="flex gap-2">
-                <span className="text-muted-foreground">Gas limit:</span>
-                <span>{data.gasEstimate.gasLimit}</span>
-              </div>
-              <div className="flex gap-2">
-                <span className="text-muted-foreground">Max fee:</span>
-                <span>{data.gasEstimate.maxFeePerGasGwei} gwei</span>
-              </div>
-              <div className="flex gap-2">
-                <span className="text-muted-foreground">Gas cost:</span>
-                <span>
-                  ~{data.gasEstimate.gasCostNative} {data.chain.nativeSymbol}
-                </span>
-              </div>
+              <ActionDetailRow label="Gas limit:" value={data.gasEstimate.gasLimit} />
+              <ActionDetailRow label="Max fee:" value={`${data.gasEstimate.maxFeePerGasGwei} gwei`} />
+              <ActionDetailRow
+                label="Gas cost:"
+                value={`~${data.gasEstimate.gasCostNative} ${data.chain.nativeSymbol}`}
+              />
             </>
           )}
           {data.balance && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground">Signer balance:</span>
-              <span>
-                {data.balance.amount} {data.balance.asset}
-              </span>
-            </div>
+            <ActionDetailRow
+              label="Signer balance:"
+              value={`${data.balance.amount} ${data.balance.asset}`}
+            />
           )}
         </div>
         {data.approval?.required && data.approval.thresholdAmount && data.approval.thresholdAssetSymbol ? (
@@ -917,16 +841,8 @@ function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
         <p className={isAborted ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
           {data.message}
         </p>
-      </CardContent>
-    </Card>
+    </ActionResultCard>
   )
-}
-
-function StepIcon({ status }: { status: ProgressStep["status"] }) {
-  if (status === "complete") return <Check className="size-3.5 text-emerald-600" />
-  if (status === "error") return <X className="size-3.5 text-destructive" />
-  if (status === "in_progress") return <Loader2 className="size-3.5 animate-spin text-amber-500" />
-  return <CircleDot className="size-3.5 text-muted-foreground/50" />
 }
 
 function TransactionProgressResult({
@@ -950,9 +866,11 @@ function TransactionProgressResult({
           : "In progress"
 
   return (
-    <Card
-      data-testid="result-transaction-progress"
-      size="sm"
+    <ActionResultCard
+      testId="result-transaction-progress"
+      title={data.summary}
+      icon={<ArrowUpRight className="size-4 text-amber-500" />}
+      badge={<Badge variant={badgeVariant}>{badgeLabel}</Badge>}
       className={
         isSuccess
           ? "border-emerald-500/20 bg-emerald-500/5"
@@ -961,50 +879,26 @@ function TransactionProgressResult({
             : "border-amber-500/20 bg-amber-500/5"
       }
     >
-      <CardHeader className="pb-0">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <ArrowUpRight className="size-4 text-amber-500" />
-            <CardTitle className="text-sm">{data.summary}</CardTitle>
-          </div>
-          <Badge variant={badgeVariant}>{badgeLabel}</Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
         <p className="text-muted-foreground">{data.message}</p>
 
         <div className="space-y-1.5">
-          <div className="flex gap-2">
-            <span className="text-muted-foreground">From:</span>
-            <span className="truncate font-mono text-xs">{data.sender}</span>
-          </div>
-          <div className="flex gap-2">
-            <span className="text-muted-foreground">To:</span>
-            <span className="truncate font-mono text-xs">{data.recipient}</span>
-          </div>
-          <div className="flex gap-2">
-            <span className="text-muted-foreground">Amount:</span>
-            <span>
-              {data.amount} {data.asset.symbol}
-            </span>
-          </div>
+          <ActionDetailRow
+            label="From:"
+            value={data.sender}
+            valueClassName="truncate font-mono text-xs"
+          />
+          <ActionDetailRow
+            label="To:"
+            value={data.recipient}
+            valueClassName="truncate font-mono text-xs"
+          />
+          <ActionDetailRow
+            label="Amount:"
+            value={`${data.amount} ${data.asset.symbol}`}
+          />
         </div>
 
-        <div className="space-y-2">
-          {data.steps.map((step) => (
-            <div key={step.key} className="flex items-start gap-2 rounded-md bg-background/50 px-2.5 py-2">
-              <div className="pt-0.5">
-                <StepIcon status={step.status} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm">{step.label}</p>
-                {step.detail && (
-                  <p className="break-all text-xs text-muted-foreground">{step.detail}</p>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+        <ActionStepList steps={data.steps} />
 
         {data.txHash && (
           <div className="flex items-center gap-2 text-sm">
@@ -1056,8 +950,7 @@ function TransactionProgressResult({
           <p className="text-sm text-destructive">{data.revertReason}</p>
         )}
         {data.error && <p className="text-sm text-destructive">{data.error}</p>}
-      </CardContent>
-    </Card>
+    </ActionResultCard>
   )
 }
 
@@ -1597,6 +1490,15 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
       : null
   const slippageLabel =
     typeof quote?.slippageBps === "number" ? `${quote.slippageBps} bps` : null
+  const validToLabel =
+    typeof quote?.validTo === "string"
+      ? new Date(quote.validTo).toLocaleString("en-US", {
+          month: "short",
+          day: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : null
   const orderId = typeof execution?.orderId === "string" ? execution.orderId : undefined
   const txHash =
     typeof execution?.approvalTxHash === "string"
@@ -1604,12 +1506,18 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
       : typeof execution?.txHash === "string"
         ? execution.txHash
         : undefined
+  const safeTxHash =
+    typeof execution?.safeTxHash === "string" ? execution.safeTxHash : undefined
+  const actionCount =
+    typeof execution?.actionCount === "number" ? execution.actionCount : null
   const orderUrl = chainId ? getCowExplorerOrderUrl(chainId, orderId) : null
   const txUrl = chainId ? getExplorerTxUrl(chainId, txHash) : null
 
   const accentClass =
     status === "executed"
       ? "border-emerald-500/20 bg-emerald-500/5"
+      : status === "proposed"
+        ? "border-amber-500/20 bg-amber-500/5"
       : status === "manual_action_required"
         ? "border-amber-500/20 bg-amber-500/5"
         : status === "unsupported" || status === "error"
@@ -1618,6 +1526,8 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
   const badgeVariant =
     status === "executed"
       ? "secondary"
+      : status === "proposed"
+        ? "secondary"
       : status === "manual_action_required"
         ? "outline"
         : status === "unsupported" || status === "error"
@@ -1665,7 +1575,15 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
           <div className="grid gap-2 sm:grid-cols-2">
             {feeAmount ? <SwapMetric label="Fee" value={feeAmount} /> : null}
             {slippageLabel ? <SwapMetric label="Slippage" value={slippageLabel} /> : null}
+            {validToLabel ? <SwapMetric label="Valid until" value={validToLabel} /> : null}
+            {actionCount && actionCount > 1 ? (
+              <SwapMetric label="Safe actions" value={String(actionCount)} />
+            ) : null}
           </div>
+        ) : null}
+
+        {Array.isArray(plan?.steps) && plan.steps.length > 0 ? (
+          <ActionStepList steps={plan.steps as Array<ProgressStep>} />
         ) : null}
 
         {orderUrl || txUrl ? (
@@ -1695,6 +1613,14 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
           </div>
         ) : null}
 
+        {safeTxHash ? (
+          <ActionDetailRow
+            label="Safe Tx:"
+            value={safeTxHash}
+            valueClassName="truncate font-mono text-xs"
+          />
+        ) : null}
+
         {execution && typeof execution.safeUILink === "string" ? (
           <a
             href={execution.safeUILink}
@@ -1702,7 +1628,7 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 transition-colors hover:text-amber-500"
           >
-            Continue in Safe
+            {status === "proposed" ? "Sign on Safe" : "Continue in Safe"}
             <ExternalLink className="size-3" />
           </a>
         ) : null}

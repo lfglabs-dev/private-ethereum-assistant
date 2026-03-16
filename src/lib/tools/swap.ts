@@ -1,16 +1,26 @@
 import { tool } from "ai";
 import {
+  COW_PROTOCOL_VAULT_RELAYER_ADDRESS,
+  ETH_FLOW_ADDRESSES,
   EVM_NATIVE_CURRENCY_ADDRESS,
   OrderKind,
+  SigningScheme,
   TradingSdk,
+  calculateUniqueOrderId,
+  getOrderToSign,
+  getTradeParametersAfterQuote,
+  getEthFlowContract,
   isSupportedChain,
+  swapParamsToLimitOrderParams,
   type QuoteResults,
+  type QuoteResultsWithSigner,
   type SupportedChainId,
 } from "@cowprotocol/cow-sdk";
 import { ViemAdapter } from "@cowprotocol/sdk-viem-adapter";
 import { z } from "zod";
 import {
   erc20Abi,
+  encodeFunctionData,
   formatUnits,
   getAddress,
   http,
@@ -24,7 +34,7 @@ import { getChainMetadata, type NetworkConfig } from "../ethereum";
 import { resolveTokenMetadata, resolveTokenQuery } from "../token-metadata";
 import { type RuntimeConfig } from "../runtime-config";
 import { buildTrustWalletTokenPaths } from "../trustwallet-assets";
-import { getSafeUiLink } from "./safe";
+import { getSafeUiLink, proposeSafeTransactions } from "./safe";
 
 const SWAP_APP_CODE = "PrivateEthereumAssistant";
 const KNOWN_TOKEN_ALIASES: Record<
@@ -118,7 +128,11 @@ type SwapPlan = {
   type: "swap";
   actor: SwapActor;
   adapter: "cow";
-  executionPath: "eoa_direct" | "safe_manual" | "railgun_unsupported";
+  executionPath:
+    | "eoa_direct"
+    | "safe_manual"
+    | "safe_proposed"
+    | "railgun_unsupported";
   chain: {
     id: number;
     name: string;
@@ -149,6 +163,7 @@ type SwapResult = {
   kind: "swap_result";
   status:
     | "executed"
+    | "proposed"
     | "manual_action_required"
     | "unsupported"
     | "input_required"
@@ -170,6 +185,8 @@ type SwapResult = {
     owner?: string;
     safeAddress?: string;
     safeUILink?: string;
+    safeTxHash?: string;
+    actionCount?: number;
   };
   candidates?: Array<Record<string, unknown>>;
   error?: string;
@@ -215,6 +232,15 @@ type SwapToolDependencies = {
     orderId?: string;
     txHash?: string;
   }>;
+  executeSafeSwap?: (options: {
+    runtimeConfig: RuntimeConfig;
+    context: SwapChainContext;
+    owner: Address;
+    sellToken: ResolvedSwapToken;
+    buyToken: ResolvedSwapToken;
+    amountAtoms: bigint;
+    requestedSellAmount: string;
+  }) => Promise<SwapResult>;
 };
 
 function getActorChainContext(runtimeConfig: RuntimeConfig): SwapChainContext {
@@ -439,13 +465,15 @@ function buildPlan(args: {
   requestedSellAmount: string;
   quote: SwapQuoteSummary;
   steps: SwapPlanStep[];
+  executionPath?: SwapPlan["executionPath"];
 }): SwapPlan {
   const executionPath =
-    args.actor === "eoa"
+    args.executionPath ??
+    (args.actor === "eoa"
       ? "eoa_direct"
       : args.actor === "safe"
         ? "safe_manual"
-        : "railgun_unsupported";
+        : "railgun_unsupported");
 
   return {
     type: "swap",
@@ -515,6 +543,500 @@ async function getCowQuoteOnly(
     buyTokenDecimals: trade.buyToken.decimals,
     ...(actor === "safe" ? { receiver: trade.owner as `0x${string}` } : {}),
   });
+}
+
+function createSafeTradingSdk(options: {
+  runtimeConfig: RuntimeConfig;
+  context: SwapChainContext;
+}) {
+  const signerKey = options.runtimeConfig.safe.signerPrivateKey.trim();
+  if (!signerKey) {
+    return null;
+  }
+
+  const signer = privateKeyToAccount(signerKey as `0x${string}`);
+  const publicClient = createPublicClient({
+    transport: http(options.context.networkConfig.rpcUrl),
+  });
+  const adapter = new ViemAdapter({
+    provider: publicClient,
+    signer,
+  });
+  const sdk = new TradingSdk(
+    {
+      chainId: options.context.networkConfig.chainId as SupportedChainId,
+      appCode: SWAP_APP_CODE,
+      signer,
+    },
+    {},
+    adapter as never,
+  );
+
+  return {
+    signer,
+    publicClient,
+    adapter,
+    sdk,
+  };
+}
+
+async function getSafeQuoteResults(options: {
+  runtimeConfig: RuntimeConfig;
+  context: SwapChainContext;
+  owner: Address;
+  sellToken: ResolvedSwapToken;
+  buyToken: ResolvedSwapToken;
+  amountAtoms: bigint;
+}) {
+  const safeSdk = createSafeTradingSdk(options);
+  if (!safeSdk) {
+    return null;
+  }
+
+  const quoteRequest = buildSafeQuoteRequest(options.owner, options.sellToken);
+
+  return safeSdk.sdk.getQuoteResults(
+    {
+      chainId: options.context.networkConfig.chainId as SupportedChainId,
+      kind: OrderKind.SELL,
+      owner: options.owner as `0x${string}`,
+      amount: options.amountAtoms.toString(),
+      sellToken: options.sellToken.address as `0x${string}`,
+      sellTokenDecimals: options.sellToken.decimals,
+      buyToken: options.buyToken.address as `0x${string}`,
+      buyTokenDecimals: options.buyToken.decimals,
+      receiver: options.owner as `0x${string}`,
+    },
+    {
+      quoteRequest,
+    },
+  );
+}
+
+export function buildSafeQuoteRequest(
+  owner: Address,
+  sellToken: ResolvedSwapToken,
+): {
+  receiver: `0x${string}`;
+  signingScheme?: SigningScheme.PRESIGN;
+} {
+  if (sellToken.kind === "native") {
+    return {
+      receiver: owner as `0x${string}`,
+    };
+  }
+
+  return {
+    receiver: owner as `0x${string}`,
+    signingScheme: SigningScheme.PRESIGN,
+  };
+}
+
+async function buildSafeEthFlowTransaction(options: {
+  quoteResults: QuoteResultsWithSigner;
+  chainId: SupportedChainId;
+  owner: Address;
+  sellTokenAddress: `0x${string}`;
+  signer: ReturnType<typeof privateKeyToAccount>;
+  adapter: ViemAdapter;
+}) {
+  const {
+    appDataInfo,
+    quoteResponse,
+    tradeParameters,
+  } = options.quoteResults.result;
+  const limitTradeParameters = swapParamsToLimitOrderParams(
+    getTradeParametersAfterQuote({
+      quoteParameters: tradeParameters,
+      sellToken: options.sellTokenAddress,
+    }),
+    quoteResponse,
+  );
+  const slippageBps =
+    limitTradeParameters.slippageBps ??
+    options.quoteResults.result.suggestedSlippageBps;
+  const adjustedLimitTradeParameters = {
+    ...limitTradeParameters,
+    slippageBps,
+  };
+  const orderToSign = getOrderToSign(
+    {
+      chainId: options.chainId,
+      isEthFlow: true,
+      from: options.owner,
+      networkCostsAmount: quoteResponse.quote.feeAmount,
+    },
+    adjustedLimitTradeParameters,
+    appDataInfo.appDataKeccak256,
+  );
+  const orderId = await calculateUniqueOrderId(
+    options.chainId,
+    orderToSign,
+    undefined,
+    adjustedLimitTradeParameters.env,
+  );
+  const contract = getEthFlowContract(
+    options.adapter.createSigner(options.signer),
+    options.chainId,
+    adjustedLimitTradeParameters.env,
+  );
+  const quoteId = adjustedLimitTradeParameters.quoteId;
+  if (typeof quoteId !== "number") {
+    throw new Error("quoteId is required to build the Safe native-token swap.");
+  }
+
+  const ethOrderParams = {
+    buyToken: orderToSign.buyToken,
+    receiver: orderToSign.receiver,
+    sellAmount: orderToSign.sellAmount,
+    buyAmount: orderToSign.buyAmount,
+    feeAmount: orderToSign.feeAmount,
+    partiallyFillable: orderToSign.partiallyFillable,
+    quoteId,
+    appData: appDataInfo.appDataKeccak256,
+    validTo: orderToSign.validTo.toString(),
+  };
+
+  await options.quoteResults.orderBookApi.uploadAppData(
+    appDataInfo.appDataKeccak256,
+    appDataInfo.fullAppData,
+  );
+
+  return {
+    orderId,
+    transaction: {
+      to:
+        ETH_FLOW_ADDRESSES[options.chainId] ??
+        contract.address,
+      valueWei: BigInt(orderToSign.sellAmount).toString(),
+      data: contract.interface.encodeFunctionData("createOrder", [ethOrderParams]),
+    },
+  };
+}
+
+async function executeCowSafeSwap(options: {
+  runtimeConfig: RuntimeConfig;
+  context: SwapChainContext;
+  owner: Address;
+  sellToken: ResolvedSwapToken;
+  buyToken: ResolvedSwapToken;
+  amountAtoms: bigint;
+  requestedSellAmount: string;
+}): Promise<SwapResult> {
+  const safeSdk = createSafeTradingSdk(options);
+  const summary = buildExecutionSummary(
+    "safe",
+    options.requestedSellAmount,
+    options.sellToken,
+    options.buyToken,
+    options.context.chain.name,
+  );
+
+  if (!safeSdk) {
+    const fallbackQuote = await getCowQuoteOnly("safe", {
+      networkConfig: options.context.networkConfig,
+      chainId: options.context.networkConfig.chainId as SupportedChainId,
+      owner: options.owner,
+      sellToken: options.sellToken,
+      buyToken: options.buyToken,
+      amountAtoms: options.amountAtoms,
+    });
+    const quote = buildQuoteSummary(fallbackQuote, options.sellToken, options.buyToken);
+    const plan = buildPlan({
+      actor: "safe",
+      context: options.context,
+      sellToken: options.sellToken,
+      buyToken: options.buyToken,
+      requestedSellAmount: options.requestedSellAmount,
+      quote,
+      executionPath: "safe_manual",
+      steps: [
+        {
+          key: "quote",
+          label: "Fetch CoW quote",
+          status: "complete",
+          detail: `${quote.buyAmount} ${options.buyToken.symbol} estimated output.`,
+        },
+        {
+          key: "proposal",
+          label: "Configure Safe signer",
+          status: "pending",
+          detail: "Add a Safe signer key to construct and propose the swap transaction automatically.",
+        },
+      ],
+    });
+
+    return {
+      kind: "swap_result",
+      status: "manual_action_required",
+      actor: "safe",
+      adapter: "cow",
+      summary,
+      message:
+        "The CoW quote is ready, but this app needs a Safe signer key to create the swap transaction automatically.",
+      chain: {
+        id: options.context.chain.id,
+        name: options.context.chain.name,
+      },
+      plan,
+      quote,
+      execution: {
+        safeAddress: options.runtimeConfig.safe.address,
+        safeUILink: getSafeUiLink(options.runtimeConfig.safe),
+      },
+    };
+  }
+
+  const quoteResults = await getSafeQuoteResults(options);
+  if (!quoteResults) {
+    throw new Error("Could not prepare the Safe swap signer.");
+  }
+
+  if (!process.env.SAFE_API_KEY) {
+    const fallbackQuote = buildQuoteSummary(
+      quoteResults.result,
+      options.sellToken,
+      options.buyToken,
+    );
+    const plan = buildPlan({
+      actor: "safe",
+      context: options.context,
+      sellToken: options.sellToken,
+      buyToken: options.buyToken,
+      requestedSellAmount: options.requestedSellAmount,
+      quote: fallbackQuote,
+      executionPath: "safe_manual",
+      steps: [
+        {
+          key: "quote",
+          label: "Fetch CoW quote",
+          status: "complete",
+          detail: `${fallbackQuote.buyAmount} ${options.buyToken.symbol} estimated output.`,
+        },
+        {
+          key: "proposal",
+          label: "Configure Safe API key",
+          status: "pending",
+          detail: "Add a Safe API key so this app can submit the Safe swap proposal automatically.",
+        },
+      ],
+    });
+
+    return {
+      kind: "swap_result",
+      status: "manual_action_required",
+      actor: "safe",
+      adapter: "cow",
+      summary,
+      message:
+        "The CoW quote is ready, but this app needs a Safe API key to create the swap transaction automatically.",
+      chain: {
+        id: options.context.chain.id,
+        name: options.context.chain.name,
+      },
+      plan,
+      quote: fallbackQuote,
+      execution: {
+        safeAddress: options.runtimeConfig.safe.address,
+        safeUILink: getSafeUiLink(options.runtimeConfig.safe),
+      },
+    };
+  }
+
+  const quote = buildQuoteSummary(
+    quoteResults.result,
+    options.sellToken,
+    options.buyToken,
+  );
+  const transactions: Array<{
+    to: string;
+    valueWei: string;
+    valueLabel: string;
+    data: string;
+    type: string;
+    spender?: string;
+    tokenAmount?: string;
+  }> = [];
+  let orderId: string | undefined;
+
+  if (options.sellToken.kind === "erc20") {
+    const requiredAllowance =
+      BigInt(quoteResults.result.quoteResponse.quote.sellAmount) +
+      BigInt(quoteResults.result.quoteResponse.quote.feeAmount);
+    const allowance = await safeSdk.sdk.getCowProtocolAllowance({
+      chainId: options.context.networkConfig.chainId as SupportedChainId,
+      tokenAddress: options.sellToken.address as `0x${string}`,
+      owner: options.owner as `0x${string}`,
+    });
+
+    if (allowance < requiredAllowance) {
+      const vaultRelayer = COW_PROTOCOL_VAULT_RELAYER_ADDRESS[
+        options.context.networkConfig.chainId as SupportedChainId
+      ];
+      transactions.push({
+        to: options.sellToken.address,
+        valueWei: "0",
+        valueLabel: "0 ETH",
+        data: encodeFunctionData({
+          abi: erc20Abi,
+          functionName: "approve",
+          args: [vaultRelayer as `0x${string}`, requiredAllowance],
+        }),
+        type: "ERC-20 approve",
+        spender: vaultRelayer,
+        tokenAmount: `${formatUnits(requiredAllowance, options.sellToken.decimals)} ${options.sellToken.symbol}`,
+      });
+    }
+
+    const postResult = await safeSdk.sdk.postSwapOrder(
+      {
+        chainId: options.context.networkConfig.chainId as SupportedChainId,
+        kind: OrderKind.SELL,
+        owner: options.owner as `0x${string}`,
+        amount: options.amountAtoms.toString(),
+        sellToken: options.sellToken.address as `0x${string}`,
+        sellTokenDecimals: options.sellToken.decimals,
+        buyToken: options.buyToken.address as `0x${string}`,
+        buyTokenDecimals: options.buyToken.decimals,
+        receiver: options.owner as `0x${string}`,
+      },
+      {
+        quoteRequest: {
+          receiver: options.owner as `0x${string}`,
+          signingScheme: SigningScheme.PRESIGN,
+        },
+      },
+    );
+
+    orderId = postResult.orderId;
+
+    const preSignTransaction = await safeSdk.sdk.getPreSignTransaction({
+      orderUid: postResult.orderId,
+      chainId: options.context.networkConfig.chainId as SupportedChainId,
+      signer: safeSdk.signer,
+    });
+
+    transactions.push({
+      to: preSignTransaction.to,
+      valueWei: preSignTransaction.value,
+      valueLabel: "0 ETH",
+      data: preSignTransaction.data,
+      type: "CoW pre-sign",
+    });
+  } else {
+    const ethFlowTransaction = await buildSafeEthFlowTransaction({
+      quoteResults,
+      chainId: options.context.networkConfig.chainId as SupportedChainId,
+      owner: options.owner,
+      sellTokenAddress: options.sellToken.address as `0x${string}`,
+      signer: safeSdk.signer,
+      adapter: safeSdk.adapter,
+    });
+
+    orderId = ethFlowTransaction.orderId;
+    transactions.push({
+      to: ethFlowTransaction.transaction.to,
+      valueWei: ethFlowTransaction.transaction.valueWei,
+      valueLabel: `${quote.sellAmount} ${options.sellToken.symbol}`,
+      data: ethFlowTransaction.transaction.data,
+      type: "CoW native swap",
+    });
+  }
+
+  const safeProposal = await proposeSafeTransactions(options.runtimeConfig.safe, {
+    transactions,
+    summary,
+    proposedMessage:
+      transactions.length > 1
+        ? "Safe swap transaction bundle proposed. Remaining owners can review and sign it in the Safe UI."
+        : "Safe swap transaction proposed. Remaining owners can review and sign it in the Safe UI.",
+    manualNoSignerMessage:
+      "The CoW quote is ready, but this app needs a Safe signer key to create the Safe swap proposal automatically.",
+    manualNoApiKeyMessage:
+      "The CoW quote is ready, but this app needs a Safe API key to propose the Safe swap transaction automatically.",
+    origin: "Private Ethereum Assistant · Safe swap",
+  });
+
+  const safeProposalRecord = safeProposal as Record<string, unknown>;
+  const status = String(safeProposalRecord.status ?? "");
+  const actionCount =
+    typeof safeProposalRecord.actionCount === "number"
+      ? safeProposalRecord.actionCount
+      : transactions.length;
+  const safeTxHash =
+    typeof safeProposalRecord.safeTxHash === "string"
+      ? safeProposalRecord.safeTxHash
+      : undefined;
+  const safeUILink =
+    typeof safeProposalRecord.safeUILink === "string"
+      ? safeProposalRecord.safeUILink
+      : undefined;
+  const safeAddress =
+    typeof safeProposalRecord.safeAddress === "string"
+      ? safeProposalRecord.safeAddress
+      : options.runtimeConfig.safe.address;
+
+  const plan = buildPlan({
+    actor: "safe",
+    context: options.context,
+    sellToken: options.sellToken,
+    buyToken: options.buyToken,
+    requestedSellAmount: options.requestedSellAmount,
+    quote,
+    executionPath: status === "proposed" ? "safe_proposed" : "safe_manual",
+    steps: [
+      {
+        key: "quote",
+        label: "Fetch CoW quote",
+        status: "complete",
+        detail: `${quote.buyAmount} ${options.buyToken.symbol} estimated output.`,
+      },
+      ...(transactions.length > 1
+        ? [
+            {
+              key: "approval",
+              label: "Batch Safe approval",
+              status: "complete" as const,
+              detail: "The Safe transaction bundle includes the ERC-20 approval required for CoW settlement.",
+            },
+          ]
+        : []),
+      {
+        key: "proposal",
+        label: status === "proposed" ? "Safe transaction proposed" : "Continue in Safe",
+        status: status === "proposed" ? "complete" : "pending",
+        detail:
+          status === "proposed"
+            ? `Safe bundle ready with ${actionCount} action${actionCount === 1 ? "" : "s"}.`
+            : "Open the Safe UI to create or review the swap transaction manually.",
+      },
+    ],
+  });
+
+  return {
+    kind: "swap_result",
+    status: status === "proposed" ? "proposed" : "manual_action_required",
+    actor: "safe",
+    adapter: "cow",
+    summary,
+    message:
+      typeof safeProposalRecord.message === "string"
+        ? safeProposalRecord.message
+        : "Safe swap action prepared.",
+    chain: {
+      id: options.context.chain.id,
+      name: options.context.chain.name,
+    },
+    plan,
+    quote,
+    execution: {
+      orderId,
+      safeAddress,
+      safeUILink,
+      safeTxHash,
+      actionCount,
+    },
+  };
 }
 
 async function executeCowEoaSwap(options: {
@@ -614,6 +1136,7 @@ export function createSwapTools(
   const resolveToken = dependencies.resolveToken ?? resolveSwapToken;
   const getQuoteOnly = dependencies.getQuoteOnly ?? getCowQuoteOnly;
   const executeEoaSwap = dependencies.executeEoaSwap ?? executeCowEoaSwap;
+  const executeSafeSwap = dependencies.executeSafeSwap ?? executeCowSafeSwap;
 
   const swapTokens = tool({
     description:
@@ -777,48 +1300,15 @@ export function createSwapTools(
         );
 
         if (context.actor === "safe") {
-          const plan = buildPlan({
-            actor: context.actor,
+          return executeSafeSwap({
+            runtimeConfig,
             context,
+            owner,
             sellToken: resolvedSellToken.token,
             buyToken: resolvedBuyToken.token,
+            amountAtoms,
             requestedSellAmount: amount,
-            quote,
-            steps: [
-              {
-                key: "quote",
-                label: "Fetch CoW quote",
-                status: "complete",
-                detail: `${quote.buyAmount} ${resolvedBuyToken.token.symbol} estimated output.`,
-              },
-              {
-                key: "proposal",
-                label: "Continue in Safe",
-                status: "pending",
-                detail: "Open the Safe UI and use the native CoW swap flow with this quote context.",
-              },
-            ],
           });
-
-          return {
-            kind: "swap_result",
-            status: "manual_action_required",
-            actor: context.actor,
-            adapter: "cow",
-            summary,
-            message:
-              "The CoW quote is ready, but Safe-native CoW proposal submission is not automated here yet. Continue in the Safe UI for approval and signing.",
-            chain: {
-              id: context.chain.id,
-              name: context.chain.name,
-            },
-            plan,
-            quote,
-            execution: {
-              safeAddress: runtimeConfig.safe.address,
-              safeUILink: getSafeUiLink(runtimeConfig.safe),
-            },
-          };
         }
 
         if (context.actor === "railgun") {

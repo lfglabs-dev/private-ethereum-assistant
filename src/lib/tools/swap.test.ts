@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { SigningScheme } from "@cowprotocol/cow-sdk";
 import type { QuoteResults } from "@cowprotocol/cow-sdk";
 import { createDefaultRuntimeConfig } from "../runtime-config";
-import { createSwapTools } from "./swap";
+import { buildSafeQuoteRequest, createSwapTools } from "./swap";
 
 const ETH_TOKEN = {
   kind: "native" as const,
@@ -157,6 +158,18 @@ function asSwapResult(value: unknown) {
 }
 
 describe("swap tool", () => {
+  test("uses a presign quote request only for Safe ERC-20 sells", () => {
+    const owner = "0x1111111111111111111111111111111111111111";
+
+    expect(buildSafeQuoteRequest(owner, ETH_TOKEN)).toEqual({
+      receiver: owner,
+    });
+    expect(buildSafeQuoteRequest(owner, USDC_TOKEN)).toEqual({
+      receiver: owner,
+      signingScheme: SigningScheme.PRESIGN,
+    });
+  });
+
   test("executes the EOA actor path and returns a canonical plan", async () => {
     const result = asSwapResult(await executeSwap("eoa"));
 
@@ -169,12 +182,223 @@ describe("swap tool", () => {
   });
 
   test("returns a Safe manual continuation plan", async () => {
-    const result = asSwapResult(await executeSwap("safe"));
+    const runtimeConfig = createRuntimeConfig("safe");
+    const tools = createSwapTools(runtimeConfig, {
+      resolveToken: async ({ query }) => {
+        if (query.toUpperCase() === "ETH") {
+          return {
+            status: "resolved",
+            token: ETH_TOKEN,
+          };
+        }
+
+        if (query.toUpperCase() === "USDC") {
+          return {
+            status: "resolved",
+            token: USDC_TOKEN,
+          };
+        }
+
+        return {
+          status: "error",
+          message: `Unknown token ${query}`,
+        };
+      },
+      getQuoteOnly: async () => createQuoteResults(),
+      executeSafeSwap: async () => ({
+        kind: "swap_result",
+        status: "manual_action_required",
+        actor: "safe",
+        adapter: "cow",
+        summary: "Swap 1 ETH for USDC in Safe mode",
+        message: "The CoW quote is ready, but this app needs a Safe signer key to create the swap transaction automatically.",
+        chain: {
+          id: 8453,
+          name: "Base",
+        },
+        plan: {
+          type: "swap",
+          actor: "safe",
+          adapter: "cow",
+          executionPath: "safe_manual",
+          chain: {
+            id: 8453,
+            name: "Base",
+          },
+          sell: {
+            amount: "1",
+            symbol: "ETH",
+            address: ETH_TOKEN.address,
+            kind: "native",
+            source: "native",
+          },
+          buy: {
+            amount: "2500",
+            symbol: "USDC",
+            address: USDC_TOKEN.address,
+            kind: "erc20",
+            source: "verified",
+          },
+          quote: {
+            sellAmount: "1",
+            buyAmount: "2500",
+            feeAmount: "0.001",
+            validTo: "2026-03-15T12:00:00.000Z",
+            verified: true,
+            slippageBps: 50,
+          },
+          steps: [],
+        },
+        quote: {
+          sellAmount: "1",
+          buyAmount: "2500",
+          feeAmount: "0.001",
+          validTo: "2026-03-15T12:00:00.000Z",
+          verified: true,
+          slippageBps: 50,
+        },
+        execution: {
+          safeAddress: "0x4581812Df7500277e3fC72CF93f766DBBd32d371",
+        },
+      }),
+    });
+
+    if (!tools.swapTokens.execute) {
+      throw new Error("swapTokens tool should be executable.");
+    }
+
+    const result = asSwapResult(await tools.swapTokens.execute(
+      {
+        sellToken: "ETH",
+        buyToken: "USDC",
+        amount: "1",
+      },
+      {
+        toolCallId: crypto.randomUUID(),
+        messages: [],
+      },
+    ));
 
     expect(result.kind).toBe("swap_result");
     expect(result.status).toBe("manual_action_required");
     expect(result.actor).toBe("safe");
     expect(result.plan?.executionPath).toBe("safe_manual");
+    expect(result.execution?.safeAddress).toBe("0x4581812Df7500277e3fC72CF93f766DBBd32d371");
+  });
+
+  test("returns a Safe proposed plan when automatic proposal succeeds", async () => {
+    const runtimeConfig = {
+      ...createRuntimeConfig("safe"),
+      safe: {
+        ...createRuntimeConfig("safe").safe,
+        signerPrivateKey:
+          "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      },
+    };
+    const tools = createSwapTools(runtimeConfig, {
+      resolveToken: async ({ query }) => {
+        if (query.toUpperCase() === "ETH") {
+          return {
+            status: "resolved",
+            token: ETH_TOKEN,
+          };
+        }
+
+        if (query.toUpperCase() === "USDC") {
+          return {
+            status: "resolved",
+            token: USDC_TOKEN,
+          };
+        }
+
+        return {
+          status: "error",
+          message: `Unknown token ${query}`,
+        };
+      },
+      getQuoteOnly: async () => createQuoteResults(),
+      executeSafeSwap: async () => ({
+        kind: "swap_result",
+        status: "proposed",
+        actor: "safe",
+        adapter: "cow",
+        summary: "Swap 1 ETH for USDC on Base in Safe mode",
+        message: "Safe swap transaction proposed.",
+        chain: {
+          id: 8453,
+          name: "Base",
+        },
+        plan: {
+          type: "swap",
+          actor: "safe",
+          adapter: "cow",
+          executionPath: "safe_proposed",
+          chain: {
+            id: 8453,
+            name: "Base",
+          },
+          sell: {
+            amount: "1",
+            symbol: "ETH",
+            address: ETH_TOKEN.address,
+            kind: "native",
+            source: "native",
+          },
+          buy: {
+            amount: "2500",
+            symbol: "USDC",
+            address: USDC_TOKEN.address,
+            kind: "erc20",
+            source: "verified",
+          },
+          quote: {
+            sellAmount: "1",
+            buyAmount: "2500",
+            feeAmount: "0.001",
+            validTo: "2026-03-15T12:00:00.000Z",
+            verified: true,
+            slippageBps: 50,
+          },
+          steps: [],
+        },
+        quote: {
+          sellAmount: "1",
+          buyAmount: "2500",
+          feeAmount: "0.001",
+          validTo: "2026-03-15T12:00:00.000Z",
+          verified: true,
+          slippageBps: 50,
+        },
+        execution: {
+          orderId: "cow-order-safe",
+          safeAddress: "0x4581812Df7500277e3fC72CF93f766DBBd32d371",
+          safeUILink: "https://app.safe.global/transactions/queue?safe=base:0x4581812Df7500277e3fC72CF93f766DBBd32d371",
+          safeTxHash: "0xsafeproposal",
+          actionCount: 2,
+        },
+      }),
+    });
+
+    if (!tools.swapTokens.execute) {
+      throw new Error("swapTokens tool should be executable.");
+    }
+
+    const result = asSwapResult(await tools.swapTokens.execute(
+      {
+        sellToken: "ETH",
+        buyToken: "USDC",
+        amount: "1",
+      },
+      {
+        toolCallId: crypto.randomUUID(),
+        messages: [],
+      },
+    ));
+
+    expect(result.kind).toBe("swap_result");
+    expect(result.status).toBe("proposed");
+    expect(result.actor).toBe("safe");
+    expect(result.plan?.executionPath).toBe("safe_proposed");
     expect(result.execution?.safeAddress).toBe("0x4581812Df7500277e3fC72CF93f766DBBd32d371");
     expect(result.execution?.safeUILink).toContain("app.safe.global");
   });

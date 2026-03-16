@@ -7,6 +7,7 @@ import {
   encodeFunctionData,
   erc20Abi,
   formatEther,
+  getAddress,
   http,
   isAddress,
   parseEther,
@@ -15,6 +16,25 @@ import {
 import { type RuntimeConfig } from "../runtime-config";
 
 type SafeToolConfig = RuntimeConfig["safe"];
+type SafeTransactionRequest = {
+  to: string;
+  valueWei: string;
+  valueLabel: string;
+  data: string;
+  type: string;
+  spender?: string;
+  tokenAmount?: string;
+};
+
+type SafeProposalRequest = {
+  transactions: SafeTransactionRequest[];
+  summary: string;
+  proposedMessage: string;
+  manualNoSignerMessage: string;
+  manualNoApiKeyMessage: string;
+  origin?: string;
+  pendingTransactionsHint?: string;
+};
 
 const SAFE_CHAIN_SHORT_NAMES: Record<number, string> = {
   1: "eth",
@@ -203,6 +223,168 @@ async function getProposalMetadata(
   };
 }
 
+function formatSafeTransactionBundle(
+  transactions: SafeTransactionRequest[],
+) {
+  if (transactions.length === 0) {
+    throw new Error("At least one Safe transaction is required.");
+  }
+
+  const normalizedTransactions = transactions.map((transaction) => ({
+    ...transaction,
+    to: getAddress(transaction.to),
+    spender: transaction.spender ? getAddress(transaction.spender) : undefined,
+  }));
+
+  const [primaryTransaction, ...rest] = normalizedTransactions;
+  const actionCount = normalizedTransactions.length;
+  const transactionType =
+    rest.length === 0
+      ? primaryTransaction.type
+      : `${primaryTransaction.type} + ${rest.length} more`;
+
+  return {
+    actionCount,
+    primaryTransaction,
+    transactionSummary: {
+      to: primaryTransaction.to,
+      value: primaryTransaction.valueLabel,
+      data: primaryTransaction.data,
+      type: transactionType,
+      spender: primaryTransaction.spender,
+      tokenAmount: primaryTransaction.tokenAmount,
+    },
+    transactions: normalizedTransactions.map((transaction) => ({
+      to: transaction.to,
+      value: transaction.valueLabel,
+      data: transaction.data,
+      type: transaction.type,
+      spender: transaction.spender,
+      tokenAmount: transaction.tokenAmount,
+    })),
+  };
+}
+
+export async function proposeSafeTransactions(
+  safeConfig: SafeToolConfig,
+  request: SafeProposalRequest,
+) {
+  const safeUILink = getSafeUiLink(safeConfig);
+  const info = await fetchSafeInfo(safeConfig);
+  const normalizedTransactions = request.transactions.map((transaction) => ({
+    ...transaction,
+    to: getAddress(transaction.to),
+    spender: transaction.spender ? getAddress(transaction.spender) : undefined,
+  }));
+  const {
+    actionCount,
+    transactionSummary,
+    transactions,
+  } = formatSafeTransactionBundle(normalizedTransactions);
+
+  const signerKey = safeConfig.signerPrivateKey.trim();
+
+  if (!signerKey) {
+    return {
+      status: "manual_creation_required",
+      message: request.manualNoSignerMessage,
+      summary: request.summary,
+      safeAddress: safeConfig.address,
+      safeUILink,
+      threshold: info.threshold,
+      signers: info.owners,
+      currentConfirmations: 0,
+      requiredConfirmations: info.threshold,
+      actionCount,
+      transaction: transactionSummary,
+      transactions,
+    };
+  }
+
+  if (!process.env.SAFE_API_KEY) {
+    return {
+      status: "manual_creation_required",
+      message: request.manualNoApiKeyMessage,
+      summary: request.summary,
+      safeAddress: safeConfig.address,
+      safeUILink,
+      threshold: info.threshold,
+      signers: info.owners,
+      currentConfirmations: 0,
+      requiredConfirmations: info.threshold,
+      actionCount,
+      transaction: transactionSummary,
+      transactions,
+    };
+  }
+
+  const apiKit = getApiKit(safeConfig);
+  const protocolKit = await Safe.init({
+    provider: safeConfig.rpcUrl,
+    signer: signerKey,
+    safeAddress: safeConfig.address,
+  });
+  const signerAddress = await protocolKit.getSafeProvider().getSignerAddress();
+
+  if (!signerAddress) {
+    throw new Error("Could not determine the configured signer address.");
+  }
+
+  const isOwner = info.owners.some(
+    (owner) => owner.toLowerCase() === signerAddress.toLowerCase(),
+  );
+
+  if (!isOwner) {
+    throw new Error(
+      `Address ${signerAddress} is not a signer of Safe ${safeConfig.address}`,
+    );
+  }
+
+  const safeTransaction = await protocolKit.createTransaction({
+    transactions: normalizedTransactions.map((transaction) => ({
+      to: transaction.to,
+      value: transaction.valueWei,
+      data: transaction.data,
+    })),
+  });
+
+  const signedTx = await protocolKit.signTransaction(safeTransaction);
+  const txHash = await protocolKit.getTransactionHash(signedTx);
+
+  await apiKit.proposeTransaction({
+    safeAddress: safeConfig.address,
+    safeTransactionData: signedTx.data,
+    safeTxHash: txHash,
+    senderAddress: signerAddress,
+    senderSignature: signedTx.encodedSignatures(),
+    origin: request.origin ?? "Private Ethereum Assistant",
+  });
+
+  const metadata = await getProposalMetadata(apiKit, txHash, info.threshold);
+
+  return {
+    status: "proposed",
+    message: request.proposedMessage,
+    summary: request.summary,
+    signerMessage: `Your signer ${signerAddress} contributed ${metadata.currentConfirmations}/${metadata.requiredConfirmations} required signatures.`,
+    safeTxHash: txHash,
+    safeAddress: safeConfig.address,
+    safeUILink,
+    proposerAddress: signerAddress,
+    threshold: info.threshold,
+    currentConfirmations: metadata.currentConfirmations,
+    requiredConfirmations: metadata.requiredConfirmations,
+    statusLabel: metadata.statusLabel,
+    signers: info.owners,
+    pendingTransactionsHint:
+      request.pendingTransactionsHint ??
+      "Ask me 'what are the pending Safe transactions?' any time to check progress.",
+    actionCount,
+    transaction: transactionSummary,
+    transactions,
+  };
+}
+
 export function createSafeTools(safeConfig: SafeToolConfig) {
   const safeAddress = safeConfig.address;
 
@@ -312,8 +494,6 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
         ),
     }),
     execute: async ({ to, value, data, spender, tokenAmount }) => {
-      const safeUILink = getSafeUiLink(safeConfig);
-
       try {
         if (!isAddress(to)) {
           throw new Error("Destination must be a resolved 0x address.");
@@ -336,7 +516,6 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
         }
 
         const client = getPublicClient(safeConfig);
-        const info = await fetchSafeInfo(safeConfig);
         const resolvedValue = value ?? "0";
         const valueInWei = parseEther(resolvedValue).toString();
 
@@ -373,132 +552,34 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
             : transactionType === "ERC-20 approve" && spender && tokenAmount
               ? `Proposing to approve ${tokenAmount} ${tokenSymbol || "tokens"} from Safe ${safeAddress} for spender ${spender}.`
               : `Proposing a contract call from Safe ${safeAddress} to ${to}.`;
-
-        const signerKey = safeConfig.signerPrivateKey.trim();
-
-        if (!signerKey) {
-          return {
-            status: "manual_creation_required",
-            message: "I can't create this Safe transaction for you. Add a Safe signer key or create it manually in Safe.",
-            summary: transactionSummary,
-            safeAddress,
-            safeUILink,
-            threshold: info.threshold,
-            signers: info.owners,
-            currentConfirmations: 0,
-            requiredConfirmations: info.threshold,
-            transaction: {
+        return await proposeSafeTransactions(safeConfig, {
+          transactions: [
+            {
               to,
-              value: `${resolvedValue} ETH`,
               valueWei: valueInWei,
+              valueLabel: `${resolvedValue} ETH`,
               data: transactionData,
               type: transactionType,
               spender,
               tokenAmount:
                 tokenAmount && tokenSymbol ? `${tokenAmount} ${tokenSymbol}` : tokenAmount,
-              nonce: info.nonce,
             },
-          };
-        }
-
-        if (!process.env.SAFE_API_KEY) {
-          return {
-            status: "manual_creation_required",
-            message:
-              "I can't create this Safe transaction for you. Configure your Safe API key in Settings or create it manually in Safe.",
-            summary: transactionSummary,
-            safeAddress,
-            safeUILink,
-            threshold: info.threshold,
-            signers: info.owners,
-            currentConfirmations: 0,
-            requiredConfirmations: info.threshold,
-            transaction: {
-              to,
-              value: `${resolvedValue} ETH`,
-              valueWei: valueInWei,
-              data: transactionData,
-              type: transactionType,
-              spender,
-              tokenAmount:
-                tokenAmount && tokenSymbol ? `${tokenAmount} ${tokenSymbol}` : tokenAmount,
-              nonce: info.nonce,
-            },
-          };
-        }
-
-        const apiKit = getApiKit(safeConfig);
-        const protocolKit = await Safe.init({
-          provider: safeConfig.rpcUrl,
-          signer: signerKey,
-          safeAddress,
-        });
-        const signerAddress = await protocolKit.getSafeProvider().getSignerAddress();
-
-        if (!signerAddress) {
-          throw new Error("Could not determine the configured signer address.");
-        }
-
-        const isOwner = info.owners.some(
-          (owner) => owner.toLowerCase() === signerAddress.toLowerCase(),
-        );
-
-        if (!isOwner) {
-          throw new Error(`Address ${signerAddress} is not a signer of Safe ${safeAddress}`);
-        }
-
-        const safeTransaction = await protocolKit.createTransaction({
-          transactions: [{ to, value: valueInWei, data: transactionData }],
-        });
-
-        const signedTx = await protocolKit.signTransaction(safeTransaction);
-        const txHash = await protocolKit.getTransactionHash(signedTx);
-
-        await apiKit.proposeTransaction({
-          safeAddress,
-          safeTransactionData: signedTx.data,
-          safeTxHash: txHash,
-          senderAddress: signerAddress,
-          senderSignature: signedTx.encodedSignatures(),
-          origin: "Private Ethereum Assistant",
-        });
-
-        const metadata = await getProposalMetadata(apiKit, txHash, info.threshold);
-
-        return {
-          status: "proposed",
-          message:
-            "Transaction proposed in the Safe Transaction Service. Remaining owners can review and sign it in the Safe UI.",
+          ],
           summary: transactionSummary,
-          signerMessage: `Your signer ${signerAddress} contributed ${metadata.currentConfirmations}/${metadata.requiredConfirmations} required signatures.`,
-          safeTxHash: txHash,
-          safeAddress,
-          safeUILink,
-          proposerAddress: signerAddress,
-          threshold: info.threshold,
-          currentConfirmations: metadata.currentConfirmations,
-          requiredConfirmations: metadata.requiredConfirmations,
-          statusLabel: metadata.statusLabel,
-          signers: info.owners,
-          pendingTransactionsHint:
-            "Ask me 'what are the pending Safe transactions?' any time to check progress.",
-          transaction: {
-            to,
-            value: `${resolvedValue} ETH`,
-            data: transactionData,
-            type: transactionType,
-            spender,
-            tokenAmount:
-              tokenAmount && tokenSymbol ? `${tokenAmount} ${tokenSymbol}` : tokenAmount,
-          },
-        };
+          proposedMessage:
+            "Transaction proposed in the Safe Transaction Service. Remaining owners can review and sign it in the Safe UI.",
+          manualNoSignerMessage:
+            "I can't create this Safe transaction for you. Add a Safe signer key or create it manually in Safe.",
+          manualNoApiKeyMessage:
+            "I can't create this Safe transaction for you. Configure your Safe API key in Settings or create it manually in Safe.",
+        });
       } catch (error) {
         return {
           status: "error",
           message: getFriendlyErrorMessage(error),
           statusLabel: "Needs attention",
           safeAddress,
-          safeUILink,
+          safeUILink: getSafeUiLink(safeConfig),
         };
       }
     },

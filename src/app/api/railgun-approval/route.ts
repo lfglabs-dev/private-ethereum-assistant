@@ -1,8 +1,4 @@
 import { z } from "zod";
-import {
-  approveRailgunAction,
-  rejectRailgunAction,
-} from "@/lib/railgun";
 
 export const runtime = "nodejs";
 
@@ -14,6 +10,10 @@ const approvalRequestSchema = z.object({
 export async function POST(req: Request) {
   const startedAt = Date.now();
   try {
+    const {
+      approveRailgunAction,
+      rejectRailgunAction,
+    } = await import("@/lib/railgun");
     const { approvalId, decision } = approvalRequestSchema.parse(await req.json());
     console.info(
       `[railgun-approval] ${JSON.stringify({
