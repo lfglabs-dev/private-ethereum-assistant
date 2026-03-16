@@ -31,6 +31,7 @@ export type NetworkConfig = z.infer<typeof networkConfigSchema>;
 export type ChainMetadata = {
   id: number;
   name: string;
+  nativeName: string;
   nativeSymbol: string;
   explorerBaseUrl?: string;
   defaultRpcUrl?: string;
@@ -66,6 +67,7 @@ export function getChainMetadata(networkConfig: NetworkConfig): ChainMetadata {
   return {
     id: networkConfig.chainId,
     name: chain?.name ?? `Chain ${networkConfig.chainId}`,
+    nativeName: chain?.nativeCurrency.name ?? chain?.nativeCurrency.symbol ?? "Native asset",
     nativeSymbol: chain?.nativeCurrency.symbol ?? "ETH",
     explorerBaseUrl: chain?.blockExplorers?.default.url,
     defaultRpcUrl: chain?.rpcUrls.default.http[0],

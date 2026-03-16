@@ -113,7 +113,7 @@ function getAffordableRailgunAmounts(publicBalanceRaw: bigint) {
 
 function expectFundingConstraint(result: unknown, operation: "shield" | "unshield") {
   expectRailgunErrorResult(result, operation)
-  expect(result.message.toLowerCase()).toMatch(/insufficient|fund/)
+  expect(result.message.toLowerCase()).toMatch(/insufficient|fund|balance too low/)
 }
 
 describe("Railgun E2E", () => {

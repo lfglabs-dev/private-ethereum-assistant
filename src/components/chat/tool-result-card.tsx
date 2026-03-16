@@ -18,12 +18,33 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { EthereumIcon } from "@/components/icons/ethereum-icon"
 import type { RuntimeConfig } from "@/lib/runtime-config"
+import { cn } from "@/lib/utils"
 
 type ToolResultCardProps = {
   result: unknown
   preliminary?: boolean
   runtimeConfig?: RuntimeConfig
+}
+
+function formatAgeMs(value: unknown) {
+  const ageMs =
+    typeof value === "number" && Number.isFinite(value) ? Math.max(value, 0) : null
+
+  if (ageMs == null) {
+    return null
+  }
+
+  if (ageMs < 1_000) {
+    return "just now"
+  }
+
+  if (ageMs < 60_000) {
+    return `${Math.round(ageMs / 1_000)}s ago`
+  }
+
+  return `${Math.round(ageMs / 60_000)}m ago`
 }
 
 type TransactionPreviewData = {
@@ -110,6 +131,26 @@ type TransactionProgressData = {
   error?: string
 }
 
+const CHAIN_EXPLORER_BY_ID: Partial<Record<number, string>> = {
+  1: "https://etherscan.io",
+  10: "https://optimistic.etherscan.io",
+  56: "https://bscscan.com",
+  137: "https://polygonscan.com",
+  8453: "https://basescan.org",
+  42161: "https://arbiscan.io",
+  43114: "https://snowtrace.io",
+}
+
+const COW_EXPLORER_NETWORK_BY_CHAIN_ID: Partial<Record<number, string>> = {
+  1: "mainnet",
+  10: "optimism",
+  56: "bnb",
+  137: "polygon",
+  8453: "base",
+  42161: "arb1",
+  43114: "avax",
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value)
 }
@@ -126,21 +167,45 @@ function getTokenAvatarStyles(seed: string) {
   }
 }
 
+function getExplorerTxUrl(chainId: number, hash?: string) {
+  if (!hash) return null
+  const explorerBaseUrl = CHAIN_EXPLORER_BY_ID[chainId]
+  return explorerBaseUrl ? `${explorerBaseUrl}/tx/${hash}` : null
+}
+
+function getCowExplorerOrderUrl(chainId: number, orderId?: string) {
+  if (!orderId) return null
+  const networkPath = COW_EXPLORER_NETWORK_BY_CHAIN_ID[chainId]
+  return networkPath ? `https://explorer.cow.fi/${networkPath}/orders/${orderId}` : null
+}
+
 function getSourceLabel(source: unknown) {
-  return source === "verified" ? "verified" : "on-chain"
+  if (source === "verified" || source === "trustwallet") return "verified"
+  if (source === "native") return "native"
+  return "on-chain"
 }
 
 function TokenAvatar({
   symbol,
   address,
   iconUrl,
+  isNative = false,
 }: {
   symbol: string
   address: string
   iconUrl?: string
+  isNative?: boolean
 }) {
   const [showFallback, setShowFallback] = useState(false)
   const initials = symbol.slice(0, 2).toUpperCase() || "??"
+
+  if (isNative && symbol.toUpperCase() === "ETH") {
+    return (
+      <div className="flex size-10 items-center justify-center rounded-full border border-border/60 bg-background text-sky-500">
+        <EthereumIcon aria-label={`${symbol} native token icon`} className="size-5" />
+      </div>
+    )
+  }
 
   if (iconUrl && !showFallback) {
     return (
@@ -189,7 +254,12 @@ function TokenRow({
     <div className="rounded-xl bg-background/70 p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 gap-3">
-          <TokenAvatar symbol={symbol} address={address} iconUrl={iconUrl} />
+          <TokenAvatar
+            symbol={symbol}
+            address={address}
+            iconUrl={iconUrl}
+            isNative={token.source === "native"}
+          />
           <div className="min-w-0 space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-medium">{symbol}</p>
@@ -303,6 +373,88 @@ function BalanceResult({ data }: { data: Record<string, unknown> }) {
 function shortenAddress(value: string) {
   if (!value || value.length < 12) return value
   return `${value.slice(0, 6)}...${value.slice(-4)}`
+}
+
+function formatSignedTokenAmount(
+  amount: string | undefined,
+  symbol: string,
+  direction: "sell" | "buy",
+) {
+  if (!amount) return symbol
+  return `${direction === "sell" ? "-" : "+"}${amount} ${symbol}`.trim()
+}
+
+function SwapMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-1 rounded-xl bg-background/70 p-3">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+      <p className="font-medium">{value}</p>
+    </div>
+  )
+}
+
+function SwapTokenPanel({
+  label,
+  amount,
+  token,
+  direction,
+}: {
+  label: string
+  amount?: string
+  token: Record<string, unknown>
+  direction: "sell" | "buy"
+}) {
+  const address = String(token.address ?? "")
+  const symbol = String(token.symbol ?? address ?? "Unknown")
+  const name = typeof token.name === "string" ? token.name : symbol
+  const iconUrl = typeof token.iconUrl === "string" ? token.iconUrl : undefined
+  const sourceLabel = getSourceLabel(token.source)
+  const amountLabel = formatSignedTokenAmount(amount, symbol, direction)
+
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border p-4",
+        direction === "sell"
+          ? "border-rose-500/20 bg-rose-500/5"
+          : "border-emerald-500/20 bg-emerald-500/5",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+        <Badge variant={sourceLabel === "verified" ? "secondary" : "outline"}>{sourceLabel}</Badge>
+      </div>
+      <p
+        className={cn(
+          "mt-3 text-2xl font-semibold tracking-tight",
+          direction === "sell"
+            ? "text-rose-600 dark:text-rose-400"
+            : "text-emerald-700 dark:text-emerald-400",
+        )}
+      >
+        {amountLabel}
+      </p>
+      <div className="mt-4 flex items-center gap-3">
+        <TokenAvatar
+          symbol={symbol}
+          address={address}
+          iconUrl={iconUrl}
+          isNative={token.source === "native"}
+        />
+        <div className="min-w-0">
+          <p className="truncate font-medium">{name}</p>
+          {name !== symbol ? (
+            <p className="text-xs text-muted-foreground">{symbol}</p>
+          ) : null}
+          {sourceLabel !== "native" && address ? (
+            <p className="truncate font-mono text-[11px] text-muted-foreground" title={address}>
+              {shortenAddress(address)}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
@@ -1037,6 +1189,11 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
     const balances = Array.isArray(data.balances)
       ? (data.balances as Array<Record<string, unknown>>)
       : []
+    const freshness =
+      typeof data.freshness === "object" && data.freshness !== null
+        ? (data.freshness as Record<string, unknown>)
+        : null
+    const freshnessAge = formatAgeMs(freshness?.ageMs)
 
     return (
       <Card
@@ -1054,6 +1211,17 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
           <p className="truncate font-mono text-xs text-muted-foreground">
             {String(data.railgunAddress)}
           </p>
+          {freshness && (
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">
+                {String(freshness.source === "cache" ? "Snapshot" : "Live")}
+              </Badge>
+              {freshnessAge && <Badge variant="secondary">{freshnessAge}</Badge>}
+              {freshness.refreshing === true && (
+                <Badge variant="secondary">Refreshing in background</Badge>
+              )}
+            </div>
+          )}
           {balances.length === 0 ? (
             <p className="text-muted-foreground">No shielded balances found.</p>
           ) : (
@@ -1080,6 +1248,7 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
   const proofProgress = Array.isArray(data.proofProgress)
     ? (data.proofProgress as Array<Record<string, unknown>>)
     : []
+  const balanceIndexing = data.balanceIndexing
 
   return (
     <Card
@@ -1101,6 +1270,9 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
             <Badge variant="secondary">
               {String(data.amount)} {String(data.token)}
             </Badge>
+          )}
+          {balanceIndexing === "pending" && (
+            <Badge variant="outline">Private balance indexing in background</Badge>
           )}
         </div>
 
@@ -1402,8 +1574,38 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
   const message = String(data.message ?? "")
   const quote = isRecord(data.quote) ? data.quote : null
   const plan = isRecord(data.plan) ? data.plan : null
+  const chain = isRecord(data.chain) ? data.chain : null
   const execution = isRecord(data.execution) ? data.execution : null
-  const steps = Array.isArray(plan?.steps) ? plan.steps.filter(isRecord) : []
+  const chainId = typeof chain?.id === "number" ? chain.id : null
+  const sellToken = isRecord(plan?.sell) ? plan.sell : null
+  const buyToken = isRecord(plan?.buy) ? plan.buy : null
+  const sellAmount =
+    typeof quote?.sellAmount === "string"
+      ? quote.sellAmount
+      : typeof sellToken?.amount === "string"
+        ? sellToken.amount
+        : undefined
+  const buyAmount =
+    typeof quote?.buyAmount === "string"
+      ? quote.buyAmount
+      : typeof buyToken?.amount === "string"
+        ? buyToken.amount
+        : undefined
+  const feeAmount =
+    typeof quote?.feeAmount === "string"
+      ? `${quote.feeAmount}${sellToken ? ` ${String(sellToken.symbol ?? "")}` : ""}`.trim()
+      : null
+  const slippageLabel =
+    typeof quote?.slippageBps === "number" ? `${quote.slippageBps} bps` : null
+  const orderId = typeof execution?.orderId === "string" ? execution.orderId : undefined
+  const txHash =
+    typeof execution?.approvalTxHash === "string"
+      ? execution.approvalTxHash
+      : typeof execution?.txHash === "string"
+        ? execution.txHash
+        : undefined
+  const orderUrl = chainId ? getCowExplorerOrderUrl(chainId, orderId) : null
+  const txUrl = chainId ? getExplorerTxUrl(chainId, txHash) : null
 
   const accentClass =
     status === "executed"
@@ -1428,8 +1630,12 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
         <div className="flex items-center justify-between gap-2">
           <div className="space-y-1">
             <CardTitle className="text-sm">{summary}</CardTitle>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">{actor}</Badge>
+              {chain && typeof chain.name === "string" ? (
+                <Badge variant="outline">{chain.name}</Badge>
+              ) : null}
+              {quote?.verified === true ? <Badge variant="secondary">verified quote</Badge> : null}
               <Badge variant={badgeVariant}>{status.replaceAll("_", " ")}</Badge>
             </div>
           </div>
@@ -1438,75 +1644,53 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
       <CardContent className="space-y-3 text-sm">
         <p className="text-muted-foreground">{message}</p>
 
+        {sellToken && buyToken ? (
+          <div className="grid gap-3">
+            <SwapTokenPanel
+              label="You pay"
+              amount={sellAmount}
+              token={sellToken}
+              direction="sell"
+            />
+            <SwapTokenPanel
+              label="You receive"
+              amount={buyAmount}
+              token={buyToken}
+              direction="buy"
+            />
+          </div>
+        ) : null}
+
         {quote ? (
-          <div className="grid gap-2 rounded-xl bg-background/60 p-3 sm:grid-cols-2">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                Sell
-              </p>
-              <p className="font-medium">{String(quote.sellAmount ?? "")}</p>
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                Buy
-              </p>
-              <p className="font-medium">{String(quote.buyAmount ?? "")}</p>
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                Fee
-              </p>
-              <p>{String(quote.feeAmount ?? "")}</p>
-            </div>
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                Slippage
-              </p>
-              <p>{String(quote.slippageBps ?? "")} bps</p>
-            </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {feeAmount ? <SwapMetric label="Fee" value={feeAmount} /> : null}
+            {slippageLabel ? <SwapMetric label="Slippage" value={slippageLabel} /> : null}
           </div>
         ) : null}
 
-        {steps.length > 0 ? (
-          <div className="space-y-2">
-            {steps.map((step) => (
-              <div
-                key={String(step.key)}
-                className="rounded-xl border border-border/60 bg-background/40 p-3"
+        {orderUrl || txUrl ? (
+          <div className="flex flex-wrap gap-2">
+            {orderUrl ? (
+              <a
+                href={orderUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
               >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-medium">{String(step.label ?? step.key)}</p>
-                  <Badge variant={step.status === "error" ? "destructive" : "outline"}>
-                    {String(step.status ?? "pending").replaceAll("_", " ")}
-                  </Badge>
-                </div>
-                {"detail" in step ? (
-                  <p className="mt-1 text-xs text-muted-foreground">{String(step.detail)}</p>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {execution ? (
-          <div className="space-y-1 rounded-xl bg-background/60 p-3 text-xs">
-            {"orderId" in execution ? (
-              <div className="flex gap-2">
-                <span className="text-muted-foreground">Order:</span>
-                <span className="break-all font-mono">{String(execution.orderId)}</span>
-              </div>
+                View order
+                <ExternalLink className="size-3" />
+              </a>
             ) : null}
-            {"approvalTxHash" in execution ? (
-              <div className="flex gap-2">
-                <span className="text-muted-foreground">Approval:</span>
-                <span className="break-all font-mono">{String(execution.approvalTxHash)}</span>
-              </div>
-            ) : null}
-            {"txHash" in execution ? (
-              <div className="flex gap-2">
-                <span className="text-muted-foreground">Tx:</span>
-                <span className="break-all font-mono">{String(execution.txHash)}</span>
-              </div>
+            {txUrl ? (
+              <a
+                href={txUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted"
+              >
+                View transaction
+                <ExternalLink className="size-3" />
+              </a>
             ) : null}
           </div>
         ) : null}
