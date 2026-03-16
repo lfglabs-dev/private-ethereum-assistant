@@ -49,7 +49,7 @@ function getApiKit(safeConfig: SafeToolConfig) {
   });
 }
 
-function getSafeUiLink(safeConfig: SafeToolConfig, address = safeConfig.address) {
+export function getSafeUiLink(safeConfig: SafeToolConfig, address = safeConfig.address) {
   const safeAppChainPrefix = SAFE_CHAIN_SHORT_NAMES[safeConfig.chainId] || "base";
   return `https://app.safe.global/transactions/queue?safe=${safeAppChainPrefix}:${address}`;
 }

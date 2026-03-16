@@ -1434,6 +1434,156 @@ function RailgunApprovalResult({ data }: { data: Record<string, unknown> }) {
   )
 }
 
+function SwapResultCard({ data }: { data: Record<string, unknown> }) {
+  const status = String(data.status ?? "")
+  const actor = String(data.actor ?? "").toUpperCase()
+  const summary = String(data.summary ?? "Swap")
+  const message = String(data.message ?? "")
+  const quote = isRecord(data.quote) ? data.quote : null
+  const plan = isRecord(data.plan) ? data.plan : null
+  const execution = isRecord(data.execution) ? data.execution : null
+  const steps = Array.isArray(plan?.steps) ? plan.steps.filter(isRecord) : []
+
+  const accentClass =
+    status === "executed"
+      ? "border-emerald-500/20 bg-emerald-500/5"
+      : status === "manual_action_required"
+        ? "border-amber-500/20 bg-amber-500/5"
+        : status === "unsupported" || status === "error"
+          ? "border-destructive/20 bg-destructive/5"
+          : "border-border/60 bg-secondary/50"
+  const badgeVariant =
+    status === "executed"
+      ? "secondary"
+      : status === "manual_action_required"
+        ? "outline"
+        : status === "unsupported" || status === "error"
+          ? "destructive"
+          : "outline"
+
+  return (
+    <Card data-testid="result-swap" size="sm" className={accentClass}>
+      <CardHeader className="pb-0">
+        <div className="flex items-center justify-between gap-2">
+          <div className="space-y-1">
+            <CardTitle className="text-sm">{summary}</CardTitle>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline">{actor}</Badge>
+              <Badge variant={badgeVariant}>{status.replaceAll("_", " ")}</Badge>
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p className="text-muted-foreground">{message}</p>
+
+        {quote ? (
+          <div className="grid gap-2 rounded-xl bg-background/60 p-3 sm:grid-cols-2">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                Sell
+              </p>
+              <p className="font-medium">{String(quote.sellAmount ?? "")}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                Buy
+              </p>
+              <p className="font-medium">{String(quote.buyAmount ?? "")}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                Fee
+              </p>
+              <p>{String(quote.feeAmount ?? "")}</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                Slippage
+              </p>
+              <p>{String(quote.slippageBps ?? "")} bps</p>
+            </div>
+          </div>
+        ) : null}
+
+        {steps.length > 0 ? (
+          <div className="space-y-2">
+            {steps.map((step) => (
+              <div
+                key={String(step.key)}
+                className="rounded-xl border border-border/60 bg-background/40 p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium">{String(step.label ?? step.key)}</p>
+                  <Badge variant={step.status === "error" ? "destructive" : "outline"}>
+                    {String(step.status ?? "pending").replaceAll("_", " ")}
+                  </Badge>
+                </div>
+                {"detail" in step ? (
+                  <p className="mt-1 text-xs text-muted-foreground">{String(step.detail)}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {execution ? (
+          <div className="space-y-1 rounded-xl bg-background/60 p-3 text-xs">
+            {"orderId" in execution ? (
+              <div className="flex gap-2">
+                <span className="text-muted-foreground">Order:</span>
+                <span className="break-all font-mono">{String(execution.orderId)}</span>
+              </div>
+            ) : null}
+            {"approvalTxHash" in execution ? (
+              <div className="flex gap-2">
+                <span className="text-muted-foreground">Approval:</span>
+                <span className="break-all font-mono">{String(execution.approvalTxHash)}</span>
+              </div>
+            ) : null}
+            {"txHash" in execution ? (
+              <div className="flex gap-2">
+                <span className="text-muted-foreground">Tx:</span>
+                <span className="break-all font-mono">{String(execution.txHash)}</span>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {execution && typeof execution.safeUILink === "string" ? (
+          <a
+            href={execution.safeUILink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 transition-colors hover:text-amber-500"
+          >
+            Continue in Safe
+            <ExternalLink className="size-3" />
+          </a>
+        ) : null}
+
+        {Array.isArray(data.candidates) && data.candidates.length > 0 ? (
+          <div className="space-y-2 rounded-xl border border-border/60 bg-background/40 p-3">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Info className="size-3.5" />
+              <p>Confirm the token contract before retrying the swap.</p>
+            </div>
+            <div className="space-y-2">
+              {data.candidates.filter(isRecord).map((candidate) => (
+                <TokenRow
+                  key={`swap-candidate-${String(candidate.address)}-${String(candidate.symbol)}`}
+                  token={candidate}
+                  showBalance={false}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function ToolResultCard({ result, preliminary, runtimeConfig }: ToolResultCardProps) {
   const [liveResult, setLiveResult] = useState(result)
   const [pendingAction, setPendingAction] = useState<"approve" | "reject" | null>(null)
@@ -1546,6 +1696,9 @@ export function ToolResultCard({ result, preliminary, runtimeConfig }: ToolResul
   }
   if ("kind" in data && (data.kind === "transaction_error" || data.kind === "tool_error")) {
     return <TransactionErrorResult data={data as unknown as TransactionErrorData} />
+  }
+  if ("kind" in data && data.kind === "swap_result") {
+    return <SwapResultCard data={data} />
   }
   if ("nativeBalance" in data && "tokens" in data) return <BalanceResult data={data} />
   if (data.railgun === true) return <RailgunResult data={data} />

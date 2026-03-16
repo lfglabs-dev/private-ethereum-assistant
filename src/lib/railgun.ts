@@ -310,6 +310,7 @@ const RAILGUN_NEW_WALLET_LOOKBACK_BLOCKS = 10_000n;
 const pendingRailgunApprovals = new Map<string, PendingRailgunApproval>();
 const optimisticShieldedBalances = new Map<string, bigint>();
 let backgroundRefreshPromise: Promise<void> | undefined;
+let backgroundRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 const LOG_REDACTED_KEYS = [
   "encryptionkey",
   "mnemonic",
@@ -503,6 +504,10 @@ function setRailgunToolRuntimeConfig(nextConfig: RailgunToolRuntimeConfig) {
   currentConfigFingerprint = fingerprint;
   initPromise = undefined;
   operationQueue = Promise.resolve();
+  if (backgroundRefreshTimer) {
+    clearTimeout(backgroundRefreshTimer);
+    backgroundRefreshTimer = undefined;
+  }
   resetRuntimeState();
   railgunLog("info", "config:updated", {
     chainId: currentConfig.chainId,
@@ -1288,27 +1293,43 @@ const canWarmRailgun = () =>
   currentConfig.mnemonic.trim().length > 0 ||
   currentConfig.signerPrivateKey.trim().length > 0;
 
-const startBackgroundRefresh = (reason: string) => {
+const startBackgroundRefresh = (
+  reason: string,
+  options?: { delayMs?: number },
+) => {
   if (!canWarmRailgun()) {
     return false;
   }
 
-  if (backgroundRefreshPromise) {
+  if (backgroundRefreshPromise || backgroundRefreshTimer) {
     return true;
   }
 
-  backgroundRefreshPromise = withRailgunLock("railgun_background_refresh", async () => {
-    try {
-      const runtime = await getRuntime();
-      await syncWalletState(runtime, { reason });
-      await persistBalanceSnapshot(runtime);
-      railgunLog("info", "wallet:background-refresh-complete", { reason });
-    } catch (error) {
-      railgunLog("warn", "wallet:background-refresh-failed", { error, reason });
-    } finally {
-      backgroundRefreshPromise = undefined;
-    }
-  });
+  const launchRefresh = () => {
+    backgroundRefreshTimer = undefined;
+    backgroundRefreshPromise = withRailgunLock("railgun_background_refresh", async () => {
+      try {
+        const runtime = await getRuntime();
+        await syncWalletState(runtime, { reason });
+        await persistBalanceSnapshot(runtime);
+        railgunLog("info", "wallet:background-refresh-complete", { reason });
+      } catch (error) {
+        railgunLog("warn", "wallet:background-refresh-failed", { error, reason });
+      } finally {
+        backgroundRefreshPromise = undefined;
+      }
+    });
+  };
+
+  const delayMs = options?.delayMs ?? 0;
+  if (delayMs > 0) {
+    backgroundRefreshTimer = setTimeout(() => {
+      launchRefresh();
+    }, delayMs);
+    return true;
+  }
+
+  launchRefresh();
 
   return true;
 };
@@ -2436,7 +2457,7 @@ async function executeShield(
         optimisticShieldedBalanceAfterRaw,
         prepared.token.decimals,
       );
-      void startBackgroundRefresh("shield-post-transaction");
+      void startBackgroundRefresh("shield-post-transaction", { delayMs: 2_000 });
       stages.push({
         label: "Private balance indexing in background",
         status: "completed",
@@ -2976,8 +2997,8 @@ export async function railgunBalance(
       if (shouldUseCached && cachedSnapshot) {
         const refreshing =
           cachedAgeMs >= Math.floor(RAILGUN_BALANCE_CACHE_MAX_AGE_MS / 2)
-            ? startBackgroundRefresh("balance-cache-refresh")
-            : Boolean(backgroundRefreshPromise);
+            ? startBackgroundRefresh("balance-cache-refresh", { delayMs: 2_000 })
+            : Boolean(backgroundRefreshPromise || backgroundRefreshTimer);
 
         return {
           railgun: true,

@@ -19,6 +19,7 @@ let cachedRuntimeConfigValue: RuntimeConfig | null = null;
 
 export const llmProviderSchema = z.enum(["openrouter", "local"]);
 export const appModeSchema = z.enum(["standard", "developer"]);
+export const activeActorSchema = z.enum(["eoa", "safe", "railgun"]);
 
 const positiveIntegerSchema = z.coerce.number().int().positive();
 const nonNegativeIntegerSchema = z.coerce.number().int().nonnegative();
@@ -86,6 +87,9 @@ export const runtimeConfigSchema = z.object({
       erc20Threshold: tokenAmountSchema,
     }),
   }),
+  actor: z.object({
+    type: activeActorSchema,
+  }),
   railgun: z.object({
     networkLabel: z.string().trim().min(1, "Enter a Railgun network label."),
     chainId: positiveIntegerSchema,
@@ -111,6 +115,7 @@ export const runtimeConfigSchema = z.object({
 export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
 export type LlmProvider = z.infer<typeof llmProviderSchema>;
 export type AppMode = z.infer<typeof appModeSchema>;
+export type ActiveActor = z.infer<typeof activeActorSchema>;
 
 export type RuntimeConfigDraft = {
   llm: {
@@ -137,6 +142,9 @@ export type RuntimeConfigDraft = {
       nativeThreshold: string;
       erc20Threshold: string;
     };
+  };
+  actor: {
+    type: ActiveActor;
   };
   railgun: {
     networkLabel: string;
@@ -218,6 +226,9 @@ export function createDefaultRuntimeConfig(): RuntimeConfig {
         erc20Threshold: config.ethereum.localApprovalErc20Threshold,
       },
     },
+    actor: {
+      type: "eoa",
+    },
     railgun: {
       networkLabel: config.railgun.networkLabel,
       chainId: config.railgun.chainId,
@@ -271,6 +282,72 @@ export function createDeveloperRuntimeConfig(): RuntimeConfig {
   };
 }
 
+function mergeRuntimeConfigOverrides(
+  baseConfig: RuntimeConfig,
+  overrides?: RuntimeConfig | null,
+  networkConfig?: NetworkConfig,
+): RuntimeConfig {
+  if (!overrides) {
+    return networkConfig
+      ? {
+          ...baseConfig,
+          network: networkConfig,
+        }
+      : baseConfig;
+  }
+
+  return {
+    ...baseConfig,
+    llm: overrides.llm,
+    network: networkConfig ?? overrides.network,
+    safe: {
+      ...baseConfig.safe,
+      address: overrides.safe.address,
+      chainId: overrides.safe.chainId,
+      rpcUrl: overrides.safe.rpcUrl,
+    },
+    wallet: {
+      ...baseConfig.wallet,
+      approvalPolicy: overrides.wallet.approvalPolicy,
+    },
+    actor: overrides.actor,
+    railgun: {
+      ...baseConfig.railgun,
+      networkLabel: overrides.railgun.networkLabel,
+      chainId: overrides.railgun.chainId,
+      rpcUrl: overrides.railgun.rpcUrl,
+      explorerTxBaseUrl: overrides.railgun.explorerTxBaseUrl,
+      privacyGuidanceText: overrides.railgun.privacyGuidanceText,
+      poiNodeUrls: overrides.railgun.poiNodeUrls,
+      mnemonic: overrides.railgun.mnemonic,
+      walletCreationBlock: overrides.railgun.walletCreationBlock,
+      scanTimeoutMs: overrides.railgun.scanTimeoutMs,
+      pollingIntervalMs: overrides.railgun.pollingIntervalMs,
+      shieldApprovalThreshold: overrides.railgun.shieldApprovalThreshold,
+      transferApprovalThreshold: overrides.railgun.transferApprovalThreshold,
+      unshieldApprovalThreshold: overrides.railgun.unshieldApprovalThreshold,
+    },
+  };
+}
+
+export function mergeDeveloperDisplayRuntimeConfig(
+  overrides?: RuntimeConfig | null,
+  networkConfig?: NetworkConfig,
+) {
+  return mergeRuntimeConfigOverrides(
+    createDeveloperDisplayRuntimeConfig(),
+    overrides,
+    networkConfig,
+  );
+}
+
+export function mergeDeveloperRuntimeConfig(
+  overrides?: RuntimeConfig | null,
+  networkConfig?: NetworkConfig,
+) {
+  return mergeRuntimeConfigOverrides(createDeveloperRuntimeConfig(), overrides, networkConfig);
+}
+
 export function getRuntimeConfigForNetwork(
   networkConfig: NetworkConfig = DEFAULT_NETWORK_CONFIG,
 ): RuntimeConfig {
@@ -311,6 +388,9 @@ export function createRuntimeConfigDraft(
         nativeThreshold: runtimeConfig.wallet.approvalPolicy.nativeThreshold,
         erc20Threshold: runtimeConfig.wallet.approvalPolicy.erc20Threshold,
       },
+    },
+    actor: {
+      type: runtimeConfig.actor.type,
     },
     railgun: {
       networkLabel: runtimeConfig.railgun.networkLabel,
@@ -357,6 +437,9 @@ export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfi
         nativeThreshold: draft.wallet.approvalPolicy.nativeThreshold,
         erc20Threshold: draft.wallet.approvalPolicy.erc20Threshold,
       },
+    },
+    actor: {
+      type: draft.actor.type,
     },
     railgun: {
       networkLabel: draft.railgun.networkLabel,
@@ -460,17 +543,30 @@ export function applyLegacyRuntimeConfigDefaults(value: unknown) {
   }
 
   const record = value as Record<string, unknown>;
+  const actor =
+    typeof record.actor === "object" && record.actor !== null
+      ? (record.actor as Record<string, unknown>)
+      : null;
   const railgun =
     typeof record.railgun === "object" && record.railgun !== null
       ? (record.railgun as Record<string, unknown>)
       : null;
 
-  if (!railgun || typeof railgun.privacyGuidanceText === "string") {
+  const hasRailgunDefaults = !railgun || typeof railgun.privacyGuidanceText === "string";
+  const hasActorDefaults = actor && typeof actor.type === "string";
+
+  if (hasRailgunDefaults && hasActorDefaults) {
     return value;
   }
 
   return {
     ...record,
+    actor:
+      actor && typeof actor.type === "string"
+        ? actor
+        : {
+            type: "eoa",
+          },
     railgun: {
       ...railgun,
       privacyGuidanceText: config.railgun.privacyGuidanceText,

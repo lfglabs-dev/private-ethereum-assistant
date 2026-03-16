@@ -3,6 +3,7 @@ import { createEoaTransferTools } from "./eoa-tx";
 import { createReadChainTools } from "./read-chain";
 import { createRailgunTools } from "./railgun";
 import { createSafeTools } from "./safe";
+import { createSwapTools } from "./swap";
 import {
   createDefaultRuntimeConfig,
   getRuntimeConfigForNetwork,
@@ -44,6 +45,7 @@ export function getTools(
     ...resolvedRuntimeConfig.railgun,
     signerPrivateKey: resolvedRuntimeConfig.wallet.eoaPrivateKey,
   });
+  const { swapTokens } = createSwapTools(resolvedRuntimeConfig);
 
   return {
     prepare_eoa_transfer: prepareEoaTransfer,
@@ -61,6 +63,7 @@ export function getTools(
     railgun_shield: railgunShieldTokens,
     railgun_transfer: railgunPrivateTransfer,
     railgun_unshield: railgunWithdraw,
+    swap_tokens: swapTokens,
   };
 }
 

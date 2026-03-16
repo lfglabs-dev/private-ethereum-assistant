@@ -16,6 +16,8 @@
     "@ai-sdk/openai-compatible": "^2.0.35",
     "@ai-sdk/react": "^3.0.118",
     "@base-ui/react": "^1.2.0",
+    "@cowprotocol/cow-sdk": "^8.0.0",
+    "@cowprotocol/sdk-viem-adapter": "^0.3.11",
     "@railgun-community/engine": "^9.5.3",
     "@railgun-community/shared-models": "^8.0.1",
     "@railgun-community/wallet": "^10.8.4",
