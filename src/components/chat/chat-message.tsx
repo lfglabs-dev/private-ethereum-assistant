@@ -50,6 +50,8 @@ function getToolLabel(toolName: string): string {
       return "Generating Railgun transfer proof"
     case "railgun_unshield":
       return "Generating Railgun unshield proof"
+    case "swap_tokens":
+      return "Planning actor-aware CoW swap"
     default:
       return `Running ${toolName}`
   }

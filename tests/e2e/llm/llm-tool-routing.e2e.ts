@@ -32,6 +32,18 @@ setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 6)
 const VITALIK_ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 const walletAddress = getWalletAddress()
 const runtimeConfig = createOpenRouterRuntimeConfig(ARBITRUM_CONFIG)
+const safeSwapRuntimeConfig = {
+  ...runtimeConfig,
+  actor: {
+    type: "safe" as const,
+  },
+}
+const railgunSwapRuntimeConfig = {
+  ...runtimeConfig,
+  actor: {
+    type: "railgun" as const,
+  },
+}
 const balanceRoutingRuntimeConfig = createBalanceRoutingRuntimeConfig(ARBITRUM_CONFIG)
 const longRunningRuntimeConfig = {
   ...runtimeConfig,
@@ -206,6 +218,48 @@ describe("LLM tool routing E2E", () => {
 
     findToolCall(result.toolCalls, "get_pending_transactions")
     expect(result.text.toLowerCase()).toMatch(/pending|no pending|safe/i)
+  })
+
+  test("LLM routes Safe swap prompts through swap_tokens", async () => {
+    const result = await sendChatPrompt({
+      prompt: "Swap 0.001 ETH for USDC.",
+      runtimeConfig: safeSwapRuntimeConfig,
+    })
+
+    const toolCall = findToolCall(result.toolCalls, "swap_tokens")
+    expect(isRecord(toolCall.input) ? toolCall.input.sellToken : undefined).toBe("ETH")
+    expect(isRecord(toolCall.input) ? toolCall.input.buyToken : undefined).toBe("USDC")
+    expect(isRecord(toolCall.input) ? toolCall.input.amount : undefined).toBe("0.001")
+
+    if (!isRecord(toolCall.output)) {
+      throw new Error("Expected swap_tokens to return a swap result.")
+    }
+
+    expect(toolCall.output.kind).toBe("swap_result")
+    expect(toolCall.output.actor).toBe("safe")
+    expect(toolCall.output.status).toBe("manual_action_required")
+    expect(result.text.toLowerCase()).toMatch(/safe|swap|usdc/)
+  })
+
+  test("LLM routes Railgun swap prompts through swap_tokens", async () => {
+    const result = await sendChatPrompt({
+      prompt: "Swap 0.001 ETH for USDC.",
+      runtimeConfig: railgunSwapRuntimeConfig,
+    })
+
+    const toolCall = findToolCall(result.toolCalls, "swap_tokens")
+    expect(isRecord(toolCall.input) ? toolCall.input.sellToken : undefined).toBe("ETH")
+    expect(isRecord(toolCall.input) ? toolCall.input.buyToken : undefined).toBe("USDC")
+    expect(isRecord(toolCall.input) ? toolCall.input.amount : undefined).toBe("0.001")
+
+    if (!isRecord(toolCall.output)) {
+      throw new Error("Expected swap_tokens to return a swap result.")
+    }
+
+    expect(toolCall.output.kind).toBe("swap_result")
+    expect(toolCall.output.actor).toBe("railgun")
+    expect(toolCall.output.status).toBe("unsupported")
+    expect(result.text.toLowerCase()).toMatch(/railgun|unsupported|eoa/)
   })
 
   test("LLM checks the Railgun balance", async () => {

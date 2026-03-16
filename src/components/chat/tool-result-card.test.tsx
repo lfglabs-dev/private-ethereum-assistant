@@ -78,4 +78,85 @@ describe("ToolResultCard", () => {
     expect(html).toContain("Wrapped Ether")
     expect(html).toContain("Confirm the contract address")
   })
+
+  test("renders actor-aware swap plans", () => {
+    const html = renderToStaticMarkup(
+      <ToolResultCard
+        result={{
+          kind: "swap_result",
+          status: "manual_action_required",
+          actor: "safe",
+          adapter: "cow",
+          summary: "Swap 1 ETH for USDC through the Safe actor",
+          message: "Continue in the Safe UI for approval and signing.",
+          chain: {
+            id: 8453,
+            name: "Base",
+          },
+          quote: {
+            sellAmount: "1",
+            buyAmount: "2500",
+            feeAmount: "0.001",
+            validTo: "2026-03-15T12:00:00.000Z",
+            verified: true,
+            slippageBps: 50,
+          },
+          plan: {
+            type: "swap",
+            actor: "safe",
+            adapter: "cow",
+            executionPath: "safe_manual",
+            chain: {
+              id: 8453,
+              name: "Base",
+            },
+            sell: {
+              amount: "1",
+              symbol: "ETH",
+              address: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+              kind: "native",
+            },
+            buy: {
+              amount: "2500",
+              symbol: "USDC",
+              address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+              kind: "erc20",
+            },
+            quote: {
+              sellAmount: "1",
+              buyAmount: "2500",
+              feeAmount: "0.001",
+              validTo: "2026-03-15T12:00:00.000Z",
+              verified: true,
+              slippageBps: 50,
+            },
+            steps: [
+              {
+                key: "quote",
+                label: "Fetch CoW quote",
+                status: "complete",
+                detail: "2500 USDC estimated output.",
+              },
+              {
+                key: "proposal",
+                label: "Continue in Safe",
+                status: "pending",
+                detail: "Open the Safe UI and use the native CoW swap flow with this quote context.",
+              },
+            ],
+          },
+          execution: {
+            safeAddress: "0x4581812Df7500277e3fC72CF93f766DBBd32d371",
+            safeUILink: "https://app.safe.global/transactions/queue?safe=base:0x4581812Df7500277e3fC72CF93f766DBBd32d371",
+          },
+        }}
+      />,
+    )
+
+    expect(html).toContain("Swap 1 ETH for USDC through the Safe actor")
+    expect(html).toContain("manual action required")
+    expect(html).toContain("Continue in Safe")
+    expect(html).toContain("2500")
+    expect(html).toContain("Continue in Safe")
+  })
 })
