@@ -6,6 +6,7 @@ import {
   createRuntimeConfigDraft,
   getActiveModel,
   parseRuntimeConfigDraft,
+  stripRuntimeConfigSecrets,
 } from "./runtime-config";
 
 describe("runtime-config helpers", () => {
@@ -20,21 +21,13 @@ describe("runtime-config helpers", () => {
 
   test("parses and normalizes a draft into a validated runtime config", () => {
     const draft = createRuntimeConfigDraft(createDefaultRuntimeConfig());
-    draft.wallet.eoaPrivateKey =
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    draft.safe.signerPrivateKey =
-      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     draft.llm.provider = "openrouter";
     draft.llm.openRouterModel = "qwen/qwen3.5-27b";
 
     const runtimeConfig = parseRuntimeConfigDraft(draft);
 
-    expect(runtimeConfig.wallet.eoaPrivateKey).toBe(
-      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    );
-    expect(runtimeConfig.safe.signerPrivateKey).toBe(
-      "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    );
+    expect(runtimeConfig.wallet.eoaPrivateKey).toBe("");
+    expect(runtimeConfig.safe.signerPrivateKey).toBe("");
     expect(runtimeConfig.railgun.poiNodeUrls.length).toBeGreaterThan(0);
     expect(runtimeConfig.railgun.shieldApprovalThreshold).toBe("1");
     expect(runtimeConfig.railgun.transferApprovalThreshold).toBe("1");
@@ -46,8 +39,6 @@ describe("runtime-config helpers", () => {
 
   test("preserves provider-specific models when switching", () => {
     const draft = createRuntimeConfigDraft(createDefaultRuntimeConfig());
-    draft.wallet.eoaPrivateKey =
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     draft.llm.localModel = "qwen3:8b";
     draft.llm.openRouterModel = "qwen/qwen3.5-27b";
 
@@ -110,5 +101,26 @@ describe("runtime-config helpers", () => {
       runtimeConfig.railgun.privacyGuidanceText,
     );
     expect(normalized.actor.type).toBe("eoa");
+  });
+
+  test("strips secret fields before browser persistence", () => {
+    const runtimeConfig = {
+      ...createDefaultRuntimeConfig(),
+      wallet: {
+        ...createDefaultRuntimeConfig().wallet,
+        eoaPrivateKey:
+          "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+      safe: {
+        ...createDefaultRuntimeConfig().safe,
+        signerPrivateKey:
+          "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      },
+    };
+    const stripped = stripRuntimeConfigSecrets(runtimeConfig);
+
+    expect(stripped.wallet.eoaPrivateKey).toBe("");
+    expect(stripped.safe.signerPrivateKey).toBe("");
+    expect(stripped.wallet.approvalPolicy).toEqual(runtimeConfig.wallet.approvalPolicy);
   });
 });

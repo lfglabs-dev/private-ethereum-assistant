@@ -1,4 +1,5 @@
 import { warmRailgun } from "@/lib/railgun";
+import { mergeRuntimeConfigWithEnvSecrets } from "@/lib/env-secrets";
 import {
   createDeveloperRuntimeConfig,
   getAppMode,
@@ -33,7 +34,7 @@ export async function POST(req: Request) {
         );
       }
 
-      selectedRuntimeConfig = parsedRuntimeConfig.data;
+      selectedRuntimeConfig = mergeRuntimeConfigWithEnvSecrets(parsedRuntimeConfig.data);
     }
 
     const result = await warmRailgun({

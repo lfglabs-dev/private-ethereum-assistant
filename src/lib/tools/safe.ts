@@ -404,7 +404,8 @@ export function createSafeTools(safeConfig: SafeToolConfig) {
         if (!process.env.SAFE_API_KEY) {
           return {
             status: "manual_creation_required",
-            message: "I can't create this Safe transaction for you. Add `SAFE_API_KEY` or create it manually in Safe.",
+            message:
+              "I can't create this Safe transaction for you. Configure your Safe API key in Settings or create it manually in Safe.",
             summary: transactionSummary,
             safeAddress,
             safeUILink,

@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useChat } from "@ai-sdk/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowDown, RefreshCw, Settings2, Trash2, X } from "lucide-react";
 import { ZodError } from "zod";
 import { EthereumIcon } from "@/components/icons/ethereum-icon";
-import { RuntimeConfigForm } from "@/components/chat/runtime-config-form";
+import {
+  RuntimeConfigForm,
+  type RuntimeConfigFormHandle,
+} from "@/components/chat/runtime-config-form";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThinkingIndicator } from "@/components/ui/thinking-indicator";
@@ -59,13 +62,13 @@ const STANDARD_ONBOARDING_STEPS = [
     sections: ["network"] as const,
   },
   {
-    title: "Wallet",
-    description: "Add the low-value EOA you want to use for normal transfers.",
-    sections: ["wallet"] as const,
+    title: "Keys",
+    description: "Add your private keys and API credentials. These are saved server-side only.",
+    sections: ["keys"] as const,
   },
   {
-    title: "Mode, Safe, and Private",
-    description: "Choose the active mode, then finish the Safe and Private settings.",
+    title: "Mode and Safe",
+    description: "Choose the active mode, then configure Safe and Railgun settings.",
     sections: ["actor", "safe", "railgun"] as const,
   },
 ];
@@ -110,11 +113,13 @@ function ConfiguredAssistant({
   const [pendingModeSwitchKey, setPendingModeSwitchKey] = useState<string | null>(null);
   const [showDebugTrace, setShowDebugTrace] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hasServerWalletKey, setHasServerWalletKey] = useState(appMode === "developer");
   const [settingsDraft, setSettingsDraft] = useState<RuntimeConfigDraft>(() =>
     createRuntimeConfigDraft(runtimeConfig),
   );
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  const settingsFormRef = useRef<RuntimeConfigFormHandle>(null);
   const { containerRef, endRef, isAtBottom, scrollToBottom } = useScrollToBottom();
 
   const appendDebugEntry = (entry: DebugLogEntry) => {
@@ -165,8 +170,41 @@ function ConfiguredAssistant({
       : undefined;
 
   useEffect(() => {
+    if (appMode === "developer") {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadEnvStatus = async () => {
+      try {
+        const response = await fetch("/api/env-status", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as { eoaPrivateKey?: boolean };
+
+        if (!cancelled) {
+          setHasServerWalletKey(Boolean(payload.eoaPrivateKey));
+        }
+      } catch {
+        if (!cancelled) {
+          setHasServerWalletKey(false);
+        }
+      }
+    };
+
+    void loadEnvStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appMode, settingsOpen]);
+
+  useEffect(() => {
     const hasRailgunCredential =
-      runtimeConfig.wallet.eoaPrivateKey.trim().length > 0 ||
+      appMode === "developer" ||
+      hasServerWalletKey ||
       runtimeConfig.railgun.mnemonic.trim().length > 0;
 
     if (!hasRailgunCredential) {
@@ -202,7 +240,7 @@ function ConfiguredAssistant({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [runtimeConfig]);
+  }, [appMode, hasServerWalletKey, runtimeConfig]);
 
   const sendChatMessage = (
     text: string,
@@ -237,7 +275,13 @@ function ConfiguredAssistant({
     sendChatMessage(suggestion);
   };
 
-  const handleSaveSettings = () => {
+  const handleSaveSettings = async () => {
+    const keySaveResult = await settingsFormRef.current?.saveKeys();
+    if (keySaveResult && !keySaveResult.ok) {
+      setSettingsError(keySaveResult.message);
+      return;
+    }
+
     try {
       const nextConfig = parseRuntimeConfigDraft(settingsDraft);
       onSaveRuntimeConfig(nextConfig);
@@ -481,7 +525,7 @@ function ConfiguredAssistant({
                 <div>
                   <h2 className="text-sm font-semibold">Runtime Settings</h2>
                   <p className="text-xs text-muted-foreground">
-                    Edit, rotate, reset, or delete all browser-stored settings.
+                    Edit browser-stored preferences and the server-side keys used on this machine.
                   </p>
                 </div>
                 <Button
@@ -496,6 +540,7 @@ function ConfiguredAssistant({
 
               <div className="space-y-4 px-6 py-6">
                 <RuntimeConfigForm
+                  ref={settingsFormRef}
                   draft={settingsDraft}
                   onChange={setSettingsDraft}
                   mode="settings"
@@ -563,6 +608,7 @@ export default function Home() {
   );
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [onboardingStep, setOnboardingStep] = useState(0);
+  const onboardingFormRef = useRef<RuntimeConfigFormHandle>(null);
 
   const handleSaveRuntimeConfig = (nextRuntimeConfig: RuntimeConfig) => {
     saveStoredRuntimeConfig(nextRuntimeConfig);
@@ -635,6 +681,7 @@ export default function Home() {
           </div>
 
           <RuntimeConfigForm
+            ref={onboardingFormRef}
             draft={onboardingDraft}
             onChange={setOnboardingDraft}
             mode="onboarding"
@@ -660,7 +707,16 @@ export default function Home() {
               data-testid="runtime-onboarding-submit"
               type="button"
               size="lg"
-              onClick={() => {
+              onClick={async () => {
+                const currentStep = STANDARD_ONBOARDING_STEPS[onboardingStep];
+                if (currentStep.sections.some((section) => section === "keys")) {
+                  const keySaveResult = await onboardingFormRef.current?.saveKeys();
+                  if (keySaveResult && !keySaveResult.ok) {
+                    setOnboardingError(keySaveResult.message);
+                    return;
+                  }
+                }
+
                 if (isLastStep) {
                   handleCompleteOnboarding();
                   return;
