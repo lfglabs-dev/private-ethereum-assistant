@@ -15,7 +15,8 @@ import {
   createDebugLog,
 } from "@/lib/chat-stream";
 import {
-  createDeveloperRuntimeConfig,
+  createDeveloperDisplayRuntimeConfig,
+  mergeDeveloperRuntimeConfig,
   getActiveModel,
   getAppMode,
   getProviderLabel,
@@ -69,16 +70,47 @@ export async function POST(req: Request) {
   try {
     const appMode = getAppMode();
     const { messages, networkConfig, runtimeConfig } = await req.json();
+    const parsedNetworkConfig = networkConfigSchema.safeParse(networkConfig);
+    const parsedRuntimeConfig = runtimeConfigSchema.safeParse(runtimeConfig);
     let selectedNetworkConfig = DEFAULT_NETWORK_CONFIG;
     let selectedRuntimeConfig;
 
     if (appMode === "developer") {
-      selectedRuntimeConfig = createDeveloperRuntimeConfig();
-      selectedNetworkConfig = selectedRuntimeConfig.network;
-    } else {
-      const parsedNetworkConfig = networkConfigSchema.safeParse(networkConfig);
-      const parsedRuntimeConfig = runtimeConfigSchema.safeParse(runtimeConfig);
+      if (networkConfig != null && !parsedNetworkConfig.success) {
+        return new Response(
+          JSON.stringify({
+            error: "Invalid network config. Provide a valid RPC_URL and CHAIN_ID.",
+          }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
 
+      if (runtimeConfig != null && !parsedRuntimeConfig.success) {
+        return new Response(
+          JSON.stringify({
+            error: parsedRuntimeConfig.error.issues[0]?.message ?? "Invalid runtime config.",
+          }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      const developerDisplayRuntimeConfig = createDeveloperDisplayRuntimeConfig();
+      selectedNetworkConfig = parsedNetworkConfig.success
+        ? parsedNetworkConfig.data
+        : parsedRuntimeConfig.success
+          ? parsedRuntimeConfig.data.network
+          : developerDisplayRuntimeConfig.network;
+      selectedRuntimeConfig = mergeDeveloperRuntimeConfig(
+        parsedRuntimeConfig.success ? parsedRuntimeConfig.data : null,
+        selectedNetworkConfig,
+      );
+    } else {
       if (networkConfig != null && !parsedNetworkConfig.success) {
         return new Response(
           JSON.stringify({

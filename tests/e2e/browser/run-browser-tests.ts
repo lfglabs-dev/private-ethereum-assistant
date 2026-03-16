@@ -181,6 +181,14 @@ async function click(selector: string) {
   await runAgentBrowser(["click", selector]);
 }
 
+async function selectActor(actor: "eoa" | "safe" | "railgun") {
+  await click('[data-testid="runtime-settings-trigger"]');
+  await runAgentBrowser(["wait", `[data-testid="runtime-actor-${actor}"]`]);
+  await click(`[data-testid="runtime-actor-${actor}"]`);
+  await click('[data-testid="runtime-settings-save"]');
+  await waitForBodyCondition((text) => text.includes(`Actor ${actor.toUpperCase()}`), 30_000);
+}
+
 async function submitMessage(message: string) {
   await fill('[data-testid="chat-input"]', message);
   await runAgentBrowser(["press", "Enter"]);
@@ -520,6 +528,38 @@ async function main() {
       await waitForAssistantAnswer(["Safe"]);
     },
     "safe-info.png",
+  );
+
+  await runTest(
+    "Safe swap flow renders the CoW swap card",
+    async () => {
+      await ensureDeveloperModeReady();
+      await selectActor("safe");
+      await submitMessage("Swap 0.001 ETH for USDC.");
+      await waitForText(
+        '[data-testid="result-swap"]',
+        ["SAFE", "manual action required", "Continue in Safe", "USDC"],
+        120_000,
+      );
+      await waitForAssistantAnswer(["Safe", "swap", "USDC"], 120_000);
+    },
+    "safe-swap-card.png",
+  );
+
+  await runTest(
+    "Railgun swap requests explain the unsupported private route",
+    async () => {
+      await ensureDeveloperModeReady();
+      await selectActor("railgun");
+      await submitMessage("Swap 0.001 ETH for USDC.");
+      await waitForText(
+        '[data-testid="result-swap"]',
+        ["RAILGUN", "unsupported", "public CoW route", "EOA"],
+        120_000,
+      );
+      await waitForAssistantAnswer(["Railgun", "unsupported", "EOA"], 120_000);
+    },
+    "railgun-swap-unsupported.png",
   );
 
   await runTest(

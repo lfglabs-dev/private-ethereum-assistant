@@ -21,6 +21,7 @@ type RuntimeConfigSection =
   | "warning"
   | "model"
   | "network"
+  | "actor"
   | "safe"
   | "wallet"
   | "railgun";
@@ -33,6 +34,24 @@ type RuntimeConfigFormProps = {
   providerOptions?: LlmProvider[];
   sections?: readonly RuntimeConfigSection[];
 };
+
+const ACTOR_OPTIONS = [
+  {
+    id: "eoa",
+    label: "EOA",
+    description: "Sign and place swaps from the configured EOA.",
+  },
+  {
+    id: "safe",
+    label: "Safe",
+    description: "Plan swaps for the configured Safe approval flow.",
+  },
+  {
+    id: "railgun",
+    label: "Railgun",
+    description: "Explain private-swap limits and public fallback next steps.",
+  },
+] as const;
 
 function updateDraftSection<K extends keyof RuntimeConfigDraft>(
   draft: RuntimeConfigDraft,
@@ -58,7 +77,7 @@ export function RuntimeConfigForm({
   mode,
   validationMessage,
   providerOptions = ["openrouter", "local"],
-  sections = ["warning", "model", "network", "safe", "wallet", "railgun"],
+  sections = ["warning", "model", "network", "actor", "safe", "wallet", "railgun"],
 }: RuntimeConfigFormProps) {
   const visibleSections = new Set(sections);
   const allowedProviders: LlmProvider[] =
@@ -279,6 +298,44 @@ export function RuntimeConfigForm({
               inputMode="numeric"
             />
           </label>
+        </CardContent>
+      </Card>
+      ) : null}
+
+      {visibleSections.has("actor") ? (
+      <Card>
+        <CardHeader>
+          <CardTitle>Active Actor</CardTitle>
+          <CardDescription>
+            Swaps route through this actor-specific execution path.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-2 sm:grid-cols-3">
+          {ACTOR_OPTIONS.map((actor) => {
+            const isActive = draft.actor.type === actor.id;
+            return (
+              <button
+                key={actor.id}
+                type="button"
+                data-testid={`runtime-actor-${actor.id}`}
+                onClick={() =>
+                  onChange(
+                    updateDraftSection(draft, "actor", {
+                      type: actor.id,
+                    }),
+                  )
+                }
+                className={`rounded-xl border px-4 py-3 text-left transition-colors ${
+                  isActive
+                    ? "border-primary bg-primary/10"
+                    : "border-border bg-background hover:bg-muted"
+                }`}
+              >
+                <div className="text-sm font-medium">{actor.label}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{actor.description}</div>
+              </button>
+            );
+          })}
         </CardContent>
       </Card>
       ) : null}

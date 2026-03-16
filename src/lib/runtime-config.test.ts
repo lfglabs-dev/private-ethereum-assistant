@@ -15,6 +15,7 @@ describe("runtime-config helpers", () => {
     expect(defaults.llm.provider).toBe("openrouter");
     expect(defaults.wallet.eoaPrivateKey).toBe("");
     expect(defaults.safe.signerPrivateKey).toBe("");
+    expect(defaults.actor.type).toBe("eoa");
   });
 
   test("parses and normalizes a draft into a validated runtime config", () => {
@@ -39,6 +40,7 @@ describe("runtime-config helpers", () => {
     expect(runtimeConfig.railgun.transferApprovalThreshold).toBe("1");
     expect(runtimeConfig.railgun.unshieldApprovalThreshold).toBe("1");
     expect(runtimeConfig.railgun.privacyGuidanceText.length).toBeGreaterThan(0);
+    expect(runtimeConfig.actor.type).toBe("eoa");
     expect(getActiveModel(runtimeConfig)).toBe("qwen/qwen3.5-27b");
   });
 
@@ -107,5 +109,6 @@ describe("runtime-config helpers", () => {
     expect(normalized.railgun.privacyGuidanceText).toBe(
       runtimeConfig.railgun.privacyGuidanceText,
     );
+    expect(normalized.actor.type).toBe("eoa");
   });
 });

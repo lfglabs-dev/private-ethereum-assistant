@@ -31,6 +31,7 @@ import {
   getAppMode,
   getProviderLabel,
   loadStoredRuntimeConfig,
+  mergeDeveloperDisplayRuntimeConfig,
   parseRuntimeConfigDraft,
   saveStoredRuntimeConfig,
   subscribeToStoredRuntimeConfig,
@@ -58,8 +59,8 @@ const STANDARD_ONBOARDING_STEPS = [
   },
   {
     title: "Safe and Railgun",
-    description: "Finish the Safe and Railgun settings used by the specialized tools.",
-    sections: ["safe", "railgun"] as const,
+    description: "Choose the active actor, then finish the Safe and Railgun settings.",
+    sections: ["actor", "safe", "railgun"] as const,
   },
 ];
 
@@ -141,7 +142,14 @@ function ConfiguredAssistant({
   const isSubmitted = status === "submitted";
   const providerLabel = getProviderLabel(runtimeConfig.llm.provider);
   const activeNetworkLabel = getNetworkLabel(runtimeConfig.network);
-  const settingsEnabled = appMode !== "developer";
+  const activeActorLabel = runtimeConfig.actor.type.toUpperCase();
+  const settingsEnabled = true;
+  const settingsProviderOptions: Array<"openrouter" | "local"> =
+    appMode === "developer" ? ["openrouter", "local"] : ["local"];
+  const settingsSections =
+    appMode === "developer"
+      ? (["model", "network", "actor", "safe", "railgun"] as const)
+      : undefined;
 
   const sendChatMessage = (text: string) => {
     setDebugEntries([]);
@@ -186,7 +194,13 @@ function ConfiguredAssistant({
   };
 
   const handleResetDefaults = () => {
-    setSettingsDraft(createRuntimeConfigDraft(createDefaultRuntimeConfig()));
+    setSettingsDraft(
+      createRuntimeConfigDraft(
+        appMode === "developer"
+          ? createDeveloperDisplayRuntimeConfig()
+          : createDefaultRuntimeConfig(),
+      ),
+    );
     setSettingsError(null);
   };
 
@@ -202,7 +216,7 @@ function ConfiguredAssistant({
               Private Ethereum Assistant
             </h1>
             <p className="text-xs text-muted-foreground">
-              {providerLabel} · {activeNetworkLabel} · Safe + Railgun + Browser Config
+              {providerLabel} · {activeNetworkLabel} · Actor {activeActorLabel}
             </p>
           </div>
         </div>
@@ -377,7 +391,8 @@ function ConfiguredAssistant({
                   onChange={setSettingsDraft}
                   mode="settings"
                   validationMessage={settingsError}
-                  providerOptions={["local"]}
+                  providerOptions={settingsProviderOptions}
+                  sections={settingsSections}
                 />
               </div>
 
@@ -465,13 +480,15 @@ export default function Home() {
   };
 
   if (appMode === "developer") {
+    const developerRuntimeConfig = mergeDeveloperDisplayRuntimeConfig(runtimeConfig);
+
     return (
       <ConfiguredAssistant
         key="developer-mode"
-        runtimeConfig={createDeveloperDisplayRuntimeConfig()}
+        runtimeConfig={developerRuntimeConfig}
         appMode={appMode}
-        onSaveRuntimeConfig={() => undefined}
-        onDeleteAllSettings={() => undefined}
+        onSaveRuntimeConfig={handleSaveRuntimeConfig}
+        onDeleteAllSettings={handleDeleteAllSettings}
       />
     );
   }
