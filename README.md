@@ -10,28 +10,26 @@ It can:
 
 ## Runtime configuration
 
-The app now uses a browser-first onboarding flow.
+The app uses UI onboarding for runtime settings, with secrets saved server-side.
 
-What changed:
-- first visit shows onboarding inside the app
-- user runtime settings are stored in browser local storage
-- `.env.local` is no longer required for normal app use
-- provider switching between `OpenRouter` and `Local` happens in the UI
-- Safe, EOA, network, and Railgun settings are edited in the same settings drawer later
-
-What is stored in the browser:
+Stored in browser local storage:
 - selected LLM provider
 - local model base URL
 - provider-specific model names
 - selected RPC and chain ID
-- Safe address, Safe RPC, and optional Safe signer private key
-- EOA private key
+- Safe address, Safe RPC, and chain ID
+- wallet approval thresholds
 - Railgun RPC, POI nodes, explorer URL, mnemonic, and timing settings
 
+Stored in `.env.local` on the machine running the app:
+- `EOA_PRIVATE_KEY`
+- `SAFE_SIGNER_PRIVATE_KEY`
+- `SAFE_API_KEY`
+
 Security note:
-- browser-stored private keys are sensitive
+- `.env.local` private keys are still sensitive
 - use dedicated low-value wallets
-- use `Delete all` in settings if the browser profile is shared
+- `Delete all` in settings clears browser prefs only
 
 ## LLM providers
 
@@ -70,14 +68,14 @@ bun install
 dotenvx run -f .env.tianjin -- bun dev
 ```
 
-3. Open the app in a fresh browser profile.
+3. Open the app.
 
 4. Complete onboarding in the UI.
 
 Recommended first-run path:
-- choose `OpenRouter`
-- use model `qwen/qwen3.5-27b`
-- enter your EOA private key
+- choose `Local`
+- use your local model name
+- enter your EOA private key in the `Keys` step
 - confirm or edit the default Safe, network, and Railgun values
 
 ## Safe and Railgun notes
@@ -86,12 +84,12 @@ Recommended first-run path:
 
 - Safe config is independent from the selected read/send network
 - the app can inspect the configured Safe without a signer key
-- proposing from the app requires a Safe owner key only if you want automatic signing/submission
+- proposing from the app requires a Safe owner key and `SAFE_API_KEY` only if you want automatic signing/submission
 - leaving the Safe signer key blank keeps the flow manual in the Safe UI
 
 ### Railgun
 
-- Railgun settings are edited in the same browser runtime config
+- Railgun settings are edited in the same runtime settings UI
 - the default Railgun network remains Arbitrum
 - leaving the Railgun mnemonic blank derives one from the configured EOA key for testing
 - shielding is public; later Railgun transfers can be private
@@ -104,7 +102,7 @@ Unit tests are intentionally limited to schema and serialization logic:
 bun test
 ```
 
-Browser E2E uses the browser-first onboarding flow and OpenRouter:
+Browser E2E uses the onboarding flow and OpenRouter:
 
 ```bash
 dotenvx run -f .env.tianjin -- bun test:e2e:browser

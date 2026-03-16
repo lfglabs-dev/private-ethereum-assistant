@@ -18,11 +18,9 @@ export const ARBITRUM_USDC_ADDRESS =
 export const E2E_TEST_TIMEOUT_MS = 120_000
 
 export function getWalletPrivateKey(): Hex {
-  const value = process.env.EOA_PRIVATE_KEY ?? process.env.WALLET_PRIVATE_KEY
+  const value = process.env.EOA_PRIVATE_KEY
   if (!value) {
-    throw new Error(
-      "Missing EOA_PRIVATE_KEY or WALLET_PRIVATE_KEY. Run the suite via dotenvx."
-    )
+    throw new Error("Missing EOA_PRIVATE_KEY. Run the suite via dotenvx.")
   }
 
   const normalized = value.startsWith("0x") ? value : `0x${value}`

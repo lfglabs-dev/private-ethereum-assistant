@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { mergeRuntimeConfigWithEnvSecrets } from "@/lib/env-secrets";
 import {
   approveAndSendPreparedEoaTransfer,
   rejectPreparedEoaTransfer,
@@ -36,7 +37,9 @@ export async function POST(req: Request) {
   const runtimeConfig =
     appMode === "developer"
       ? createDeveloperRuntimeConfig()
-      : parsed.data.runtimeConfig;
+      : parsed.data.runtimeConfig
+        ? mergeRuntimeConfigWithEnvSecrets(parsed.data.runtimeConfig)
+        : undefined;
 
   if (!runtimeConfig) {
     return new Response(

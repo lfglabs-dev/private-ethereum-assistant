@@ -7,6 +7,7 @@ import {
 } from "ai";
 import type { TextStreamPart } from "ai";
 import { networkConfigSchema, DEFAULT_NETWORK_CONFIG } from "@/lib/ethereum";
+import { mergeRuntimeConfigWithEnvSecrets } from "@/lib/env-secrets";
 import { getSystemPrompt } from "@/lib/system-prompt";
 import { createTools } from "@/lib/tools";
 import { createRuntimeModel } from "@/lib/llm";
@@ -170,10 +171,10 @@ export async function POST(req: Request) {
       selectedNetworkConfig = parsedNetworkConfig.success
         ? parsedNetworkConfig.data
         : DEFAULT_NETWORK_CONFIG;
-      selectedRuntimeConfig = {
+      selectedRuntimeConfig = mergeRuntimeConfigWithEnvSecrets({
         ...parsedRuntimeConfig.data,
         network: selectedNetworkConfig,
-      };
+      });
     }
 
     const lastUserMessageText = getLastUserMessageText(messages);

@@ -232,8 +232,7 @@ function getSignerPrivateKey(
   const value = configuredPrivateKey?.trim();
   if (!value) {
     return {
-      error:
-        "No EOA signer is configured. Add an EOA private key in browser settings first.",
+      error: "No EOA signer is configured. Add an EOA private key in Settings first.",
     };
   }
 

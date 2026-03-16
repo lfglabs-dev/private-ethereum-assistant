@@ -4,7 +4,7 @@ import { config } from "./config";
 import { DEFAULT_NETWORK_CONFIG, NETWORK_PRESETS, type NetworkConfig } from "./ethereum";
 
 export const RUNTIME_CONFIG_STORAGE_KEY =
-  "private-ethereum-assistant.runtime-config.v1";
+  "private-ethereum-assistant.runtime-config";
 export const RUNTIME_CONFIG_STORAGE_EVENT =
   "private-ethereum-assistant.runtime-config.changed";
 
@@ -33,15 +33,6 @@ const addressSchema = z
   .trim()
   .refine((value) => isAddress(value), "Enter a valid 0x address.");
 
-const privateKeySchema = z
-  .string()
-  .trim()
-  .transform((value) => (value.startsWith("0x") ? value : `0x${value}`))
-  .refine(
-    (value) => /^0x[0-9a-fA-F]{64}$/.test(value),
-    "Enter a valid 32-byte private key.",
-  );
-
 const optionalPrivateKeySchema = z
   .string()
   .trim()
@@ -57,8 +48,7 @@ const optionalPrivateKeySchema = z
     "Enter a valid 32-byte private key or leave it blank.",
   );
 
-export const runtimeConfigSchema = z.object({
-  version: z.literal(1),
+const runtimeConfigSections = {
   llm: z.object({
     provider: llmProviderSchema,
     localBaseUrl: z.string().trim().url(),
@@ -80,7 +70,7 @@ export const runtimeConfigSchema = z.object({
     signerPrivateKey: optionalPrivateKeySchema,
   }),
   wallet: z.object({
-    eoaPrivateKey: privateKeySchema,
+    eoaPrivateKey: optionalPrivateKeySchema,
     approvalPolicy: z.object({
       enabled: z.boolean(),
       nativeThreshold: tokenAmountSchema,
@@ -110,7 +100,9 @@ export const runtimeConfigSchema = z.object({
     transferApprovalThreshold: tokenAmountSchema,
     unshieldApprovalThreshold: tokenAmountSchema,
   }),
-});
+};
+
+export const runtimeConfigSchema = z.object(runtimeConfigSections);
 
 export type RuntimeConfig = z.infer<typeof runtimeConfigSchema>;
 export type LlmProvider = z.infer<typeof llmProviderSchema>;
@@ -133,10 +125,8 @@ export type RuntimeConfigDraft = {
     address: string;
     chainId: string;
     rpcUrl: string;
-    signerPrivateKey: string;
   };
   wallet: {
-    eoaPrivateKey: string;
     approvalPolicy: {
       enabled: boolean;
       nativeThreshold: string;
@@ -176,10 +166,10 @@ function getArbitrumNetworkConfig(): NetworkConfig {
 }
 
 function getDeveloperWalletPrivateKey() {
-  const value = process.env.EOA_PRIVATE_KEY ?? process.env.WALLET_PRIVATE_KEY;
+  const value = process.env.EOA_PRIVATE_KEY;
   if (!value) {
     throw new Error(
-      "Developer mode requires EOA_PRIVATE_KEY or WALLET_PRIVATE_KEY in the environment.",
+      "Developer mode requires EOA_PRIVATE_KEY in the environment.",
     );
   }
 
@@ -200,7 +190,6 @@ export function getAppMode(): AppMode {
 
 export function createDefaultRuntimeConfig(): RuntimeConfig {
   return {
-    version: 1,
     llm: {
       provider: "openrouter",
       localBaseUrl: config.llm.baseURL,
@@ -379,10 +368,8 @@ export function createRuntimeConfigDraft(
       address: runtimeConfig.safe.address,
       chainId: String(runtimeConfig.safe.chainId),
       rpcUrl: runtimeConfig.safe.rpcUrl,
-      signerPrivateKey: runtimeConfig.safe.signerPrivateKey,
     },
     wallet: {
-      eoaPrivateKey: runtimeConfig.wallet.eoaPrivateKey,
       approvalPolicy: {
         enabled: runtimeConfig.wallet.approvalPolicy.enabled,
         nativeThreshold: runtimeConfig.wallet.approvalPolicy.nativeThreshold,
@@ -412,7 +399,6 @@ export function createRuntimeConfigDraft(
 
 export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfig {
   return runtimeConfigSchema.parse({
-    version: 1,
     llm: {
       provider: draft.llm.provider,
       localBaseUrl: draft.llm.localBaseUrl,
@@ -428,10 +414,10 @@ export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfi
       address: draft.safe.address,
       chainId: draft.safe.chainId,
       rpcUrl: draft.safe.rpcUrl,
-      signerPrivateKey: draft.safe.signerPrivateKey,
+      signerPrivateKey: "",
     },
     wallet: {
-      eoaPrivateKey: draft.wallet.eoaPrivateKey,
+      eoaPrivateKey: "",
       approvalPolicy: {
         enabled: draft.wallet.approvalPolicy.enabled,
         nativeThreshold: draft.wallet.approvalPolicy.nativeThreshold,
@@ -574,6 +560,33 @@ export function applyLegacyRuntimeConfigDefaults(value: unknown) {
   };
 }
 
+export function stripRuntimeConfigSecrets(runtimeConfig: RuntimeConfig): RuntimeConfig {
+  return {
+    ...runtimeConfig,
+    safe: {
+      ...runtimeConfig.safe,
+      signerPrivateKey: "",
+    },
+    wallet: {
+      ...runtimeConfig.wallet,
+      eoaPrivateKey: "",
+    },
+  };
+}
+
+function loadCurrentStoredRuntimeConfig(rawValue: string) {
+  const parsed = runtimeConfigSchema.parse(
+    applyLegacyRuntimeConfigDefaults(JSON.parse(rawValue)),
+  );
+  const sanitized = stripRuntimeConfigSecrets(parsed);
+
+  if (JSON.stringify(sanitized) !== rawValue) {
+    saveStoredRuntimeConfig(sanitized);
+  }
+
+  return sanitized;
+}
+
 export function loadStoredRuntimeConfig() {
   if (typeof window === "undefined") {
     return null;
@@ -591,9 +604,7 @@ export function loadStoredRuntimeConfig() {
   }
 
   try {
-    const parsed = runtimeConfigSchema.parse(
-      applyLegacyRuntimeConfigDefaults(JSON.parse(rawValue)),
-    );
+    const parsed = loadCurrentStoredRuntimeConfig(rawValue);
     if (getAppMode() !== "developer" && parsed.llm.provider === "openrouter") {
       window.localStorage.removeItem(RUNTIME_CONFIG_STORAGE_KEY);
       cachedRuntimeConfigRaw = null;
@@ -636,9 +647,10 @@ export function saveStoredRuntimeConfig(runtimeConfig: RuntimeConfig) {
     return;
   }
 
-  const serialized = JSON.stringify(runtimeConfig);
+  const sanitized = stripRuntimeConfigSecrets(runtimeConfig);
+  const serialized = JSON.stringify(sanitized);
   cachedRuntimeConfigRaw = serialized;
-  cachedRuntimeConfigValue = runtimeConfig;
+  cachedRuntimeConfigValue = sanitized;
   window.localStorage.setItem(RUNTIME_CONFIG_STORAGE_KEY, serialized);
   window.dispatchEvent(new Event(RUNTIME_CONFIG_STORAGE_EVENT));
 }

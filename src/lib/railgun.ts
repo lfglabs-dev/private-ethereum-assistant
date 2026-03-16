@@ -908,8 +908,8 @@ const getRailgunGroth16 = (): SnarkJSGroth16 => {
 };
 
 const clearRailgunSecrets = () => [
-  "Set a dedicated Railgun mnemonic in browser settings, or leave it blank to derive one from the configured EOA private key for testing.",
-  "Set an EOA private key in browser settings if you want the assistant to submit Arbitrum transactions on your behalf.",
+  "Set a dedicated Railgun mnemonic in Settings, or leave it blank to derive one from the configured EOA private key for testing.",
+  "Set an EOA private key in Settings if you want the assistant to submit Arbitrum transactions on your behalf.",
   "Optionally change the Railgun RPC URL and POI node URLs in settings if you want custom infrastructure.",
 ];
 
@@ -935,7 +935,7 @@ const getSignerPrivateKey = (): `0x${string}` => {
 
   if (!privateKey) {
     throw new Error(
-      "Missing EOA private key for Arbitrum transaction signing. Add it in browser settings first.",
+      "Missing EOA private key for Arbitrum transaction signing. Add it in Settings first.",
     );
   }
 
@@ -971,7 +971,7 @@ const deriveRailgunMnemonic = () => {
   }
 
   throw new Error(
-    "Missing Railgun mnemonic and EOA private key. Add one of them in browser settings first.",
+    "Missing Railgun mnemonic and EOA private key. Add one of them in Settings first.",
   );
 };
 
