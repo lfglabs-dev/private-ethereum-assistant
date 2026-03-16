@@ -44,6 +44,7 @@ Runtime behavior:
 - auth uses the developer/test key from `.env.tianjin`
 - the recommended model is `qwen/qwen3.5-27b`
 - prompts and tool outputs leave the machine for inference
+- Ollama is not required when you are running in developer mode with OpenRouter
 
 ### Local
 
@@ -59,13 +60,13 @@ Runtime behavior:
 1. Install dependencies:
 
 ```bash
-bun install
+bun install --frozen-lockfile
 ```
 
 2. Start the app with the developer/test secrets from `.env.tianjin`:
 
 ```bash
-dotenvx run -f .env.tianjin -- bun dev
+dotenvx run -f .env.tianjin -- bun run dev -- --developer-mode
 ```
 
 3. Open the app.
@@ -73,8 +74,8 @@ dotenvx run -f .env.tianjin -- bun dev
 4. Complete onboarding in the UI.
 
 Recommended first-run path:
-- choose `Local`
-- use your local model name
+- choose `OpenRouter` in developer mode for the default repo-backed setup
+- switch to `Local` only when you want to test your own Ollama or LM Studio endpoint
 - enter your EOA private key in the `Keys` step
 - confirm or edit the default Safe, network, and Railgun values
 
@@ -127,6 +128,7 @@ dotenvx run -f .env.tianjin -- bun test:e2e:tools
 If OpenRouter requests fail:
 - confirm you started the app with `dotenvx run -f .env.tianjin`
 - confirm `.env.tianjin` contains a valid `OPEN_ROUTER_KEY`
+- if startup says `Missing local dependencies`, run `bun install --frozen-lockfile` once in the repo root
 
 If Local requests fail:
 - confirm your local model server is running
