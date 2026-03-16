@@ -18,7 +18,8 @@ const tools = createTools(
   createBalanceRoutingRuntimeConfig(ARBITRUM_CONFIG),
 )
 
-setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 2)
+// Cold RAILGUN wallet syncs on fresh test state can exceed the default E2E timeout.
+setDefaultTimeout(Math.max(E2E_TEST_TIMEOUT_MS * 4, 8 * 60 * 1000))
 
 type RailgunBalanceRouteInput = {
   action: "transfer" | "unshield"

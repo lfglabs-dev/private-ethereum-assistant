@@ -40,7 +40,6 @@ import {
   gasEstimateForUnprovenUnshieldToOrigin,
   populateProvedUnshieldToOrigin,
 } from "../../node_modules/@railgun-community/wallet/dist/services/transactions/tx-unshield.js";
-import { getEngine as getRailgunEngineInternal } from "../../node_modules/@railgun-community/wallet/dist/services/railgun/core/engine.js";
 import { generateUnshieldToOriginProof } from "../../node_modules/@railgun-community/wallet/dist/services/transactions/tx-proof-unshield.js";
 import {
   EVMGasType,
@@ -145,6 +144,15 @@ type RailgunBalanceRow = {
   rawAmount: string;
 };
 
+type RailgunBalanceSource = "live" | "cache";
+
+type RailgunFreshness = {
+  source: RailgunBalanceSource;
+  updatedAt: string;
+  ageMs: number;
+  refreshing: boolean;
+};
+
 type RailgunOperationStage = {
   label: string;
   status: "completed" | "skipped";
@@ -224,6 +232,7 @@ type RailgunBalanceSuccessResult = {
   railgunAddress: string;
   scan: RailgunRuntimeState;
   balances: RailgunBalanceRow[];
+  freshness: RailgunFreshness;
 };
 
 type RailgunActionSuccessResult = RailgunActionResultBase & {
@@ -236,6 +245,15 @@ type RailgunActionSuccessResult = RailgunActionResultBase & {
   publicBalanceAfter?: string;
   approvalTxHash?: string;
   scan: RailgunRuntimeState;
+  balanceIndexing?: "pending" | "complete";
+};
+
+type RailgunBalanceSnapshot = {
+  chainId: number;
+  railgunAddress: string;
+  balances: RailgunBalanceRow[];
+  scan: RailgunRuntimeState;
+  updatedAt: string;
 };
 
 type RailgunApprovalRequiredResult = RailgunActionResultBase & {
@@ -287,9 +305,12 @@ let engineStarted = false;
 const RAILGUN_APPROVAL_TTL_MS = 10 * 60 * 1000;
 const RAILGUN_RECENT_SHIELD_TTL_MS = 24 * 60 * 60 * 1000;
 const RAILGUN_SYNC_FRESH_MS = 5 * 60 * 1000;
+const RAILGUN_BALANCE_CACHE_MAX_AGE_MS = 60 * 1000;
 const RAILGUN_NEW_WALLET_LOOKBACK_BLOCKS = 10_000n;
 const pendingRailgunApprovals = new Map<string, PendingRailgunApproval>();
 const optimisticShieldedBalances = new Map<string, bigint>();
+let backgroundRefreshPromise: Promise<void> | undefined;
+let backgroundRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 const LOG_REDACTED_KEYS = [
   "encryptionkey",
   "mnemonic",
@@ -483,6 +504,10 @@ function setRailgunToolRuntimeConfig(nextConfig: RailgunToolRuntimeConfig) {
   currentConfigFingerprint = fingerprint;
   initPromise = undefined;
   operationQueue = Promise.resolve();
+  if (backgroundRefreshTimer) {
+    clearTimeout(backgroundRefreshTimer);
+    backgroundRefreshTimer = undefined;
+  }
   resetRuntimeState();
   railgunLog("info", "config:updated", {
     chainId: currentConfig.chainId,
@@ -551,6 +576,9 @@ const getRailgunWalletMetaPath = () =>
 const getRailgunRecentShieldsPath = () =>
   path.join(getRailgunStorageDir(), "recent-shields.json");
 
+const getRailgunBalanceSnapshotPath = () =>
+  path.join(getRailgunStorageDir(), "balance-snapshot.json");
+
 const loadRecentShieldRecords = async (): Promise<RecentShieldRecord[]> => {
   if (!(await fileExists(getRailgunRecentShieldsPath()))) {
     return [];
@@ -565,6 +593,23 @@ const saveRecentShieldRecords = async (records: RecentShieldRecord[]) => {
   await fs.promises.writeFile(
     getRailgunRecentShieldsPath(),
     JSON.stringify(records, null, 2),
+  );
+};
+
+const loadBalanceSnapshot = async (): Promise<RailgunBalanceSnapshot | null> => {
+  if (!(await fileExists(getRailgunBalanceSnapshotPath()))) {
+    return null;
+  }
+
+  const raw = await fs.promises.readFile(getRailgunBalanceSnapshotPath(), "utf8");
+  return JSON.parse(raw) as RailgunBalanceSnapshot;
+};
+
+const saveBalanceSnapshot = async (snapshot: RailgunBalanceSnapshot) => {
+  await ensureContextDir();
+  await fs.promises.writeFile(
+    getRailgunBalanceSnapshotPath(),
+    JSON.stringify(snapshot, null, 2),
   );
 };
 
@@ -852,7 +897,11 @@ const getRailgunGroth16 = (): SnarkJSGroth16 => {
         zkey as ArrayLike<number>,
       );
     },
-    verify: async (vkey, publicSignals, proof) => {
+    verify: async (
+      vkey: unknown,
+      publicSignals: unknown,
+      proof: unknown,
+    ) => {
       return runNodeSnarkjsVerify(vkey, publicSignals, proof);
     },
   } as SnarkJSGroth16;
@@ -866,6 +915,20 @@ const clearRailgunSecrets = () => [
 
 const snapshotState = (): RailgunRuntimeState =>
   JSON.parse(JSON.stringify(runtimeState)) as RailgunRuntimeState;
+
+const getFreshness = (
+  updatedAt: string,
+  source: RailgunBalanceSource,
+  refreshing: boolean,
+): RailgunFreshness => {
+  const updatedAtMs = Date.parse(updatedAt);
+  return {
+    source,
+    updatedAt,
+    ageMs: Number.isFinite(updatedAtMs) ? Math.max(Date.now() - updatedAtMs, 0) : 0,
+    refreshing,
+  };
+};
 
 const getSignerPrivateKey = (): `0x${string}` => {
   const privateKey = currentConfig.signerPrivateKey.trim();
@@ -1125,37 +1188,6 @@ const shouldIgnorePOIRefreshError = (error: unknown) => {
   return error.message.includes("Failed to refresh POIs");
 };
 
-const syncWalletUTXOOnly = async (
-  runtime: RailgunRuntime,
-  reason: string,
-) => {
-  await withRailgunTiming(
-    "wallet:sync-utxo-only",
-    {
-      railgunAddress: runtime.railgunAddress,
-      reason,
-      walletId: runtime.walletId,
-    },
-    async () => {
-      resetScanProgressForSync();
-      const railgunEngine = getRailgunEngineInternal() as unknown as {
-        scanUTXOHistory: (
-          txidVersion: TXIDVersion,
-          chain: typeof RAILGUN_CHAIN,
-          walletIdFilter?: string[],
-        ) => Promise<void>;
-      };
-      await railgunEngine.scanUTXOHistory(
-        RAILGUN_TXID_VERSION,
-        RAILGUN_CHAIN,
-        [runtime.walletId],
-      );
-      await waitForPrivateBalanceScans();
-      markWalletStateFresh(`utxo-only:${reason}`);
-    },
-  );
-};
-
 const syncWalletState = async (
   runtime: RailgunRuntime,
   options?: {
@@ -1255,6 +1287,51 @@ const syncWalletState = async (
 
 const refreshWalletStateForRouting = async (runtime: RailgunRuntime) => {
   await syncWalletState(runtime, { reason: "routing" });
+};
+
+const canWarmRailgun = () =>
+  currentConfig.mnemonic.trim().length > 0 ||
+  currentConfig.signerPrivateKey.trim().length > 0;
+
+const startBackgroundRefresh = (
+  reason: string,
+  options?: { delayMs?: number },
+) => {
+  if (!canWarmRailgun()) {
+    return false;
+  }
+
+  if (backgroundRefreshPromise || backgroundRefreshTimer) {
+    return true;
+  }
+
+  const launchRefresh = () => {
+    backgroundRefreshTimer = undefined;
+    backgroundRefreshPromise = withRailgunLock("railgun_background_refresh", async () => {
+      try {
+        const runtime = await getRuntime();
+        await syncWalletState(runtime, { reason });
+        await persistBalanceSnapshot(runtime);
+        railgunLog("info", "wallet:background-refresh-complete", { reason });
+      } catch (error) {
+        railgunLog("warn", "wallet:background-refresh-failed", { error, reason });
+      } finally {
+        backgroundRefreshPromise = undefined;
+      }
+    });
+  };
+
+  const delayMs = options?.delayMs ?? 0;
+  if (delayMs > 0) {
+    backgroundRefreshTimer = setTimeout(() => {
+      launchRefresh();
+    }, delayMs);
+    return true;
+  }
+
+  launchRefresh();
+
+  return true;
 };
 
 const createFallbackProviderConfig = () => ({
@@ -1385,6 +1462,18 @@ const getRuntime = async () => {
 
   return initPromise;
 };
+
+export async function warmRailgun(
+  runtimeConfig?: RailgunToolRuntimeConfig,
+): Promise<{ started: boolean }> {
+  if (runtimeConfig) {
+    setRailgunToolRuntimeConfig(runtimeConfig);
+  }
+
+  return {
+    started: startBackgroundRefresh("background-warm"),
+  };
+}
 
 const explorerUrlForTx = (txHash: string) =>
   `${currentConfig.explorerTxBaseUrl}${txHash}`;
@@ -1725,38 +1814,6 @@ const getSpendableShieldedBalanceRawForToken = async (
   return amount;
 };
 
-const getTotalShieldedBalanceForToken = async (
-  runtime: RailgunRuntime,
-  token: RailgunToken,
-) => {
-  return withRailgunTiming(
-    "balance:shielded-total",
-    {
-      railgunAddress: runtime.railgunAddress,
-      symbol: token.symbol,
-      tokenAddress: token.tokenAddress,
-      walletId: runtime.walletId,
-    },
-    async () => {
-      const wallet = fullWalletForID(runtime.walletId);
-      const amount = await balanceForERC20Token(
-        RAILGUN_TXID_VERSION,
-        wallet,
-        RAILGUN_NETWORK,
-        token.tokenAddress,
-        false,
-      );
-      const formattedAmount = formatUnits(amount, token.decimals);
-      railgunLog("info", "balance:shielded-total-result", {
-        amount: formattedAmount,
-        rawAmount: amount,
-        symbol: token.symbol,
-      });
-      return formattedAmount;
-    },
-  );
-};
-
 const getPublicBalanceForToken = async (recipientAddress: `0x${string}`, token: RailgunToken) => {
   return withRailgunTiming(
     "balance:public",
@@ -1794,6 +1851,111 @@ const getPublicBalanceForToken = async (recipientAddress: `0x${string}`, token: 
       return formattedAmount;
     },
   );
+};
+
+const collectShieldedBalanceRows = async (
+  runtime: RailgunRuntime,
+): Promise<RailgunBalanceRow[]> => {
+  const wallet = fullWalletForID(runtime.walletId);
+  const balances = await wallet.getTokenBalances(
+    RAILGUN_TXID_VERSION,
+    RAILGUN_CHAIN,
+    true,
+  );
+
+  const serialized = getSerializedERC20Balances(balances);
+  let rows = await Promise.all(
+    serialized.map(async (balance) => {
+      const isWrappedNative =
+        getAddress(balance.tokenAddress) ===
+        getAddress(NETWORK_CONFIG[RAILGUN_NETWORK].baseToken.wrappedAddress);
+
+      const metadata = isWrappedNative
+        ? {
+            symbol: "ETH",
+            decimals: NETWORK_CONFIG[RAILGUN_NETWORK].baseToken.decimals,
+          }
+        : await getTokenMetadata(getAddress(balance.tokenAddress) as `0x${string}`);
+
+      return {
+        tokenAddress: balance.tokenAddress,
+        symbol: metadata.symbol,
+        amount: formatUnits(balance.amount, metadata.decimals),
+        rawAmount: balance.amount.toString(),
+      };
+    }),
+  );
+
+  if (optimisticShieldedBalances.size === 0) {
+    return rows;
+  }
+
+  const overriddenRows = await Promise.all(
+    Array.from(optimisticShieldedBalances.entries()).map(
+      async ([tokenAddress, amountRaw]) => {
+        const existingRow = rows.find(
+          (row) => getAddress(row.tokenAddress) === tokenAddress,
+        );
+        const isWrappedNative =
+          tokenAddress ===
+          getAddress(NETWORK_CONFIG[RAILGUN_NETWORK].baseToken.wrappedAddress);
+        const metadata = isWrappedNative
+          ? {
+              symbol: "ETH",
+              decimals: NETWORK_CONFIG[RAILGUN_NETWORK].baseToken.decimals,
+            }
+          : await getTokenMetadata(tokenAddress as `0x${string}`);
+
+        if (existingRow) {
+          return {
+            ...existingRow,
+            symbol: metadata.symbol,
+            amount: formatUnits(amountRaw, metadata.decimals),
+            rawAmount: amountRaw.toString(),
+          };
+        }
+
+        return {
+          tokenAddress,
+          symbol: metadata.symbol,
+          amount: formatUnits(amountRaw, metadata.decimals),
+          rawAmount: amountRaw.toString(),
+        };
+      },
+    ),
+  );
+
+  rows = rows.filter(
+    (row) => !optimisticShieldedBalances.has(getAddress(row.tokenAddress)),
+  );
+  rows.push(...overriddenRows);
+  return rows;
+};
+
+const filterBalanceRows = async (
+  rows: RailgunBalanceRow[],
+  token?: string,
+) => {
+  if (!token) {
+    return rows;
+  }
+
+  const resolvedToken = await resolveToken(token);
+  return rows.filter(
+    (row) => getAddress(row.tokenAddress) === getAddress(resolvedToken.tokenAddress),
+  );
+};
+
+const persistBalanceSnapshot = async (runtime: RailgunRuntime) => {
+  const snapshot: RailgunBalanceSnapshot = {
+    chainId: currentConfig.chainId,
+    railgunAddress: runtime.railgunAddress,
+    balances: await collectShieldedBalanceRows(runtime),
+    scan: snapshotState(),
+    updatedAt: new Date().toISOString(),
+  };
+  await saveBalanceSnapshot(snapshot);
+  return snapshot;
 };
 
 const dedupeProofStages = (stages: ProofStage[]) => {
@@ -2095,13 +2257,13 @@ const buildUnshieldContext = async (
   });
 
   await syncWalletState(runtime, { reason: "unshield-context" });
-  let spendableBalance = await getShieldedBalanceForToken(runtime, resolvedToken);
-  let spendableBalanceRaw = await getSpendableShieldedBalanceRawForToken(
+  const spendableBalance = await getShieldedBalanceForToken(runtime, resolvedToken);
+  const spendableBalanceRaw = await getSpendableShieldedBalanceRawForToken(
     runtime,
     resolvedToken,
     { includeOptimistic: false },
   );
-  let recentOriginShield =
+  const recentOriginShield =
     spendableBalanceRaw < amountRaw
       ? await findRecentOriginShield(resolvedToken, signerAddress, amountRaw)
       : undefined;
@@ -2290,50 +2452,20 @@ async function executeShield(
         optimisticShieldedBalanceAfterRaw,
         "shield-post-transaction",
       );
-
-      let shieldedBalanceAfter = formatUnits(
+      markWalletStateFresh("shield-post-transaction-optimistic");
+      const shieldedBalanceAfter = formatUnits(
         optimisticShieldedBalanceAfterRaw,
         prepared.token.decimals,
       );
-      let totalShieldedBalanceAfter = shieldedBalanceAfter;
-      try {
-        await syncWalletUTXOOnly(prepared.runtime, "shield-post-transaction");
-        shieldedBalanceAfter = await getShieldedBalanceForToken(
-          prepared.runtime,
-          prepared.token,
-        );
-        totalShieldedBalanceAfter =
-          shieldedBalanceAfter === "0"
-            ? await getTotalShieldedBalanceForToken(prepared.runtime, prepared.token)
-            : shieldedBalanceAfter;
-      } catch (error) {
-        railgunLog("warn", "shield:post-transaction-sync-failed", {
-          error,
-          txHash,
-        });
-        markWalletStateFresh("shield-post-transaction-optimistic");
-      }
-
-      const reportedShieldedBalanceAfter =
-        shieldedBalanceAfter === "0" && totalShieldedBalanceAfter !== "0"
-          ? totalShieldedBalanceAfter
-          : shieldedBalanceAfter;
-      if (reportedShieldedBalanceAfter !== shieldedBalanceAfter) {
-        railgunLog("warn", "shield:pending-spendability-detected", {
-          reportedShieldedBalanceAfter,
-          spendableShieldedBalanceAfter: shieldedBalanceAfter,
-          token: prepared.token.symbol,
-          totalShieldedBalanceAfter,
-        });
-      }
+      void startBackgroundRefresh("shield-post-transaction", { delayMs: 2_000 });
       stages.push({
-        label: "Shielded balance updated",
+        label: "Private balance indexing in background",
         status: "completed",
-        detail: reportedShieldedBalanceAfter,
+        detail: shieldedBalanceAfter,
       });
 
       railgunLog("info", "operation:shield-complete", {
-        shieldedBalanceAfter: reportedShieldedBalanceAfter,
+        shieldedBalanceAfter,
         txHash,
       });
 
@@ -2349,7 +2481,8 @@ async function executeShield(
         explorerUrl: explorerUrlForTx(txHash),
         approvalTxHash,
         stages,
-        shieldedBalanceAfter: reportedShieldedBalanceAfter,
+        shieldedBalanceAfter,
+        balanceIndexing: "pending",
         scan: snapshotState(),
       };
     },
@@ -2852,96 +2985,45 @@ export async function railgunBalance(
     try {
       railgunLog("info", "tool:railgun_balance", { token: token ?? "all" });
       const runtime = await getRuntime();
+      const cachedSnapshot = await loadBalanceSnapshot();
+      const cachedAgeMs = cachedSnapshot
+        ? Math.max(Date.now() - Date.parse(cachedSnapshot.updatedAt), 0)
+        : Number.POSITIVE_INFINITY;
+      const shouldUseCached =
+        Boolean(cachedSnapshot) &&
+        cachedSnapshot.railgunAddress === runtime.railgunAddress &&
+        cachedSnapshot.chainId === currentConfig.chainId;
+
+      if (shouldUseCached && cachedSnapshot) {
+        const refreshing =
+          cachedAgeMs >= Math.floor(RAILGUN_BALANCE_CACHE_MAX_AGE_MS / 2)
+            ? startBackgroundRefresh("balance-cache-refresh", { delayMs: 2_000 })
+            : Boolean(backgroundRefreshPromise || backgroundRefreshTimer);
+
+        return {
+          railgun: true,
+          status: "success",
+          operation: "balance",
+          network: currentConfig.networkLabel,
+          railgunAddress: cachedSnapshot.railgunAddress,
+          scan: cachedSnapshot.scan,
+          balances: await filterBalanceRows(cachedSnapshot.balances, token),
+          freshness: getFreshness(cachedSnapshot.updatedAt, "cache", refreshing),
+        };
+      }
+
       await syncWalletState(runtime, { reason: "balance-tool" });
-      const wallet = fullWalletForID(runtime.walletId);
-      const balances = await wallet.getTokenBalances(
-        RAILGUN_TXID_VERSION,
-        RAILGUN_CHAIN,
-        true,
-      );
-
-      const serialized = getSerializedERC20Balances(balances);
-      let rows = await Promise.all(
-        serialized.map(async (balance) => {
-          const isWrappedNative =
-            getAddress(balance.tokenAddress) ===
-            getAddress(NETWORK_CONFIG[RAILGUN_NETWORK].baseToken.wrappedAddress);
-
-          const metadata = isWrappedNative
-            ? {
-                symbol: "ETH",
-                decimals: NETWORK_CONFIG[RAILGUN_NETWORK].baseToken.decimals,
-              }
-            : await getTokenMetadata(getAddress(balance.tokenAddress) as `0x${string}`);
-
-          return {
-            tokenAddress: balance.tokenAddress,
-            symbol: metadata.symbol,
-            amount: formatUnits(balance.amount, metadata.decimals),
-            rawAmount: balance.amount.toString(),
-          };
-        }),
-      );
-
-      if (optimisticShieldedBalances.size > 0) {
-        const overriddenRows = await Promise.all(
-          Array.from(optimisticShieldedBalances.entries()).map(
-            async ([tokenAddress, amountRaw]) => {
-              const existingRow = rows.find(
-                (row) => getAddress(row.tokenAddress) === tokenAddress,
-              );
-              const isWrappedNative =
-                tokenAddress ===
-                getAddress(NETWORK_CONFIG[RAILGUN_NETWORK].baseToken.wrappedAddress);
-              const metadata = isWrappedNative
-                ? {
-                    symbol: "ETH",
-                    decimals: NETWORK_CONFIG[RAILGUN_NETWORK].baseToken.decimals,
-                  }
-                : await getTokenMetadata(tokenAddress as `0x${string}`);
-
-              if (existingRow) {
-                return {
-                  ...existingRow,
-                  symbol: metadata.symbol,
-                  amount: formatUnits(amountRaw, metadata.decimals),
-                  rawAmount: amountRaw.toString(),
-                };
-              }
-
-              return {
-                tokenAddress,
-                symbol: metadata.symbol,
-                amount: formatUnits(amountRaw, metadata.decimals),
-                rawAmount: amountRaw.toString(),
-              };
-            },
-          ),
-        );
-
-        rows = rows.filter(
-          (row) => !optimisticShieldedBalances.has(getAddress(row.tokenAddress)),
-        );
-        rows.push(...overriddenRows);
-      }
-
-      let filteredBalances = rows;
-      if (token) {
-        const resolvedToken = await resolveToken(token);
-        filteredBalances = rows.filter(
-          (row) =>
-            getAddress(row.tokenAddress) === getAddress(resolvedToken.tokenAddress),
-        );
-      }
+      const snapshot = await persistBalanceSnapshot(runtime);
 
       return {
         railgun: true,
         status: "success",
         operation: "balance",
         network: currentConfig.networkLabel,
-        railgunAddress: runtime.railgunAddress,
-        scan: snapshotState(),
-        balances: filteredBalances,
+        railgunAddress: snapshot.railgunAddress,
+        scan: snapshot.scan,
+        balances: await filterBalanceRows(snapshot.balances, token),
+        freshness: getFreshness(snapshot.updatedAt, "live", false),
       };
     } catch (error) {
       return buildErrorResult("balance", error);

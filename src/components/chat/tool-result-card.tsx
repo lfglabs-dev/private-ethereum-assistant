@@ -28,6 +28,25 @@ type ToolResultCardProps = {
   runtimeConfig?: RuntimeConfig
 }
 
+function formatAgeMs(value: unknown) {
+  const ageMs =
+    typeof value === "number" && Number.isFinite(value) ? Math.max(value, 0) : null
+
+  if (ageMs == null) {
+    return null
+  }
+
+  if (ageMs < 1_000) {
+    return "just now"
+  }
+
+  if (ageMs < 60_000) {
+    return `${Math.round(ageMs / 1_000)}s ago`
+  }
+
+  return `${Math.round(ageMs / 60_000)}m ago`
+}
+
 type TransactionPreviewData = {
   kind: "transaction_preview"
   status: "awaiting_confirmation" | "awaiting_local_approval" | "aborted"
@@ -1170,6 +1189,11 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
     const balances = Array.isArray(data.balances)
       ? (data.balances as Array<Record<string, unknown>>)
       : []
+    const freshness =
+      typeof data.freshness === "object" && data.freshness !== null
+        ? (data.freshness as Record<string, unknown>)
+        : null
+    const freshnessAge = formatAgeMs(freshness?.ageMs)
 
     return (
       <Card
@@ -1187,6 +1211,17 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
           <p className="truncate font-mono text-xs text-muted-foreground">
             {String(data.railgunAddress)}
           </p>
+          {freshness && (
+            <div className="flex flex-wrap gap-2">
+              <Badge variant="outline">
+                {String(freshness.source === "cache" ? "Snapshot" : "Live")}
+              </Badge>
+              {freshnessAge && <Badge variant="secondary">{freshnessAge}</Badge>}
+              {freshness.refreshing === true && (
+                <Badge variant="secondary">Refreshing in background</Badge>
+              )}
+            </div>
+          )}
           {balances.length === 0 ? (
             <p className="text-muted-foreground">No shielded balances found.</p>
           ) : (
@@ -1213,6 +1248,7 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
   const proofProgress = Array.isArray(data.proofProgress)
     ? (data.proofProgress as Array<Record<string, unknown>>)
     : []
+  const balanceIndexing = data.balanceIndexing
 
   return (
     <Card
@@ -1234,6 +1270,9 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
             <Badge variant="secondary">
               {String(data.amount)} {String(data.token)}
             </Badge>
+          )}
+          {balanceIndexing === "pending" && (
+            <Badge variant="outline">Private balance indexing in background</Badge>
           )}
         </div>
 

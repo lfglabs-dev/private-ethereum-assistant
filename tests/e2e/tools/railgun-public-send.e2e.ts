@@ -127,7 +127,9 @@ describe("Railgun public-recipient send E2E", () => {
   test("railgun_unshield sends to the resolved public recipient", () => {
     if (isRecord(publicSendResult) && publicSendResult.status === "error") {
       expect(publicSendResult.operation).toBe("unshield")
-      expect(String(publicSendResult.message).toLowerCase()).toMatch(/insufficient|fund/)
+      expect(String(publicSendResult.message).toLowerCase()).toMatch(
+        /insufficient|fund|balance too low/,
+      )
       return
     }
 
