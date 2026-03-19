@@ -57,7 +57,7 @@ You can change any of these later in the settings panel.
 
 ### Developer mode
 
-Developer mode uses OpenRouter (a cloud LLM gateway) instead of a local model. It loads `APP_MODE` and `OPEN_ROUTER_KEY` from the repo file `.env.tianjin` via dotenvx. You need the dotenvx decryption key (ask a team member if you don't have it).
+Developer mode uses OpenRouter (a cloud LLM gateway) instead of a local model. It loads developer-only secrets from the repo file `.env.tianjin` via dotenvx, including `APP_MODE`, `OPEN_ROUTER_KEY`, `EOA_PRIVATE_KEY`, and any optional Safe credentials present there. You need the dotenvx decryption key (ask a team member if you don't have it).
 
 1. Start the app:
 
@@ -67,7 +67,7 @@ dotenvx run -f .env.tianjin -- bun run dev -- --developer-mode
 
 2. Open `http://localhost:3000` in your browser.
 
-3. Complete the onboarding wizard. The OpenRouter key is injected automatically; you still need to provide your EOA private key in the Keys step so it can be saved to the macOS Keychain.
+3. Start using the app. Developer-mode wallet and Safe secrets come from `.env.tianjin`; standard mode secrets are still stored in the macOS Keychain.
 
 ## Runtime configuration
 
@@ -148,7 +148,7 @@ Browser E2E tests use the onboarding flow with OpenRouter (requires `.env.tianji
 dotenvx run -f .env.tianjin -- bun test:e2e:browser
 ```
 
-Store any required wallet or Safe credentials in the macOS Keychain before running the suite.
+Store any required developer-mode wallet or Safe credentials in `.env.tianjin` before running the suite.
 
 The browser suite verifies:
 - first-run onboarding
@@ -164,7 +164,7 @@ Tool-level E2E tests:
 dotenvx run -f .env.tianjin -- bun test:e2e:tools
 ```
 
-These tests also read wallet and Safe credentials from the macOS Keychain.
+These tests also read developer-mode wallet and Safe credentials from `.env.tianjin`.
 
 ## Troubleshooting
 

@@ -22,6 +22,20 @@ const SECRET_STORE_KEY_SET = new Set<string>(SECRET_STORE_KEYS);
 const CACHE_TTL_MS = 30_000;
 const secretCache = new Map<string, { value: string; expiresAt: number }>();
 
+function isDeveloperMode() {
+  return process.env.APP_MODE === "developer" ||
+    process.env.NEXT_PUBLIC_APP_MODE === "developer";
+}
+
+function getDeveloperModeEnvSecret(key: SecretStoreKey): string | null {
+  if (!isDeveloperMode()) {
+    return null;
+  }
+
+  const value = process.env[key]?.trim();
+  return value ? value : null;
+}
+
 export function getSecretBackend(): SecretBackend | null {
   const backends: SecretBackend[] = [new MacKeychainBackend()];
 
@@ -35,6 +49,11 @@ export function getSecretBackend(): SecretBackend | null {
 }
 
 export async function getSecret(key: SecretStoreKey): Promise<string | null> {
+  const envValue = getDeveloperModeEnvSecret(key);
+  if (envValue !== null) {
+    return envValue;
+  }
+
   const cached = secretCache.get(key);
   if (cached && Date.now() < cached.expiresAt) {
     return cached.value;
@@ -66,6 +85,17 @@ export function invalidateSecretCache() {
 }
 
 export async function loadAllSecrets(): Promise<Record<string, string> | null> {
+  if (isDeveloperMode()) {
+    const envSecrets = Object.fromEntries(
+      SECRET_STORE_KEYS.flatMap((key) => {
+        const value = getDeveloperModeEnvSecret(key);
+        return value === null ? [] : [[key, value]];
+      }),
+    );
+
+    return envSecrets;
+  }
+
   const backend = getSecretBackend();
   if (!backend) {
     return null;
