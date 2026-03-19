@@ -21,7 +21,7 @@ export const E2E_TEST_TIMEOUT_MS = 120_000
 export async function getWalletPrivateKey(): Promise<Hex> {
   const value = await getSecret("EOA_PRIVATE_KEY")
   if (!value) {
-    throw new Error("Missing EOA_PRIVATE_KEY in Keychain.")
+    throw new Error("Missing EOA_PRIVATE_KEY in the configured developer env or Keychain.")
   }
 
   const normalized = value.startsWith("0x") ? value : `0x${value}`

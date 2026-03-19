@@ -90,7 +90,7 @@ async function getDeveloperWalletPrivateKey() {
   const value = await getSecret("EOA_PRIVATE_KEY");
   if (!value) {
     throw new Error(
-      "Developer mode requires EOA_PRIVATE_KEY in the secret store.",
+      "Developer mode requires EOA_PRIVATE_KEY in .env.tianjin.",
     );
   }
 
