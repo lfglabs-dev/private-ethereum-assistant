@@ -15,7 +15,7 @@ import { verificationClient } from "../helpers/verification-client"
 
 const tools = createTools(
   ARBITRUM_CONFIG,
-  createBalanceRoutingRuntimeConfig(ARBITRUM_CONFIG),
+  await createBalanceRoutingRuntimeConfig(ARBITRUM_CONFIG),
 )
 
 // Cold RAILGUN wallet syncs on fresh test state can exceed the default E2E timeout.
@@ -81,7 +81,7 @@ function getEthShieldedBalanceRaw(result: RailgunBalanceResult) {
 
 async function getShieldThenRetryAmount() {
   const publicBalanceRaw = await verificationClient.getBalance({
-    address: getWalletAddress(),
+    address: await getWalletAddress(),
   })
   if (publicBalanceRaw <= 0n) {
     throw new Error("The public EOA wallet needs ETH to exercise balance routing.")

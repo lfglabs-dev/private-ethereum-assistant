@@ -20,7 +20,7 @@ const baseTools = createTools({
   chainId: 8453,
   rpcUrl: "https://mainnet.base.org",
 })
-const walletAddress = getWalletAddress()
+const walletAddress = await getWalletAddress()
 
 describe("read-chain E2E", () => {
   test("get_balance returns the real native ETH balance on Arbitrum", async () => {

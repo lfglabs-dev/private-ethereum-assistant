@@ -30,8 +30,8 @@ import {
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 6)
 
 const VITALIK_ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
-const walletAddress = getWalletAddress()
-const runtimeConfig = createOpenRouterRuntimeConfig(ARBITRUM_CONFIG)
+const walletAddress = await getWalletAddress()
+const runtimeConfig = await createOpenRouterRuntimeConfig(ARBITRUM_CONFIG)
 const safeModeRuntimeConfig = {
   ...runtimeConfig,
   actor: {

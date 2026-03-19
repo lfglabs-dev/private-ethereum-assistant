@@ -14,6 +14,7 @@ import {
   parseUnits,
 } from "viem";
 import { type RuntimeConfig } from "../runtime-config";
+import { getSecret } from "../secret-store";
 
 type SafeToolConfig = RuntimeConfig["safe"];
 type SafeTransactionRequest = {
@@ -54,8 +55,8 @@ function getTxServiceUrl(safeConfig: SafeToolConfig) {
   return `https://api.safe.global/tx-service/${shortName}/api`;
 }
 
-function getApiKit(safeConfig: SafeToolConfig) {
-  const apiKey = process.env.SAFE_API_KEY;
+async function getApiKit(safeConfig: SafeToolConfig) {
+  const apiKey = await getSecret("SAFE_API_KEY");
   if (!apiKey) {
     throw new Error(
       "SAFE_API_KEY is required for authenticated Safe write operations.",
@@ -81,10 +82,11 @@ function getPublicClient(safeConfig: SafeToolConfig) {
 }
 
 async function txServiceGet<T>(safeConfig: SafeToolConfig, path: string): Promise<T> {
+  const apiKey = await getSecret("SAFE_API_KEY");
   const response = await fetch(`${getTxServiceUrl(safeConfig)}${path}`, {
     headers: {
-      ...(process.env.SAFE_API_KEY
-        ? { Authorization: `Bearer ${process.env.SAFE_API_KEY}` }
+      ...(apiKey
+        ? { Authorization: `Bearer ${apiKey}` }
         : {}),
     },
   });
@@ -301,7 +303,8 @@ export async function proposeSafeTransactions(
     };
   }
 
-  if (!process.env.SAFE_API_KEY) {
+  const safeApiKey = await getSecret("SAFE_API_KEY");
+  if (!safeApiKey) {
     return {
       status: "manual_creation_required",
       message: request.manualNoApiKeyMessage,
@@ -318,7 +321,7 @@ export async function proposeSafeTransactions(
     };
   }
 
-  const apiKit = getApiKit(safeConfig);
+  const apiKit = await getApiKit(safeConfig);
   const protocolKit = await Safe.init({
     provider: safeConfig.rpcUrl,
     signer: signerKey,

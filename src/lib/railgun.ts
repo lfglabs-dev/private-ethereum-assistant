@@ -474,7 +474,7 @@ function createDefaultRailgunToolRuntimeConfig(): RailgunToolRuntimeConfig {
     privacyGuidanceText: config.railgun.privacyGuidanceText,
     poiNodeUrls: config.railgun.poiNodeUrls,
     mnemonic: config.railgun.mnemonic || "",
-    signerPrivateKey: config.railgun.signerPrivateKey || "",
+    signerPrivateKey: "",
     walletCreationBlock: config.railgun.walletCreationBlock,
     scanTimeoutMs: config.railgun.scanTimeoutMs,
     pollingIntervalMs: config.railgun.pollingIntervalMs,

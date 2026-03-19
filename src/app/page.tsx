@@ -63,7 +63,7 @@ const STANDARD_ONBOARDING_STEPS = [
   },
   {
     title: "Keys",
-    description: "Add your private keys and API credentials. These are saved server-side only.",
+    description: "Add your private keys and API credentials. These are saved in the macOS Keychain only.",
     sections: ["keys"] as const,
   },
   {

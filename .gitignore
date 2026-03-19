@@ -20,6 +20,7 @@
 
 # production
 /build
+/native/keychain-helper/.build/
 
 # misc
 .DS_Store

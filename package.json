@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "bun run scripts/dev.ts",
     "local": "bun run scripts/local.ts",
+    "build:keychain": "cd native/keychain-helper && swift build -c release",
     "build": "next build",
     "start": "next start",
     "lint": "bunx eslint .",

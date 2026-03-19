@@ -1,6 +1,7 @@
 import type { Tool, ToolExecutionOptions } from "ai"
 import type { NetworkConfig } from "@/lib/ethereum"
 import { createDefaultRuntimeConfig, type ActiveActor } from "@/lib/runtime-config"
+import { getSecret } from "@/lib/secret-store"
 import type { Address, Hex } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 
@@ -17,10 +18,10 @@ export const ARBITRUM_USDC_ADDRESS =
 
 export const E2E_TEST_TIMEOUT_MS = 120_000
 
-export function getWalletPrivateKey(): Hex {
-  const value = process.env.EOA_PRIVATE_KEY
+export async function getWalletPrivateKey(): Promise<Hex> {
+  const value = await getSecret("EOA_PRIVATE_KEY")
   if (!value) {
-    throw new Error("Missing EOA_PRIVATE_KEY. Run the suite via dotenvx.")
+    throw new Error("Missing EOA_PRIVATE_KEY in Keychain.")
   }
 
   const normalized = value.startsWith("0x") ? value : `0x${value}`
@@ -31,16 +32,16 @@ export function getWalletPrivateKey(): Hex {
   return normalized as Hex
 }
 
-export function getWalletAddress() {
-  return privateKeyToAccount(getWalletPrivateKey()).address
+export async function getWalletAddress() {
+  return privateKeyToAccount(await getWalletPrivateKey()).address
 }
 
-export function createE2ERuntimeConfig<M extends ActiveActor = "eoa">(
+export async function createE2ERuntimeConfig<M extends ActiveActor = "eoa">(
   networkConfig: NetworkConfig = ARBITRUM_CONFIG,
   actor: M = "eoa" as M
 ) {
   const runtimeConfig = createDefaultRuntimeConfig()
-  const eoaPrivateKey = getWalletPrivateKey()
+  const eoaPrivateKey = await getWalletPrivateKey()
 
   return {
     ...runtimeConfig,

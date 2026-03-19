@@ -16,7 +16,7 @@ Install the following before starting:
 |------|-------------|---------|
 | [Bun](https://bun.sh) | JavaScript runtime and package manager | `curl -fsSL https://bun.sh/install \| bash` |
 | [Ollama](https://ollama.com) | Local LLM server (Normal mode only) | Download from ollama.com or `brew install ollama` |
-| [dotenvx](https://dotenvx.com) | Encrypted env loader (Developer mode only) | `brew install dotenvx/brew/dotenvx` |
+| [dotenvx](https://dotenvx.com) | Encrypted env loader for OpenRouter config (Developer mode only) | `brew install dotenvx/brew/dotenvx` |
 
 The project runs on macOS. On Linux, everything works except the automatic browser-open step (you will need to open `http://localhost:3000` manually).
 
@@ -42,21 +42,22 @@ bun run local
 
 2. The launcher will automatically:
    - start Ollama if it is not already running
-   - pull the default model (`qwen3:8b`) if not already downloaded
+   - pull the default model (`llama3.2:3b`) if not already downloaded
+   - build the macOS Keychain helper if needed
    - start the Next.js dev server on `http://localhost:3000`
    - open the browser
 
 3. Complete the onboarding wizard in the browser:
    - **Provider:** select `Local`
    - **Base URL:** `http://localhost:11434/v1` (pre-filled for Ollama)
-   - **Model:** `qwen3:8b`
+   - **Model:** `llama3.2:3b`
    - **Keys:** paste your EOA private key (the hex private key of the Ethereum wallet you want the assistant to use)
 
 You can change any of these later in the settings panel.
 
 ### Developer mode
 
-Developer mode uses OpenRouter (a cloud LLM gateway) instead of a local model. It loads encrypted API keys from the repo file `.env.tianjin` via dotenvx. You need the dotenvx decryption key (ask a team member if you don't have it).
+Developer mode uses OpenRouter (a cloud LLM gateway) instead of a local model. It loads `APP_MODE` and `OPEN_ROUTER_KEY` from the repo file `.env.tianjin` via dotenvx. You need the dotenvx decryption key (ask a team member if you don't have it).
 
 1. Start the app:
 
@@ -66,7 +67,7 @@ dotenvx run -f .env.tianjin -- bun run dev -- --developer-mode
 
 2. Open `http://localhost:3000` in your browser.
 
-3. Complete the onboarding wizard. The OpenRouter key is injected automatically; you still need to provide your EOA private key in the Keys step.
+3. Complete the onboarding wizard. The OpenRouter key is injected automatically; you still need to provide your EOA private key in the Keys step so it can be saved to the macOS Keychain.
 
 ## Runtime configuration
 
@@ -80,14 +81,15 @@ The app uses a UI onboarding wizard for runtime settings. Secrets are saved serv
 - wallet approval thresholds
 - Railgun RPC, POI (Proof of Innocence) nodes, explorer URL, mnemonic, and timing settings
 
-**Stored in `.env.local` on the machine** (sensitive — never committed):
+**Stored in the macOS Keychain on the machine**:
 - `EOA_PRIVATE_KEY` — the Ethereum wallet private key
 - `SAFE_SIGNER_PRIVATE_KEY` — the Safe multisig signer key (optional)
 - `SAFE_API_KEY` — Safe Transaction Service API key (optional)
 
 **Security notes:**
-- `.env.local` private keys are sensitive — use dedicated low-value wallets
-- "Delete all" in settings clears browser preferences only, not `.env.local`
+- Secrets never enter browser storage
+- Use dedicated low-value wallets for local testing
+- "Delete all" in settings clears browser preferences only, not Keychain entries
 
 ## LLM providers
 
@@ -146,6 +148,8 @@ Browser E2E tests use the onboarding flow with OpenRouter (requires `.env.tianji
 dotenvx run -f .env.tianjin -- bun test:e2e:browser
 ```
 
+Store any required wallet or Safe credentials in the macOS Keychain before running the suite.
+
 The browser suite verifies:
 - first-run onboarding
 - OpenRouter-backed chat success
@@ -159,6 +163,8 @@ Tool-level E2E tests:
 ```bash
 dotenvx run -f .env.tianjin -- bun test:e2e:tools
 ```
+
+These tests also read wallet and Safe credentials from the macOS Keychain.
 
 ## Troubleshooting
 

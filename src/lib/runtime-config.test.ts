@@ -1,14 +1,27 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import {
   applyLegacyRuntimeConfigDefaults,
   createDefaultRuntimeConfig,
-  createDeveloperRuntimeConfig,
   createRuntimeConfigDraft,
   getActiveModel,
   parseRuntimeConfigDraft,
   stripRuntimeConfigSecrets,
   validateRuntimeConfigDraftForAppMode,
 } from "./runtime-config";
+import { createDeveloperRuntimeConfig } from "./env-secrets";
+
+const mockGetSecret = mock();
+
+mock.module("./secret-store", () => ({
+  getSecret: mockGetSecret,
+  hasSecret: async (key: string) => {
+    const value = await mockGetSecret(key);
+    return value !== null && value !== undefined && value.trim().length > 0;
+  },
+  invalidateSecretCache: () => {},
+  getSecretBackend: () => null,
+  SECRET_STORE_KEYS: ["EOA_PRIVATE_KEY", "SAFE_SIGNER_PRIVATE_KEY", "SAFE_API_KEY"],
+}));
 
 describe("runtime-config helpers", () => {
   test("keeps onboarding defaults unvalidated until save time", () => {
@@ -80,29 +93,25 @@ describe("runtime-config helpers", () => {
     expect(getActiveModel(localConfig)).toBe("qwen3:8b");
   });
 
-  test("developer mode reuses the EOA key as the Safe signer key", () => {
-    const originalEoaPrivateKey = process.env.EOA_PRIVATE_KEY;
-
-    process.env.EOA_PRIVATE_KEY =
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-
-    try {
-      const runtimeConfig = createDeveloperRuntimeConfig();
-
-      expect(runtimeConfig.wallet.eoaPrivateKey).toBe(
-        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      );
-      expect(runtimeConfig.safe.signerPrivateKey).toBe(
-        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      );
-      expect(runtimeConfig.railgun.mnemonic).toBe("");
-    } finally {
-      if (originalEoaPrivateKey === undefined) {
-        delete process.env.EOA_PRIVATE_KEY;
-      } else {
-        process.env.EOA_PRIVATE_KEY = originalEoaPrivateKey;
+  test("developer mode reuses the EOA key as the Safe signer key", async () => {
+    mockGetSecret.mockImplementation(async (key: string) => {
+      if (key === "EOA_PRIVATE_KEY") {
+        return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
       }
-    }
+      return null;
+    });
+
+    const runtimeConfig = await createDeveloperRuntimeConfig();
+
+    expect(runtimeConfig.wallet.eoaPrivateKey).toBe(
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    expect(runtimeConfig.safe.signerPrivateKey).toBe(
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    expect(runtimeConfig.railgun.mnemonic).toBe("");
+
+    mockGetSecret.mockReset();
   });
 
   test("fills legacy Railgun privacy guidance defaults for stored configs", () => {

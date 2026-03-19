@@ -10,7 +10,7 @@ import { ensureRailgunShieldedEthBalance } from "../helpers/railgun"
 
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 6)
 
-const tools = createTools(ARBITRUM_CONFIG, createE2ERuntimeConfig(ARBITRUM_CONFIG, "railgun"))
+const tools = createTools(ARBITRUM_CONFIG, await createE2ERuntimeConfig(ARBITRUM_CONFIG, "railgun"))
 const VITALIK_ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"
 const PUBLIC_SEND_AMOUNT = "0.000001"
 

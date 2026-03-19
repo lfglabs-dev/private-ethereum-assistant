@@ -34,6 +34,7 @@ import { getChainMetadata, type NetworkConfig } from "../ethereum";
 import { resolveTokenMetadata, resolveTokenQuery } from "../token-metadata";
 import { type RuntimeConfig } from "../runtime-config";
 import { buildTrustWalletTokenPaths } from "../trustwallet-assets";
+import { getSecret } from "../secret-store";
 import { getSafeUiLink, proposeSafeTransactions } from "./safe";
 
 const SWAP_APP_CODE = "PrivateEthereumAssistant";
@@ -792,7 +793,7 @@ async function executeCowSafeSwap(options: {
     throw new Error("Could not prepare the Safe swap signer.");
   }
 
-  if (!process.env.SAFE_API_KEY) {
+  if (!(await getSecret("SAFE_API_KEY"))) {
     const fallbackQuote = buildQuoteSummary(
       quoteResults.result,
       options.sellToken,

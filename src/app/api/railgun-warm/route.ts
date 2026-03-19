@@ -1,6 +1,5 @@
-import { mergeRuntimeConfigWithEnvSecrets } from "@/lib/env-secrets";
+import { mergeRuntimeConfigWithEnvSecrets, createDeveloperRuntimeConfig } from "@/lib/env-secrets";
 import {
-  createDeveloperRuntimeConfig,
   getAppMode,
   runtimeConfigSchema,
 } from "@/lib/runtime-config";
@@ -15,7 +14,7 @@ export async function POST(req: Request) {
     const appMode = getAppMode();
 
     if (appMode === "developer") {
-      selectedRuntimeConfig = createDeveloperRuntimeConfig();
+      selectedRuntimeConfig = await createDeveloperRuntimeConfig();
     } else {
       const { runtimeConfig } = await req.json();
       const parsedRuntimeConfig = runtimeConfigSchema.safeParse(runtimeConfig);
@@ -34,7 +33,7 @@ export async function POST(req: Request) {
         );
       }
 
-      selectedRuntimeConfig = mergeRuntimeConfigWithEnvSecrets(parsedRuntimeConfig.data);
+      selectedRuntimeConfig = await mergeRuntimeConfigWithEnvSecrets(parsedRuntimeConfig.data);
     }
 
     const result = await warmRailgun({

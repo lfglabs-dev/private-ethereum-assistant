@@ -1,7 +1,12 @@
-import { promises as fs } from "fs";
-import path from "path";
 import { z } from "zod";
-import type { RuntimeConfig } from "./runtime-config";
+import { getSecret, getSecretBackend, hasSecret, invalidateSecretCache } from "./secret-store";
+import {
+  createDeveloperDisplayRuntimeConfig,
+  mergeRuntimeConfigOverrides,
+  normalizeDeveloperRuntimeConfig,
+  type RuntimeConfig,
+} from "./runtime-config";
+import type { NetworkConfig } from "./ethereum";
 
 const envPrivateKeySchema = z
   .string()
@@ -42,9 +47,6 @@ const ENV_SECRET_VARIABLES: Record<SavedEnvVariable, string> = {
   safeApiKey: "SAFE_API_KEY",
 };
 
-const SIMPLE_ENV_VALUE_PATTERN = /^[A-Za-z0-9_./:@%+-]+$/;
-const ENV_LINE_PATTERN = /^(\s*export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
-
 function normalizePrivateKey(value: string | undefined) {
   if (!value) {
     return "";
@@ -53,116 +55,91 @@ function normalizePrivateKey(value: string | undefined) {
   return value.startsWith("0x") ? value : `0x${value}`;
 }
 
-function serializeEnvValue(value: string) {
-  if (SIMPLE_ENV_VALUE_PATTERN.test(value)) {
-    return value;
-  }
+export async function getEnvSecretStatus(): Promise<EnvSecretStatus> {
+  const [eoaPrivateKey, safeSignerPrivateKey, safeApiKey] = await Promise.all([
+    hasSecret("EOA_PRIVATE_KEY"),
+    hasSecret("SAFE_SIGNER_PRIVATE_KEY"),
+    hasSecret("SAFE_API_KEY"),
+  ]);
 
-  return `"${value
-    .replaceAll("\\", "\\\\")
-    .replaceAll("\"", "\\\"")
-    .replaceAll("\n", "\\n")}"`;
+  return { eoaPrivateKey, safeSignerPrivateKey, safeApiKey };
 }
 
-export function getEnvLocalPath() {
-  return path.resolve(process.cwd(), ".env.local");
-}
-
-export function getEnvSecretStatus(): EnvSecretStatus {
-  return {
-    eoaPrivateKey: Boolean(process.env.EOA_PRIVATE_KEY?.trim()),
-    safeSignerPrivateKey: Boolean(process.env.SAFE_SIGNER_PRIVATE_KEY?.trim()),
-    safeApiKey: Boolean(process.env.SAFE_API_KEY?.trim()),
-  };
-}
-
-export function mergeRuntimeConfigWithEnvSecrets(
+export async function mergeRuntimeConfigWithEnvSecrets(
   runtimeConfig: RuntimeConfig,
-): RuntimeConfig {
+): Promise<RuntimeConfig> {
+  const [signerKey, eoaKey] = await Promise.all([
+    getSecret("SAFE_SIGNER_PRIVATE_KEY"),
+    getSecret("EOA_PRIVATE_KEY"),
+  ]);
+
   return {
     ...runtimeConfig,
     safe: {
       ...runtimeConfig.safe,
-      signerPrivateKey: normalizePrivateKey(process.env.SAFE_SIGNER_PRIVATE_KEY?.trim()),
+      signerPrivateKey: normalizePrivateKey(signerKey?.trim()),
     },
     wallet: {
       ...runtimeConfig.wallet,
-      eoaPrivateKey: normalizePrivateKey(process.env.EOA_PRIVATE_KEY?.trim()),
+      eoaPrivateKey: normalizePrivateKey(eoaKey?.trim()),
     },
   };
 }
 
-export function upsertEnvFileContent(
-  content: string,
-  updates: Partial<Record<SavedEnvVariable, string>>,
-) {
-  const entries = Object.entries(updates).filter(
-    (entry): entry is [SavedEnvVariable, string] => typeof entry[1] === "string",
-  );
-  if (entries.length === 0) {
-    return content;
-  }
-
-  const nextLines = (content ? content.split(/\r?\n/) : []).map((line) => {
-    const match = ENV_LINE_PATTERN.exec(line);
-    if (!match) {
-      return line;
-    }
-
-    const variable = Object.entries(ENV_SECRET_VARIABLES).find(
-      ([, envName]) => envName === match[2],
+async function getDeveloperWalletPrivateKey() {
+  const value = await getSecret("EOA_PRIVATE_KEY");
+  if (!value) {
+    throw new Error(
+      "Developer mode requires EOA_PRIVATE_KEY in the secret store.",
     );
-    if (!variable) {
-      return line;
-    }
-
-    const [fieldName] = variable as [SavedEnvVariable, string];
-    const nextValue = updates[fieldName];
-    return typeof nextValue === "string"
-      ? `${match[1] ?? ""}${match[2]}=${serializeEnvValue(nextValue)}`
-      : line;
-  });
-
-  const existingEnvNames = new Set(
-    nextLines
-      .map((line) => ENV_LINE_PATTERN.exec(line)?.[2])
-      .filter((value): value is string => Boolean(value)),
-  );
-
-  const missingEntries = entries.filter(
-    ([fieldName]) => !existingEnvNames.has(ENV_SECRET_VARIABLES[fieldName]),
-  );
-
-  if (missingEntries.length === 0) {
-    return `${nextLines.join("\n").replace(/\n*$/, "")}\n`;
   }
 
-  const prefix = nextLines.length > 0 && nextLines.at(-1) !== "" ? "\n" : "";
-  const appendedLines = missingEntries.map(
-    ([fieldName, value]) =>
-      `${ENV_SECRET_VARIABLES[fieldName]}=${serializeEnvValue(value)}`,
-  );
+  const normalized = value.startsWith("0x") ? value : `0x${value}`;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(normalized)) {
+    throw new Error("Developer mode wallet private key is not a valid 32-byte hex value.");
+  }
 
-  return `${nextLines.join("\n")}${prefix}${appendedLines.join("\n")}\n`;
+  return normalized;
+}
+
+export async function createDeveloperRuntimeConfig(): Promise<RuntimeConfig> {
+  const displayRuntimeConfig = createDeveloperDisplayRuntimeConfig();
+  const developerWalletPrivateKey = await getDeveloperWalletPrivateKey();
+
+  return {
+    ...displayRuntimeConfig,
+    safe: {
+      ...displayRuntimeConfig.safe,
+      signerPrivateKey: developerWalletPrivateKey,
+    },
+    wallet: {
+      ...displayRuntimeConfig.wallet,
+      eoaPrivateKey: developerWalletPrivateKey,
+    },
+    railgun: {
+      ...displayRuntimeConfig.railgun,
+      mnemonic: "",
+    },
+  };
+}
+
+export async function mergeDeveloperRuntimeConfig(
+  overrides?: RuntimeConfig | null,
+  networkConfig?: NetworkConfig,
+) {
+  return normalizeDeveloperRuntimeConfig(
+    mergeRuntimeConfigOverrides(await createDeveloperRuntimeConfig(), overrides, networkConfig),
+  );
 }
 
 export async function saveEnvSecrets(
   payload: z.input<typeof envSecretsPayloadSchema>,
 ) {
   const parsed = envSecretsPayloadSchema.parse(payload);
-  const envFilePath = getEnvLocalPath();
-  const currentContent = await fs.readFile(envFilePath, "utf8").catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
-      return "";
-    }
-
-    throw error;
-  });
-
   const updates: Partial<Record<SavedEnvVariable, string>> = {};
   const saved: SavedEnvVariable[] = [];
 
-  for (const [fieldName, envName] of Object.entries(
+  for (const [fieldName] of Object.entries(
     ENV_SECRET_VARIABLES,
   ) as Array<[SavedEnvVariable, string]>) {
     const nextValue = parsed[fieldName];
@@ -171,13 +148,21 @@ export async function saveEnvSecrets(
     }
 
     updates[fieldName] = nextValue;
-    process.env[envName] = nextValue;
     saved.push(fieldName);
   }
 
-  const nextContent = upsertEnvFileContent(currentContent, updates);
-  await fs.writeFile(envFilePath, nextContent, "utf8");
+  const backend = getSecretBackend();
+  if (!backend) {
+    throw new Error("No secret backend is available. macOS Keychain is required.");
+  }
 
+  for (const [fieldName, value] of Object.entries(updates) as Array<
+    [SavedEnvVariable, string]
+  >) {
+    await backend.set(ENV_SECRET_VARIABLES[fieldName], value);
+  }
+
+  invalidateSecretCache();
   return {
     success: true as const,
     saved,

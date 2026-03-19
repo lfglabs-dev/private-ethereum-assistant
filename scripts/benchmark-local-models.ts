@@ -519,9 +519,11 @@ ${detailSections}
 }
 
 async function main() {
-  if (!process.env.EOA_PRIVATE_KEY?.trim()) {
+  const { getSecret } = await import("../src/lib/secret-store");
+  const eoaKey = await getSecret("EOA_PRIVATE_KEY");
+  if (!eoaKey) {
     throw new Error(
-      "Missing EOA_PRIVATE_KEY. Run the benchmark with dotenvx, for example: dotenvx run -f .env.tianjin -- bun run scripts/benchmark-local-models.ts",
+      "Missing EOA_PRIVATE_KEY in Keychain. Store it first via: bun run local",
     );
   }
 
