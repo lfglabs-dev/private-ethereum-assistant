@@ -7,7 +7,7 @@ import {
 } from "ai";
 import type { TextStreamPart } from "ai";
 import { networkConfigSchema, DEFAULT_NETWORK_CONFIG } from "@/lib/ethereum";
-import { mergeRuntimeConfigWithEnvSecrets } from "@/lib/env-secrets";
+import { mergeRuntimeConfigWithEnvSecrets, mergeDeveloperRuntimeConfig } from "@/lib/env-secrets";
 import { getSystemPrompt } from "@/lib/system-prompt";
 import { createTools } from "@/lib/tools";
 import { createRuntimeModel } from "@/lib/llm";
@@ -18,7 +18,6 @@ import {
 import { detectModeSwitchRequired } from "@/lib/mode";
 import {
   createDeveloperDisplayRuntimeConfig,
-  mergeDeveloperRuntimeConfig,
   getActiveModel,
   getAppMode,
   getProviderLabel,
@@ -139,7 +138,7 @@ export async function POST(req: Request) {
         : parsedRuntimeConfig.success
           ? parsedRuntimeConfig.data.network
           : developerDisplayRuntimeConfig.network;
-      selectedRuntimeConfig = mergeDeveloperRuntimeConfig(
+      selectedRuntimeConfig = await mergeDeveloperRuntimeConfig(
         parsedRuntimeConfig.success ? parsedRuntimeConfig.data : null,
         selectedNetworkConfig,
       );
@@ -171,7 +170,7 @@ export async function POST(req: Request) {
       selectedNetworkConfig = parsedNetworkConfig.success
         ? parsedNetworkConfig.data
         : DEFAULT_NETWORK_CONFIG;
-      selectedRuntimeConfig = mergeRuntimeConfigWithEnvSecrets({
+      selectedRuntimeConfig = await mergeRuntimeConfigWithEnvSecrets({
         ...parsedRuntimeConfig.data,
         network: selectedNetworkConfig,
       });

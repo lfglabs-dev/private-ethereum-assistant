@@ -11,8 +11,8 @@ import {
 
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 3)
 
-const walletAddress = getWalletAddress()
-const baseRuntimeConfig = createE2ERuntimeConfig(ARBITRUM_CONFIG, "railgun")
+const walletAddress = await getWalletAddress()
+const baseRuntimeConfig = await createE2ERuntimeConfig(ARBITRUM_CONFIG, "railgun")
 const runtimeConfig = {
   ...baseRuntimeConfig,
   railgun: {

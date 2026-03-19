@@ -165,22 +165,6 @@ function getArbitrumNetworkConfig(): NetworkConfig {
   };
 }
 
-function getDeveloperWalletPrivateKey() {
-  const value = process.env.EOA_PRIVATE_KEY;
-  if (!value) {
-    throw new Error(
-      "Developer mode requires EOA_PRIVATE_KEY in the environment.",
-    );
-  }
-
-  const normalized = value.startsWith("0x") ? value : `0x${value}`;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(normalized)) {
-    throw new Error("Developer mode wallet private key is not a valid 32-byte hex value.");
-  }
-
-  return normalized;
-}
-
 export function getAppMode(): AppMode {
   return process.env.APP_MODE === "developer" ||
     process.env.NEXT_PUBLIC_APP_MODE === "developer"
@@ -258,28 +242,7 @@ export function createDeveloperDisplayRuntimeConfig(): RuntimeConfig {
   };
 }
 
-export function createDeveloperRuntimeConfig(): RuntimeConfig {
-  const displayRuntimeConfig = createDeveloperDisplayRuntimeConfig();
-  const developerWalletPrivateKey = getDeveloperWalletPrivateKey();
-
-  return {
-    ...displayRuntimeConfig,
-    safe: {
-      ...displayRuntimeConfig.safe,
-      signerPrivateKey: developerWalletPrivateKey,
-    },
-    wallet: {
-      ...displayRuntimeConfig.wallet,
-      eoaPrivateKey: developerWalletPrivateKey,
-    },
-    railgun: {
-      ...displayRuntimeConfig.railgun,
-      mnemonic: "",
-    },
-  };
-}
-
-function normalizeDeveloperRuntimeConfig(runtimeConfig: RuntimeConfig): RuntimeConfig {
+export function normalizeDeveloperRuntimeConfig(runtimeConfig: RuntimeConfig): RuntimeConfig {
   return {
     ...runtimeConfig,
     railgun: {
@@ -289,7 +252,7 @@ function normalizeDeveloperRuntimeConfig(runtimeConfig: RuntimeConfig): RuntimeC
   };
 }
 
-function mergeRuntimeConfigOverrides(
+export function mergeRuntimeConfigOverrides(
   baseConfig: RuntimeConfig,
   overrides?: RuntimeConfig | null,
   networkConfig?: NetworkConfig,
@@ -347,15 +310,6 @@ export function mergeDeveloperDisplayRuntimeConfig(
       overrides,
       networkConfig,
     ),
-  );
-}
-
-export function mergeDeveloperRuntimeConfig(
-  overrides?: RuntimeConfig | null,
-  networkConfig?: NetworkConfig,
-) {
-  return normalizeDeveloperRuntimeConfig(
-    mergeRuntimeConfigOverrides(createDeveloperRuntimeConfig(), overrides, networkConfig),
   );
 }
 
@@ -528,7 +482,7 @@ export function setActiveModelDraftValue(
 
 export function getSuggestedModels(provider: LlmProvider) {
   return provider === "local"
-    ? ["qwen3:8b", "qwen2.5:14b-instruct", "llama3.1:latest"]
+    ? ["llama3.2:3b", "qwen3:8b", "qwen2.5:14b-instruct"]
     : [
         "mistralai/mistral-large",
         "openai/gpt-4o-mini",

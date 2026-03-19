@@ -10,7 +10,7 @@ export async function POST(req: Request) {
   } catch (error) {
     return new Response(
       JSON.stringify({
-        error: error instanceof Error ? error.message : "Failed to save env secrets.",
+        error: error instanceof Error ? error.message : "Failed to save secrets.",
       }),
       {
         status: 400,

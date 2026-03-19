@@ -14,8 +14,8 @@ import { verificationClient } from "../helpers/verification-client"
 
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS)
 
-const tools = createTools(ARBITRUM_CONFIG, createE2ERuntimeConfig(ARBITRUM_CONFIG))
-const walletAddress = getWalletAddress()
+const tools = createTools(ARBITRUM_CONFIG, await createE2ERuntimeConfig(ARBITRUM_CONFIG))
+const walletAddress = await getWalletAddress()
 const TEST_AMOUNT = "0.000001"
 
 async function prepareEoaTransfer(input: {

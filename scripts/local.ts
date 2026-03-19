@@ -1,6 +1,8 @@
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
+import { getMacKeychainHelperPath } from "../src/lib/backends/macos-keychain";
+import { SECRET_STORE_KEYS } from "../src/lib/secret-store";
 
 export {};
 
@@ -15,7 +17,7 @@ const requiredDeps = [
 ];
 const missingDeps = requiredDeps.filter(([, depPath]) => !existsSync(depPath));
 const defaultBaseUrl = process.env.LLM_BASE_URL || "http://localhost:11434/v1";
-const defaultModel = process.env.LLM_MODEL || "qwen3:8b";
+const defaultModel = process.env.LLM_MODEL || "llama3.2:3b";
 const baseUrl = new URL(defaultBaseUrl);
 const requestedPort = getPort(args);
 const managesOllama = isManagedOllamaBaseUrl(baseUrl);
@@ -70,6 +72,8 @@ try {
     );
   }
 
+  await ensureCredentialStoreReady();
+
   process.on("SIGINT", () => {
     void shutdown(130);
   });
@@ -107,7 +111,7 @@ try {
     appProc = Bun.spawn({
       cmd: [bunBin, nextBin, "dev", ...normalizePortArgs(args, selectedPort)],
       cwd,
-      env: process.env,
+      env: getCleanEnv(),
       stdout: "inherit",
       stderr: "inherit",
       stdin: "inherit",
@@ -309,10 +313,26 @@ async function runCommand(cmd: string[]) {
   }
 }
 
-async function runCommandCapture(cmd: string[]) {
+async function runCommandInDir(cmd: string[], workdir = cwd) {
   const proc = Bun.spawn({
     cmd,
-    cwd,
+    cwd: workdir,
+    env: process.env,
+    stdout: "inherit",
+    stderr: "inherit",
+    stdin: "inherit",
+  });
+
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    throw new Error(`Command failed: ${cmd.join(" ")}`);
+  }
+}
+
+async function runCommandCapture(cmd: string[], workdir = cwd) {
+  const proc = Bun.spawn({
+    cmd,
+    cwd: workdir,
     env: process.env,
     stdout: "pipe",
     stderr: "pipe",
@@ -329,6 +349,33 @@ async function runCommandCapture(cmd: string[]) {
   }
 
   return stdout;
+}
+
+async function ensureCredentialStoreReady() {
+  if (process.platform !== "darwin") {
+    throw new Error("macOS Keychain is required to store wallet secrets.");
+  }
+
+  const helperPath = getMacKeychainHelperPath(cwd);
+  if (existsSync(helperPath)) {
+    return;
+  }
+
+  const swiftBin = Bun.which("swift");
+  if (!swiftBin) {
+    throw new Error(
+      "Swift is required to build the macOS Keychain helper. Install Xcode Command Line Tools or run `bun run build:keychain` first.",
+    );
+  }
+
+  const keychainProjectDir = path.join(cwd, "native", "keychain-helper");
+  console.log("Building macOS Keychain helper...");
+
+  await runCommandInDir([swiftBin, "build", "-c", "release"], keychainProjectDir);
+
+  if (!existsSync(helperPath)) {
+    throw new Error("Failed to build the macOS Keychain helper.");
+  }
 }
 
 function openBrowser(url: string) {
@@ -354,6 +401,14 @@ async function readProcessOutput(
   stream: ReadableStream<Uint8Array<ArrayBufferLike>> | number | undefined,
 ) {
   return stream instanceof ReadableStream ? new Response(stream).text() : "";
+}
+
+function getCleanEnv() {
+  const env = { ...process.env };
+  for (const key of SECRET_STORE_KEYS) {
+    delete env[key];
+  }
+  return env;
 }
 
 async function shutdown(exitCode: number) {

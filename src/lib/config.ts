@@ -20,7 +20,7 @@ function getTokenAmountEnv(name: string, fallback: string) {
 export const config = {
   llm: {
     baseURL: process.env.LLM_BASE_URL || "http://localhost:11434/v1",
-    model: process.env.LLM_MODEL || "qwen3:8b",
+    model: process.env.LLM_MODEL || "llama3.2:3b",
     timeoutMs: getNumberEnv("LLM_TIMEOUT_MS", 180000),
   },
   ethereum: {
@@ -49,7 +49,6 @@ export const config = {
       .map((url) => url.trim())
       .filter(Boolean),
     mnemonic: process.env.RAILGUN_MNEMONIC,
-    signerPrivateKey: process.env.EOA_PRIVATE_KEY,
     walletCreationBlock: Number(process.env.RAILGUN_WALLET_CREATION_BLOCK || "56109834"),
     scanTimeoutMs: Number(process.env.RAILGUN_SCAN_TIMEOUT_MS || "180000"),
     pollingIntervalMs: Number(process.env.RAILGUN_POLLING_INTERVAL_MS || "15000"),

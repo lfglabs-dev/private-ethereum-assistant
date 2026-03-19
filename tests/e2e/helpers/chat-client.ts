@@ -106,9 +106,9 @@ export async function cleanupChatServer() {
   }
 }
 
-export function createOpenRouterRuntimeConfig(
+export async function createOpenRouterRuntimeConfig(
   networkConfig: NetworkConfig = ARBITRUM_CONFIG,
-): RuntimeConfig {
+): Promise<RuntimeConfig> {
   const runtimeConfig = createDefaultRuntimeConfig()
 
   return {
@@ -123,7 +123,7 @@ export function createOpenRouterRuntimeConfig(
     },
     network: networkConfig,
     wallet: {
-      eoaPrivateKey: getWalletPrivateKey(),
+      eoaPrivateKey: await getWalletPrivateKey(),
       approvalPolicy: runtimeConfig.wallet.approvalPolicy,
     },
   }

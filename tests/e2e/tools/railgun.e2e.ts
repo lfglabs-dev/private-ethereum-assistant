@@ -12,8 +12,8 @@ import { verificationClient } from "../helpers/verification-client"
 
 setDefaultTimeout(E2E_TEST_TIMEOUT_MS * 3)
 
-const tools = createTools(ARBITRUM_CONFIG, createE2ERuntimeConfig(ARBITRUM_CONFIG, "railgun"))
-const walletAddress = getWalletAddress()
+const tools = createTools(ARBITRUM_CONFIG, await createE2ERuntimeConfig(ARBITRUM_CONFIG, "railgun"))
+const walletAddress = await getWalletAddress()
 const MAX_SHIELD_AMOUNT_RAW = parseEther("0.000001")
 
 type RailgunBalanceResult = {

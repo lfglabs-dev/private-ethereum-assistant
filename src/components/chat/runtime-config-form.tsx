@@ -288,7 +288,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
               </CardTitle>
               <CardDescription>
                 Non-secret preferences stay in browser storage. Wallet keys are saved
-                later to a local `.env.local` file on this machine instead.
+                later to the macOS Keychain on this machine instead.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -360,7 +360,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
                   placeholder={
                     draft.llm.provider === "openrouter"
                       ? "qwen/qwen3.5-27b"
-                      : "qwen3:8b"
+                      : "llama3.2:3b"
                   }
                 />
               </label>
@@ -497,8 +497,8 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
             <CardHeader>
               <CardTitle>Keys</CardTitle>
               <CardDescription>
-                Saved to a local `.env.local` file on this machine. These values are
-                never written to browser storage.
+                Saved to the macOS Keychain on this machine. These values never enter
+                browser storage.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -594,7 +594,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
               )}
 
               <p className="text-xs text-muted-foreground">
-                Keys are stored in `.env.local` on this machine. Use dedicated
+                Keys are stored in the macOS Keychain on this machine. Use dedicated
                 low-value wallets.
               </p>
 

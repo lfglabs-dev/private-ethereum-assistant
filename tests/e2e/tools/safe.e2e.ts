@@ -1,5 +1,6 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { createDefaultRuntimeConfig } from "@/lib/runtime-config"
+import { getSecret } from "@/lib/secret-store"
 import { createTools } from "@/lib/tools"
 import {
   ARBITRUM_CONFIG,
@@ -77,13 +78,13 @@ describe("Safe E2E", () => {
     )
   })
 
-  if (process.env.SAFE_API_KEY && process.env.EOA_PRIVATE_KEY) {
+  if ((await getSecret("SAFE_API_KEY")) && (await getSecret("EOA_PRIVATE_KEY"))) {
     test("swap_tokens can propose a Safe-native swap transaction", async () => {
       const swapTools = createTools(ARBITRUM_CONFIG, {
         ...safeRuntimeConfig,
         safe: {
           ...safeRuntimeConfig.safe,
-          signerPrivateKey: getWalletPrivateKey(),
+          signerPrivateKey: await getWalletPrivateKey(),
         },
       })
 

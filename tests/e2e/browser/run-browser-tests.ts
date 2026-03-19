@@ -6,6 +6,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { privateKeyToAccount } from "viem/accounts";
+import { getSecret } from "@/lib/secret-store";
 import {
   BALANCE_ROUTING_ETH_AMOUNT,
   BALANCE_ROUTING_PRIVACY_GUIDANCE,
@@ -23,9 +24,9 @@ const APP_URL = process.env.E2E_APP_URL ?? "http://127.0.0.1:3100";
 const DEV_PORT = new URL(APP_URL).port || "3000";
 const SESSION = `private-ethereum-assistant-e2e-${Date.now()}`;
 const SCREENSHOT_DIR = join(process.cwd(), "tests/e2e/browser/screenshots");
-const E2E_WALLET_PRIVATE_KEY = process.env.EOA_PRIVATE_KEY ?? "";
+const E2E_WALLET_PRIVATE_KEY = (await getSecret("EOA_PRIVATE_KEY")) ?? "";
 const HAS_SAFE_AUTOMATION = Boolean(
-  process.env.SAFE_API_KEY && E2E_WALLET_PRIVATE_KEY,
+  (await getSecret("SAFE_API_KEY")) && E2E_WALLET_PRIVATE_KEY,
 );
 const E2E_WALLET_ADDRESS = E2E_WALLET_PRIVATE_KEY
   ? privateKeyToAccount(
