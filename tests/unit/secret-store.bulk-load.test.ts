@@ -165,6 +165,43 @@ describe("secret store access", () => {
     await expect(getSecret("SAFE_API_KEY")).resolves.toBe("new-safe-api-key");
   });
 
+  test("developer mode prefers encrypted env secrets over Keychain", async () => {
+    const originalAppMode = process.env.APP_MODE;
+    const originalEoaPrivateKey = process.env.EOA_PRIVATE_KEY;
+    const originalRailgunMnemonic = process.env.RAILGUN_MNEMONIC;
+
+    process.env.APP_MODE = "developer";
+    process.env.EOA_PRIVATE_KEY = "env-eoa-secret";
+    process.env.RAILGUN_MNEMONIC =
+      "test test test test test test test test test test test junk";
+
+    try {
+      await expect(getSecret("EOA_PRIVATE_KEY")).resolves.toBe("env-eoa-secret");
+      await expect(listStoredSecretKeys()).resolves.toEqual([
+        "EOA_PRIVATE_KEY",
+        "RAILGUN_MNEMONIC",
+      ]);
+    } finally {
+      if (originalAppMode === undefined) {
+        delete process.env.APP_MODE;
+      } else {
+        process.env.APP_MODE = originalAppMode;
+      }
+
+      if (originalEoaPrivateKey === undefined) {
+        delete process.env.EOA_PRIVATE_KEY;
+      } else {
+        process.env.EOA_PRIVATE_KEY = originalEoaPrivateKey;
+      }
+
+      if (originalRailgunMnemonic === undefined) {
+        delete process.env.RAILGUN_MNEMONIC;
+      } else {
+        process.env.RAILGUN_MNEMONIC = originalRailgunMnemonic;
+      }
+    }
+  });
+
   test("explicit export seeds later reads from memory", async () => {
     if (process.platform !== "darwin") {
       return;
