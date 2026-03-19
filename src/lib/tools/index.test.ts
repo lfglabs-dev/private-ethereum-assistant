@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { tool } from "ai";
+import { z } from "zod";
 import { createDefaultRuntimeConfig } from "../runtime-config";
 import { detectModeSwitchRequired } from "../mode";
 import { getTools } from "./index";
+import { guardToolExecution } from "./access-control";
 
 function createRuntimeConfig(mode: "eoa" | "safe" | "railgun") {
   const runtimeConfig = createDefaultRuntimeConfig();
@@ -22,11 +25,13 @@ describe("mode-scoped tool registry", () => {
       expect.arrayContaining([
         "prepare_eoa_transfer",
         "send_eoa_transfer",
-        "swap_tokens",
+        "prepare_swap",
+        "execute_swap",
         "get_balance",
         "resolve_ens",
       ]),
     );
+    expect(Object.keys(tools)).not.toContain("swap_tokens");
     expect(Object.keys(tools)).not.toContain("get_safe_info");
     expect(Object.keys(tools)).not.toContain("railgun_balance");
   });
@@ -84,5 +89,36 @@ describe("mode-scoped tool registry", () => {
       message:
         "This request needs Safe mode. Confirm the mode change and I'll replay it with the Safe toolset.",
     });
+  });
+
+  test("server-side execution guard rejects out-of-mode tool calls", async () => {
+    const guardedTool = guardToolExecution(
+      "send_eoa_transfer",
+      "safe",
+      tool({
+        description: "Send an EOA transfer.",
+        inputSchema: z.object({
+          confirmationId: z.string(),
+        }),
+        execute: async () => ({ ok: true }),
+      }),
+    );
+    if (!guardedTool.execute) {
+      throw new Error("Expected guarded tool execution handler.");
+    }
+
+    await expect(
+      Promise.resolve().then(() =>
+        guardedTool.execute(
+          {
+            confirmationId: "confirmation-id",
+          },
+          {
+            toolCallId: "tool-call-id",
+            messages: [],
+          } as never,
+        ),
+      ),
+    ).rejects.toThrow('Tool "send_eoa_transfer" is not allowed in safe mode.');
   });
 });

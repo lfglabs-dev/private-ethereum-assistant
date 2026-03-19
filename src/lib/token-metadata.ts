@@ -10,6 +10,7 @@ import {
   searchTrustWalletTokens,
   type TokenSearchCandidate,
 } from "./token-search-index";
+import { formatUntrustedDataLiteral } from "./untrusted-data";
 
 export type OnchainTokenMetadata = {
   symbol: string;
@@ -124,8 +125,10 @@ export async function resolveTokenMetadata(options: {
     chainId: options.chainId,
     chainName: getTrustWalletChainName(options.chainId),
     address: checksumAddress,
-    symbol: onchain.symbol || checksumAddress,
-    name: onchain.name,
+    symbol: formatUntrustedDataLiteral(onchain.symbol, 32, checksumAddress),
+    name: onchain.name
+      ? formatUntrustedDataLiteral(onchain.name, 64, "")
+      : undefined,
     decimals: onchain.decimals,
     source: "onchain",
     verified: false,

@@ -69,6 +69,8 @@ import { privateKeyToAccount } from "viem/accounts";
 import { arbitrum } from "viem/chains";
 import { config } from "./config";
 import { getAppMode, type RuntimeConfig } from "./runtime-config";
+import { getSecret } from "./secret-store";
+import { signLocalActionId, verifyLocalActionId } from "./signed-action-id";
 
 const RAILGUN_NETWORK = NetworkName.Arbitrum;
 const RAILGUN_TXID_VERSION = TXIDVersion.V2_PoseidonMerkle;
@@ -473,7 +475,7 @@ function createDefaultRailgunToolRuntimeConfig(): RailgunToolRuntimeConfig {
     explorerTxBaseUrl: config.railgun.explorerTxBaseUrl,
     privacyGuidanceText: config.railgun.privacyGuidanceText,
     poiNodeUrls: config.railgun.poiNodeUrls,
-    mnemonic: config.railgun.mnemonic || "",
+    mnemonic: "",
     signerPrivateKey: "",
     walletCreationBlock: config.railgun.walletCreationBlock,
     scanTimeoutMs: config.railgun.scanTimeoutMs,
@@ -486,6 +488,7 @@ function createDefaultRailgunToolRuntimeConfig(): RailgunToolRuntimeConfig {
 
 let currentConfig = createDefaultRailgunToolRuntimeConfig();
 let currentConfigFingerprint = JSON.stringify(currentConfig);
+let railgunConfigLocked = false;
 let publicClient = createPublicClient({
   chain: arbitrum,
   transport: http(currentConfig.rpcUrl),
@@ -524,8 +527,15 @@ function setRailgunToolRuntimeConfig(nextConfig: RailgunToolRuntimeConfig) {
     return;
   }
 
+  if (railgunConfigLocked) {
+    throw new Error(
+      "Railgun runtime config is fixed for this server process. Restart the app before changing Railgun settings.",
+    );
+  }
+
   currentConfig = nextConfig;
   currentConfigFingerprint = fingerprint;
+  railgunConfigLocked = true;
   initPromise = undefined;
   operationQueue = Promise.resolve();
   if (backgroundRefreshTimer) {
@@ -981,7 +991,7 @@ const getWalletClient = () =>
     transport: http(currentConfig.rpcUrl),
   });
 
-const deriveRailgunMnemonic = () => {
+const deriveRailgunMnemonic = async () => {
   if (getAppMode() === "developer") {
     const privateKey = currentConfig.signerPrivateKey.trim();
     if (!privateKey) {
@@ -1005,6 +1015,11 @@ const deriveRailgunMnemonic = () => {
   const explicitMnemonic = currentConfig.mnemonic.trim();
   if (explicitMnemonic) {
     return explicitMnemonic;
+  }
+
+  const storedMnemonic = (await getSecret("RAILGUN_MNEMONIC"))?.trim();
+  if (storedMnemonic) {
+    return storedMnemonic;
   }
 
   const privateKey = currentConfig.signerPrivateKey.trim();
@@ -1385,7 +1400,7 @@ const initializeRailgun = async (): Promise<RailgunRuntime> => {
     async () => {
       await ensureContextDir();
 
-      const mnemonic = deriveRailgunMnemonic();
+      const mnemonic = await deriveRailgunMnemonic();
       const fingerprint = getWalletFingerprint(mnemonic);
       const encryptionKey = deriveEncryptionKey(mnemonic);
 
@@ -2105,7 +2120,8 @@ const createPendingApprovalResult = (
 ): RailgunApprovalRequiredResult => {
   cleanupPendingRailgunApprovals();
 
-  const approvalId = crypto.randomUUID();
+  const internalApprovalId = crypto.randomUUID();
+  const approvalId = signLocalActionId(internalApprovalId, "railgun-approval");
   const threshold = getApprovalThreshold(operation);
   const createdAt = new Date().toISOString();
   const base = buildActionResultBase(operation, runtime, token, amount, recipient);
@@ -2118,14 +2134,13 @@ const createPendingApprovalResult = (
     createdAt,
   };
 
-  pendingRailgunApprovals.set(approvalId, {
+  pendingRailgunApprovals.set(internalApprovalId, {
     ...base,
     approval,
     execute,
   });
   railgunLog("info", "approval:created", {
     amount,
-    approvalId,
     operation,
     railgunAddress: runtime.railgunAddress,
     recipient,
@@ -3324,15 +3339,19 @@ export async function approveRailgunAction(
   approvalId: string,
 ): Promise<RailgunResult> {
   cleanupPendingRailgunApprovals();
-  const pendingApproval = pendingRailgunApprovals.get(approvalId);
+  const internalApprovalId = verifyLocalActionId(approvalId, "railgun-approval");
+  if (!internalApprovalId) {
+    throw new Error("Railgun approval request was not found or has expired.");
+  }
+
+  const pendingApproval = pendingRailgunApprovals.get(internalApprovalId);
 
   if (!pendingApproval) {
     throw new Error("Railgun approval request was not found or has expired.");
   }
 
-  pendingRailgunApprovals.delete(approvalId);
+  pendingRailgunApprovals.delete(internalApprovalId);
   railgunLog("info", "approval:approved", {
-    approvalId,
     operation: pendingApproval.operation,
     railgunAddress: pendingApproval.railgunAddress,
   });
@@ -3341,15 +3360,19 @@ export async function approveRailgunAction(
 
 export function rejectRailgunAction(approvalId: string): RailgunResult {
   cleanupPendingRailgunApprovals();
-  const pendingApproval = pendingRailgunApprovals.get(approvalId);
+  const internalApprovalId = verifyLocalActionId(approvalId, "railgun-approval");
+  if (!internalApprovalId) {
+    throw new Error("Railgun approval request was not found or has expired.");
+  }
+
+  const pendingApproval = pendingRailgunApprovals.get(internalApprovalId);
 
   if (!pendingApproval) {
     throw new Error("Railgun approval request was not found or has expired.");
   }
 
-  pendingRailgunApprovals.delete(approvalId);
+  pendingRailgunApprovals.delete(internalApprovalId);
   railgunLog("info", "approval:rejected", {
-    approvalId,
     operation: pendingApproval.operation,
     railgunAddress: pendingApproval.railgunAddress,
   });

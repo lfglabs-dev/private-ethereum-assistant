@@ -91,7 +91,6 @@ try {
     }
 
     console.log(`Reusing existing app server: ${existingAppUrl}`);
-    openBrowser(existingAppUrl);
 
     if (startedOllama) {
       console.log("Press Ctrl+C to stop the managed Ollama process.");
@@ -118,7 +117,6 @@ try {
     });
 
     await waitForHttp(managedAppUrl);
-    openBrowser(managedAppUrl);
 
     const exitCode = await appProc.exited;
     await shutdown(exitCode);
@@ -376,21 +374,6 @@ async function ensureCredentialStoreReady() {
   if (!existsSync(helperPath)) {
     throw new Error("Failed to build the macOS Keychain helper.");
   }
-}
-
-function openBrowser(url: string) {
-  const openBin = Bun.which("open");
-  if (!openBin) {
-    return;
-  }
-
-  Bun.spawn({
-    cmd: [openBin, url],
-    cwd,
-    env: process.env,
-    stdout: "ignore",
-    stderr: "ignore",
-  });
 }
 
 async function keepAlive() {

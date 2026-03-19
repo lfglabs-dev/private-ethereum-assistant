@@ -26,6 +26,22 @@ async function readOutput(
   return new Response(stream).text();
 }
 
+export class MacKeychainAccessDeniedError extends Error {
+  constructor(
+    backendName: string,
+    readonly command: string,
+  ) {
+    super(`${backendName} access was denied while running "${command}".`);
+    this.name = "MacKeychainAccessDeniedError";
+  }
+}
+
+export function isMacKeychainAccessDeniedError(
+  error: unknown,
+): error is MacKeychainAccessDeniedError {
+  return error instanceof MacKeychainAccessDeniedError;
+}
+
 export class MacKeychainBackend implements SecretBackend {
   readonly name = "macOS Keychain";
 
@@ -75,6 +91,25 @@ export class MacKeychainBackend implements SecretBackend {
     return parsed;
   }
 
+  async loadAll() {
+    const result = await this.run("export");
+    this.assertSuccess("export", undefined, result);
+
+    const parsed = JSON.parse(result.stdout || "{}");
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      Object.entries(parsed).some(
+        ([key, value]) => typeof key !== "string" || typeof value !== "string",
+      )
+    ) {
+      throw new Error(`${this.name} returned an invalid secret export.`);
+    }
+
+    return parsed as Record<string, string>;
+  }
+
   private async run(command: string, account?: string, input?: string) {
     const proc = this.spawn({
       cmd: [this.helperPath, command, this.serviceName, ...(account ? [account] : [])],
@@ -108,7 +143,7 @@ export class MacKeychainBackend implements SecretBackend {
     }
 
     if (result.exitCode === 2) {
-      throw new Error(`${this.name} access was denied while running "${command}".`);
+      throw new MacKeychainAccessDeniedError(this.name, command);
     }
 
     const scope = account ? ` for ${account}` : "";

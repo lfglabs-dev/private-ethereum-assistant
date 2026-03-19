@@ -96,6 +96,12 @@ function getValidationMessage(error: unknown) {
   return "Invalid runtime config.";
 }
 
+type StandardEnvReadiness = {
+  eoaPrivateKey: boolean;
+  railgunMnemonic: boolean;
+  accessDenied: boolean;
+};
+
 type ConfiguredAssistantProps = {
   runtimeConfig: RuntimeConfig;
   appMode: AppMode;
@@ -114,6 +120,9 @@ function ConfiguredAssistant({
   const [showDebugTrace, setShowDebugTrace] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hasServerWalletKey, setHasServerWalletKey] = useState(appMode === "developer");
+  const [hasServerRailgunMnemonic, setHasServerRailgunMnemonic] = useState(
+    appMode === "developer",
+  );
   const [settingsDraft, setSettingsDraft] = useState<RuntimeConfigDraft>(() =>
     createRuntimeConfigDraft(runtimeConfig),
   );
@@ -182,14 +191,19 @@ function ConfiguredAssistant({
           method: "GET",
           cache: "no-store",
         });
-        const payload = (await response.json()) as { eoaPrivateKey?: boolean };
+        const payload = (await response.json()) as {
+          eoaPrivateKey?: boolean;
+          railgunMnemonic?: boolean;
+        };
 
         if (!cancelled) {
           setHasServerWalletKey(Boolean(payload.eoaPrivateKey));
+          setHasServerRailgunMnemonic(Boolean(payload.railgunMnemonic));
         }
       } catch {
         if (!cancelled) {
           setHasServerWalletKey(false);
+          setHasServerRailgunMnemonic(false);
         }
       }
     };
@@ -205,6 +219,7 @@ function ConfiguredAssistant({
     const hasRailgunCredential =
       appMode === "developer" ||
       hasServerWalletKey ||
+      hasServerRailgunMnemonic ||
       runtimeConfig.railgun.mnemonic.trim().length > 0;
 
     if (!hasRailgunCredential) {
@@ -240,7 +255,7 @@ function ConfiguredAssistant({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [appMode, hasServerWalletKey, runtimeConfig]);
+  }, [appMode, hasServerRailgunMnemonic, hasServerWalletKey, runtimeConfig]);
 
   const sendChatMessage = (
     text: string,
@@ -415,7 +430,6 @@ function ConfiguredAssistant({
             <ChatMessage
               key={message.id}
               message={message}
-              runtimeConfig={runtimeConfig}
               onConfirmModeSwitch={handleConfirmModeSwitch}
               pendingModeSwitchKey={pendingModeSwitchKey}
               isStreaming={
@@ -609,7 +623,65 @@ export default function Home() {
   );
   const [onboardingError, setOnboardingError] = useState<string | null>(null);
   const [onboardingStep, setOnboardingStep] = useState(0);
+  const [standardEnvReadiness, setStandardEnvReadiness] =
+    useState<StandardEnvReadiness | null>(null);
   const onboardingFormRef = useRef<RuntimeConfigFormHandle>(null);
+
+  useEffect(() => {
+    if (appMode !== "standard" || runtimeConfig === null) {
+      setStandardEnvReadiness(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadStandardEnvReadiness = async () => {
+      try {
+        const response = await fetch("/api/env-status", {
+          method: "GET",
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as Partial<StandardEnvReadiness>;
+
+        if (!response.ok) {
+          throw new Error("Could not load key status.");
+        }
+
+        if (!cancelled) {
+          setStandardEnvReadiness({
+            eoaPrivateKey: Boolean(payload.eoaPrivateKey),
+            railgunMnemonic: Boolean(payload.railgunMnemonic),
+            accessDenied: Boolean(payload.accessDenied),
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setStandardEnvReadiness({
+            eoaPrivateKey: false,
+            railgunMnemonic: false,
+            accessDenied: false,
+          });
+        }
+      }
+    };
+
+    void loadStandardEnvReadiness();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appMode, runtimeConfig, sessionKey]);
+
+  const shouldResumeStandardOnboarding =
+    appMode === "standard" &&
+    runtimeConfig !== null &&
+    standardEnvReadiness !== null &&
+    (!standardEnvReadiness.eoaPrivateKey || !standardEnvReadiness.railgunMnemonic);
+  const effectiveOnboardingStep = shouldResumeStandardOnboarding
+    ? Math.max(onboardingStep, 2)
+    : onboardingStep;
+  const shouldShowLoadingState =
+    appMode === "standard" && runtimeConfig !== null && standardEnvReadiness === null;
 
   const handleSaveRuntimeConfig = (nextRuntimeConfig: RuntimeConfig) => {
     saveStoredRuntimeConfig(nextRuntimeConfig);
@@ -620,6 +692,7 @@ export default function Home() {
     setOnboardingDraft(createStandardRuntimeConfigDraft());
     setOnboardingError(null);
     setOnboardingStep(0);
+    setStandardEnvReadiness(null);
     setSessionKey((value) => value + 1);
   };
 
@@ -638,6 +711,19 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    if (!shouldResumeStandardOnboarding || runtimeConfig === null) {
+      return;
+    }
+
+    setOnboardingDraft(createRuntimeConfigDraft(runtimeConfig));
+    if (standardEnvReadiness.accessDenied) {
+      setOnboardingError(
+        "macOS Keychain access was denied while checking configured keys.",
+      );
+    }
+  }, [runtimeConfig, shouldResumeStandardOnboarding, standardEnvReadiness]);
+
   if (appMode === "developer") {
     const developerRuntimeConfig = mergeDeveloperDisplayRuntimeConfig(runtimeConfig);
 
@@ -652,9 +738,19 @@ export default function Home() {
     );
   }
 
-  if (runtimeConfig === null) {
-    const step = STANDARD_ONBOARDING_STEPS[onboardingStep];
-    const isLastStep = onboardingStep === STANDARD_ONBOARDING_STEPS.length - 1;
+  if (shouldShowLoadingState) {
+    return (
+      <main className="min-h-dvh bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_45%),linear-gradient(180deg,rgba(15,23,42,0.04),transparent_50%)] px-4 py-8">
+        <div className="mx-auto max-w-4xl rounded-2xl border bg-background/80 p-6 text-sm text-muted-foreground shadow-sm backdrop-blur">
+          Checking local configuration and required keychain secrets…
+        </div>
+      </main>
+    );
+  }
+
+  if (runtimeConfig === null || shouldResumeStandardOnboarding) {
+    const step = STANDARD_ONBOARDING_STEPS[effectiveOnboardingStep];
+    const isLastStep = effectiveOnboardingStep === STANDARD_ONBOARDING_STEPS.length - 1;
 
     return (
       <main
@@ -680,7 +776,7 @@ export default function Home() {
           </div>
 
           <div className="rounded-2xl border bg-background/80 p-4 text-sm text-muted-foreground shadow-sm backdrop-blur">
-            Step {onboardingStep + 1} of {STANDARD_ONBOARDING_STEPS.length}:{" "}
+            Step {effectiveOnboardingStep + 1} of {STANDARD_ONBOARDING_STEPS.length}:{" "}
             <span className="font-medium text-foreground">{step.title}</span>. {step.description}
           </div>
 
@@ -700,10 +796,14 @@ export default function Home() {
               type="button"
               variant="outline"
               size="lg"
-              disabled={onboardingStep === 0}
+              disabled={effectiveOnboardingStep === 0}
               onClick={() => {
                 setOnboardingError(null);
-                setOnboardingStep((value) => Math.max(0, value - 1));
+                setOnboardingStep((value) =>
+                  shouldResumeStandardOnboarding
+                    ? Math.max(2, value - 1)
+                    : Math.max(0, value - 1),
+                );
               }}
             >
               Back
@@ -713,8 +813,11 @@ export default function Home() {
               type="button"
               size="lg"
               onClick={async () => {
-                const currentStep = STANDARD_ONBOARDING_STEPS[onboardingStep];
-                if (currentStep.sections.some((section) => section === "keys")) {
+                const currentStep = STANDARD_ONBOARDING_STEPS[effectiveOnboardingStep];
+                if (
+                  currentStep.sections.some((section) => section === "keys") ||
+                  isLastStep
+                ) {
                   const keySaveResult = await onboardingFormRef.current?.saveKeys();
                   if (keySaveResult && !keySaveResult.ok) {
                     setOnboardingError(keySaveResult.message);
@@ -729,7 +832,10 @@ export default function Home() {
 
                 setOnboardingError(null);
                 setOnboardingStep((value) =>
-                  Math.min(STANDARD_ONBOARDING_STEPS.length - 1, value + 1),
+                  Math.min(
+                    STANDARD_ONBOARDING_STEPS.length - 1,
+                    Math.max(effectiveOnboardingStep, value) + 1,
+                  ),
                 );
               }}
             >

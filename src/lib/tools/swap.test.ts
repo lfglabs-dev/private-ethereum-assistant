@@ -40,6 +40,11 @@ function createRuntimeConfig(actor: "eoa" | "safe" | "railgun") {
       ...runtimeConfig.wallet,
       eoaPrivateKey:
         "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      approvalPolicy: {
+        enabled: true,
+        nativeThreshold: "10",
+        erc20Threshold: "100000",
+      },
     },
     actor: {
       type: actor,
@@ -111,6 +116,38 @@ async function executeSwap(actor: "eoa" | "safe" | "railgun") {
     executeEoaSwap: async () => executionResult,
   });
 
+  if (actor === "eoa") {
+    if (!tools.prepareSwap.execute || !tools.executeSwap.execute) {
+      throw new Error("EOA swap tools should be executable.");
+    }
+
+    const prepared = asSwapResult(await tools.prepareSwap.execute(
+      {
+        sellToken: "ETH",
+        buyToken: "USDC",
+        amount: "1",
+      },
+      {
+        toolCallId: crypto.randomUUID(),
+        messages: [],
+      },
+    ));
+
+    if (typeof prepared.confirmationId !== "string") {
+      throw new Error("Expected prepare_swap to return a confirmationId.");
+    }
+
+    return tools.executeSwap.execute(
+      {
+        confirmationId: prepared.confirmationId,
+      },
+      {
+        toolCallId: crypto.randomUUID(),
+        messages: [],
+      },
+    );
+  }
+
   if (!tools.swapTokens.execute) {
     throw new Error("swapTokens tool should be executable.");
   }
@@ -141,6 +178,7 @@ function asSwapResult(value: unknown) {
     kind: string;
     status: string;
     actor: string;
+    confirmationId?: string;
     plan?: {
       executionPath?: string;
     };
@@ -170,7 +208,7 @@ describe("swap tool", () => {
     });
   });
 
-  test("executes the EOA actor path and returns a canonical plan", async () => {
+  test("prepares then executes the EOA actor path and returns a canonical plan", async () => {
     const result = asSwapResult(await executeSwap("eoa"));
 
     expect(result.kind).toBe("swap_result");

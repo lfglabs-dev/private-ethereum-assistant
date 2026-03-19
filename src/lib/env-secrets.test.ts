@@ -5,37 +5,77 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createDefaultRuntimeConfig } from "./runtime-config";
 import {
+  getEnvSecretStatus,
   mergeRuntimeConfigWithEnvSecrets,
   saveEnvSecrets,
 } from "./env-secrets";
-import { MacKeychainBackend } from "./backends/macos-keychain";
+import {
+  MacKeychainAccessDeniedError,
+  MacKeychainBackend,
+} from "./backends/macos-keychain";
 
 const mockGetSecret = mock();
 const mockGetSecretBackend = mock();
+const mockListStoredSecretKeys = mock();
 
 mockGetSecretBackend.mockImplementation(() => {
   const backend = new MacKeychainBackend();
   return backend.isAvailable() ? backend : null;
 });
+mockListStoredSecretKeys.mockImplementation(async () => []);
 
 mock.module("./secret-store", () => ({
   getSecret: mockGetSecret,
-  hasSecret: async (key: string) => {
-    const value = await mockGetSecret(key);
-    return value !== null && value !== undefined && value.trim().length > 0;
-  },
+  listStoredSecretKeys: mockListStoredSecretKeys,
   invalidateSecretCache: () => {},
   getSecretBackend: mockGetSecretBackend,
-  SECRET_STORE_KEYS: ["EOA_PRIVATE_KEY", "SAFE_SIGNER_PRIVATE_KEY", "SAFE_API_KEY"],
+  SECRET_STORE_KEYS: [
+    "EOA_PRIVATE_KEY",
+    "SAFE_SIGNER_PRIVATE_KEY",
+    "SAFE_API_KEY",
+    "RAILGUN_MNEMONIC",
+  ],
 }));
 
 describe("env secret helpers", () => {
   afterEach(() => {
     mockGetSecret.mockReset();
     mockGetSecretBackend.mockReset();
+    mockListStoredSecretKeys.mockReset();
     mockGetSecretBackend.mockImplementation(() => {
       const backend = new MacKeychainBackend();
       return backend.isAvailable() ? backend : null;
+    });
+    mockListStoredSecretKeys.mockImplementation(async () => []);
+  });
+
+  test("reports configured secrets from a single listed-key lookup", async () => {
+    mockListStoredSecretKeys.mockResolvedValue([
+      "EOA_PRIVATE_KEY",
+      "RAILGUN_MNEMONIC",
+    ]);
+
+    await expect(getEnvSecretStatus()).resolves.toEqual({
+      eoaPrivateKey: true,
+      safeSignerPrivateKey: false,
+      safeApiKey: false,
+      railgunMnemonic: true,
+      accessDenied: false,
+    });
+    expect(mockGetSecret).not.toHaveBeenCalled();
+  });
+
+  test("treats keychain denial as a non-fatal status response", async () => {
+    mockListStoredSecretKeys.mockRejectedValue(
+      new MacKeychainAccessDeniedError("macOS Keychain", "list"),
+    );
+
+    await expect(getEnvSecretStatus()).resolves.toEqual({
+      eoaPrivateKey: false,
+      safeSignerPrivateKey: false,
+      safeApiKey: false,
+      railgunMnemonic: false,
+      accessDenied: true,
     });
   });
 
@@ -47,6 +87,9 @@ describe("env secret helpers", () => {
       if (key === "SAFE_SIGNER_PRIVATE_KEY") {
         return "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
       }
+      if (key === "RAILGUN_MNEMONIC") {
+        return "test test test test test test test test test test test junk";
+      }
       return null;
     });
 
@@ -57,6 +100,9 @@ describe("env secret helpers", () => {
     );
     expect(runtimeConfig.safe.signerPrivateKey).toBe(
       "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
+    expect(runtimeConfig.railgun.mnemonic).toBe(
+      "test test test test test test test test test test test junk",
     );
   });
 

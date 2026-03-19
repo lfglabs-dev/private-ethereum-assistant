@@ -93,6 +93,32 @@ describe("MacKeychainBackend", () => {
     ]);
   });
 
+  test("parses exported secrets as JSON", async () => {
+    const spawn = spyOn(Bun, "spawn").mockImplementation(() =>
+      createSpawnResult(
+        0,
+        '{"EOA_PRIVATE_KEY":"secret-value","SAFE_API_KEY":"safe-api-key"}',
+      ),
+    );
+    const backend = new MacKeychainBackend(
+      MAC_KEYCHAIN_SERVICE,
+      "/tmp/keychain-helper",
+    );
+
+    await expect(backend.loadAll()).resolves.toEqual({
+      EOA_PRIVATE_KEY: "secret-value",
+      SAFE_API_KEY: "safe-api-key",
+    });
+    expect(spawn).toHaveBeenCalledWith({
+      cmd: ["/tmp/keychain-helper", "export", MAC_KEYCHAIN_SERVICE],
+      cwd: process.cwd(),
+      env: process.env,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  });
+
   test("surfaces denied access distinctly", async () => {
     spyOn(Bun, "spawn").mockImplementation(() =>
       createSpawnResult(2, "", "denied"),

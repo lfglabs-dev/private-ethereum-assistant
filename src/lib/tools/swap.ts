@@ -32,10 +32,17 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { getChainMetadata, type NetworkConfig } from "../ethereum";
 import { resolveTokenMetadata, resolveTokenQuery } from "../token-metadata";
-import { type RuntimeConfig } from "../runtime-config";
+import { createDefaultRuntimeConfig, type RuntimeConfig } from "../runtime-config";
 import { buildTrustWalletTokenPaths } from "../trustwallet-assets";
 import { getSecret } from "../secret-store";
 import { getSafeUiLink, proposeSafeTransactions } from "./safe";
+import {
+  consumeTransferRateLimitSlot,
+  evaluateSessionTransferApproval,
+  recordConfirmedSessionTransfer,
+  type SessionTransferApprovalReason,
+} from "./eoa-session-guard";
+import { signLocalActionId, verifyLocalActionId } from "../signed-action-id";
 
 const SWAP_APP_CODE = "PrivateEthereumAssistant";
 const KNOWN_TOKEN_ALIASES: Record<
@@ -125,6 +132,17 @@ type SwapQuoteSummary = {
   slippageBps: number;
 };
 
+type EoaSwapApprovalState = "not_required" | "pending" | "approved" | "rejected";
+
+type EoaSwapApproval = {
+  required: boolean;
+  state: EoaSwapApprovalState;
+  thresholdAmount?: string;
+  thresholdAssetSymbol?: string;
+  reason?: SessionTransferApprovalReason;
+  cumulativeAmount?: string;
+};
+
 type SwapPlan = {
   type: "swap";
   actor: SwapActor;
@@ -163,6 +181,9 @@ type SwapPlan = {
 type SwapResult = {
   kind: "swap_result";
   status:
+    | "awaiting_confirmation"
+    | "awaiting_local_approval"
+    | "aborted"
     | "executed"
     | "proposed"
     | "manual_action_required"
@@ -177,6 +198,8 @@ type SwapResult = {
     id: number;
     name: string;
   };
+  confirmationId?: string;
+  approval?: EoaSwapApproval;
   plan?: SwapPlan;
   quote?: SwapQuoteSummary;
   execution?: {
@@ -191,6 +214,23 @@ type SwapResult = {
   };
   candidates?: Array<Record<string, unknown>>;
   error?: string;
+};
+
+type PreparedEoaSwap = {
+  internalConfirmationId: string;
+  confirmationId: string;
+  createdAt: number;
+  expiresAt: number;
+  context: SwapChainContext;
+  owner: Address;
+  sellToken: ResolvedSwapToken;
+  buyToken: ResolvedSwapToken;
+  amountAtoms: bigint;
+  requestedSellAmount: string;
+  quote: QuoteResults;
+  quoteSummary: SwapQuoteSummary;
+  approval: EoaSwapApproval;
+  approvalPolicySnapshot: RuntimeConfig["wallet"]["approvalPolicy"];
 };
 
 type SwapToolDependencies = {
@@ -243,6 +283,10 @@ type SwapToolDependencies = {
     requestedSellAmount: string;
   }) => Promise<SwapResult>;
 };
+
+const PREPARED_EOA_SWAP_TTL_MS = 10 * 60 * 1000;
+const SWAP_RATE_LIMIT_WINDOW_MS = 30_000;
+const preparedEoaSwaps = new Map<string, PreparedEoaSwap>();
 
 function getActorChainContext(runtimeConfig: RuntimeConfig): SwapChainContext {
   switch (runtimeConfig.actor.type) {
@@ -446,6 +490,7 @@ function buildQuoteSummary(
   buyToken: ResolvedSwapToken,
 ): SwapQuoteSummary {
   const quotedOrder = quote.quoteResponse.quote;
+  const slippageBps = Math.min(quote.suggestedSlippageBps, 100);
 
   return {
     sellAmount: formatUnits(BigInt(quotedOrder.sellAmount), sellToken.decimals),
@@ -454,8 +499,214 @@ function buildQuoteSummary(
     validTo: quote.quoteResponse.expiration,
     verified: quote.quoteResponse.verified,
     quoteId: quote.quoteResponse.id,
-    slippageBps: quote.suggestedSlippageBps,
+    slippageBps,
   };
+}
+
+function cleanupPreparedEoaSwaps() {
+  const now = Date.now();
+  for (const [id, preparedSwap] of preparedEoaSwaps.entries()) {
+    if (preparedSwap.expiresAt <= now) {
+      preparedEoaSwaps.delete(id);
+    }
+  }
+}
+
+function getSwapSessionAssetKey(token: ResolvedSwapToken) {
+  return token.kind === "native" ? "native" : token.address;
+}
+
+function buildEoaSwapApproval(
+  runtimeConfig: RuntimeConfig,
+  owner: Address,
+  sellToken: ResolvedSwapToken,
+  amountAtoms: bigint,
+): EoaSwapApproval {
+  const thresholdAmount =
+    sellToken.kind === "native"
+      ? runtimeConfig.wallet.approvalPolicy.nativeThreshold
+      : runtimeConfig.wallet.approvalPolicy.erc20Threshold;
+
+  if (!runtimeConfig.wallet.approvalPolicy.enabled) {
+    return {
+      required: false,
+      state: "not_required",
+      thresholdAmount,
+      thresholdAssetSymbol: sellToken.symbol,
+    };
+  }
+
+  const thresholdBaseUnits = parseUnits(thresholdAmount, sellToken.decimals);
+  const sessionApproval = evaluateSessionTransferApproval({
+    sender: owner,
+    chainId: runtimeConfig.network.chainId,
+    assetKey: getSwapSessionAssetKey(sellToken),
+    amountBaseUnits: amountAtoms,
+    thresholdBaseUnits,
+    thresholdAmount,
+    thresholdAssetSymbol: sellToken.symbol,
+    formatAmount: (value) => `${formatUnits(value, sellToken.decimals)} ${sellToken.symbol}`,
+  });
+
+  return {
+    required: sessionApproval.required,
+    state: sessionApproval.required ? "pending" : "not_required",
+    thresholdAmount: sessionApproval.thresholdAmount,
+    thresholdAssetSymbol: sessionApproval.thresholdAssetSymbol,
+    reason: sessionApproval.reason,
+    cumulativeAmount: sessionApproval.cumulativeAmount,
+  };
+}
+
+function buildPreparedEoaSwapResult(
+  preparedSwap: PreparedEoaSwap,
+  overrides?: Partial<Pick<SwapResult, "status" | "message" | "error">>,
+): SwapResult {
+  const status =
+    overrides?.status ??
+    (preparedSwap.approval.required
+      ? preparedSwap.approval.state === "rejected"
+        ? "aborted"
+        : "awaiting_local_approval"
+      : "awaiting_confirmation");
+  const summary = buildExecutionSummary(
+    "eoa",
+    preparedSwap.requestedSellAmount,
+    preparedSwap.sellToken,
+    preparedSwap.buyToken,
+    preparedSwap.context.chain.name,
+  );
+
+  return {
+    kind: "swap_result",
+    status,
+    actor: "eoa",
+    adapter: "cow",
+    summary,
+    message:
+      overrides?.message ??
+      (status === "awaiting_local_approval"
+        ? preparedSwap.approval.reason === "session_cumulative_threshold"
+          ? "Local approval is required because this swap would exceed the cumulative session limit. Approve or reject it on this device."
+          : "Local approval is required on this device before posting the CoW swap."
+        : status === "aborted"
+          ? "Local approval was rejected. The swap was not submitted."
+          : "Swap prepared. Summarize the quote and wait for the user to explicitly confirm before calling execute_swap."),
+    chain: {
+      id: preparedSwap.context.chain.id,
+      name: preparedSwap.context.chain.name,
+    },
+    confirmationId: preparedSwap.confirmationId,
+    approval: preparedSwap.approval,
+    plan: buildPlan({
+      actor: "eoa",
+      context: preparedSwap.context,
+      sellToken: preparedSwap.sellToken,
+      buyToken: preparedSwap.buyToken,
+      requestedSellAmount: preparedSwap.requestedSellAmount,
+      quote: preparedSwap.quoteSummary,
+      executionPath: "eoa_direct",
+      steps: [
+        {
+          key: "quote",
+          label: "Fetch CoW quote",
+          status: "complete",
+          detail: `${preparedSwap.quoteSummary.buyAmount} ${preparedSwap.buyToken.symbol} estimated output.`,
+        },
+        {
+          key: "approval",
+          label: preparedSwap.approval.required
+            ? "Approve locally"
+            : "Wait for chat confirmation",
+          status:
+            status === "aborted"
+              ? "error"
+              : status === "awaiting_local_approval" || status === "awaiting_confirmation"
+                ? "pending"
+                : "complete",
+          detail:
+            preparedSwap.approval.required && preparedSwap.approval.thresholdAmount
+              ? `Threshold ${preparedSwap.approval.thresholdAmount} ${preparedSwap.approval.thresholdAssetSymbol}.`
+              : "Ready after explicit chat confirmation.",
+        },
+        {
+          key: "execution",
+          label: "Post CoW order",
+          status: "pending",
+          detail: "This step runs only after confirmation and any required local approval.",
+        },
+      ],
+    }),
+    quote: preparedSwap.quoteSummary,
+    ...(overrides?.error ? { error: overrides.error } : {}),
+  };
+}
+
+function getPreparedEoaSwapOrError(
+  confirmationId: string,
+): { preparedSwap: PreparedEoaSwap } | { error: SwapResult } {
+  cleanupPreparedEoaSwaps();
+  const internalConfirmationId = verifyLocalActionId(confirmationId, "eoa-swap");
+  const preparedSwap = internalConfirmationId
+    ? preparedEoaSwaps.get(internalConfirmationId)
+    : undefined;
+
+  if (!preparedSwap || preparedSwap.expiresAt <= Date.now()) {
+    return {
+      error: {
+        kind: "swap_result" as const,
+        status: "error" as const,
+        actor: "eoa" as const,
+        adapter: "cow" as const,
+        summary: "Swap preparation expired",
+        message: "The prepared swap expired or was not found. Run prepare_swap again.",
+        chain: {
+          id: 0,
+          name: "Unknown",
+        },
+        error: "The prepared swap expired or was not found. Run prepare_swap again.",
+      },
+    };
+  }
+
+  return { preparedSwap };
+}
+
+function markPreparedEoaSwapApproved(
+  confirmationId: string,
+): PreparedEoaSwap | SwapResult {
+  const lookup = getPreparedEoaSwapOrError(confirmationId);
+  if ("error" in lookup) {
+    return lookup.error;
+  }
+
+  const { preparedSwap } = lookup;
+  if (!preparedSwap.approval.required) {
+    return preparedSwap;
+  }
+
+  if (preparedSwap.approval.state === "rejected") {
+    return buildPreparedEoaSwapResult(preparedSwap, {
+      status: "aborted",
+    });
+  }
+
+  preparedSwap.approval.state = "approved";
+  return preparedSwap;
+}
+
+export function rejectPreparedEoaSwap(confirmationId: string) {
+  const lookup = getPreparedEoaSwapOrError(confirmationId);
+  if ("error" in lookup) {
+    return lookup.error;
+  }
+
+  lookup.preparedSwap.approval.state = lookup.preparedSwap.approval.required
+    ? "rejected"
+    : "not_required";
+  return buildPreparedEoaSwapResult(lookup.preparedSwap, {
+    status: "aborted",
+  });
 }
 
 function buildPlan(args: {
@@ -655,7 +906,7 @@ async function buildSafeEthFlowTransaction(options: {
   );
   const slippageBps =
     limitTradeParameters.slippageBps ??
-    options.quoteResults.result.suggestedSlippageBps;
+    Math.min(options.quoteResults.result.suggestedSlippageBps, 100);
   const adjustedLimitTradeParameters = {
     ...limitTradeParameters,
     slippageBps,
@@ -1111,6 +1362,216 @@ async function executeCowEoaSwap(options: {
   };
 }
 
+async function executePreparedEoaSwapWithExecutor(
+  confirmationId: string,
+  eoaPrivateKey: string,
+  executeEoaSwap: NonNullable<SwapToolDependencies["executeEoaSwap"]>,
+): Promise<SwapResult> {
+  const lookup = getPreparedEoaSwapOrError(confirmationId);
+  if ("error" in lookup) {
+    return lookup.error;
+  }
+
+  const { preparedSwap } = lookup;
+
+  if (preparedSwap.approval.required) {
+    if (preparedSwap.approval.state === "rejected") {
+      return buildPreparedEoaSwapResult(preparedSwap, {
+        status: "aborted",
+      });
+    }
+
+    if (preparedSwap.approval.state !== "approved") {
+      return buildPreparedEoaSwapResult(preparedSwap, {
+        status: "awaiting_local_approval",
+      });
+    }
+  }
+
+  if (!eoaPrivateKey.trim()) {
+    return {
+      kind: "swap_result",
+      status: "error",
+      actor: "eoa",
+      adapter: "cow",
+      summary: "Swap execution needs a signer",
+      message: "Configure an EOA private key before executing this prepared swap.",
+      chain: {
+        id: preparedSwap.context.chain.id,
+        name: preparedSwap.context.chain.name,
+      },
+      error: "Missing EOA signer.",
+    };
+  }
+
+  const signer = privateKeyToAccount(eoaPrivateKey as `0x${string}`);
+  if (signer.address.toLowerCase() !== preparedSwap.owner.toLowerCase()) {
+    return {
+      kind: "swap_result",
+      status: "error",
+      actor: "eoa",
+      adapter: "cow",
+      summary: "Swap signer changed",
+      message:
+        "The configured EOA signer changed after this swap was prepared. Run prepare_swap again.",
+      chain: {
+        id: preparedSwap.context.chain.id,
+        name: preparedSwap.context.chain.name,
+      },
+      error:
+        "The configured EOA signer changed after this swap was prepared. Run prepare_swap again.",
+    };
+  }
+
+  const rateLimit = consumeTransferRateLimitSlot({
+    sender: preparedSwap.owner,
+    chainId: preparedSwap.context.networkConfig.chainId,
+    minimumIntervalMs: SWAP_RATE_LIMIT_WINDOW_MS,
+  });
+  if (!rateLimit.allowed) {
+    return {
+      kind: "swap_result",
+      status: "error",
+      actor: "eoa",
+      adapter: "cow",
+      summary: "Swap rate limit active",
+      message: `Wait ${Math.ceil(
+        rateLimit.retryAfterMs / 1_000,
+      )}s before sending another EOA transaction.`,
+      chain: {
+        id: preparedSwap.context.chain.id,
+        name: preparedSwap.context.chain.name,
+      },
+      error: "EOA transaction rate limit active.",
+    };
+  }
+
+  preparedEoaSwaps.delete(preparedSwap.internalConfirmationId);
+
+  try {
+    const execution = await executeEoaSwap({
+      runtimeConfig: {
+        ...createDefaultRuntimeConfig(),
+        wallet: {
+          ...createDefaultRuntimeConfig().wallet,
+          eoaPrivateKey,
+        },
+      },
+      context: preparedSwap.context,
+      owner: preparedSwap.owner,
+      sellToken: preparedSwap.sellToken,
+      buyToken: preparedSwap.buyToken,
+      amountAtoms: preparedSwap.amountAtoms,
+      quote: preparedSwap.quote,
+    });
+
+    recordConfirmedSessionTransfer({
+      sender: preparedSwap.owner,
+      chainId: preparedSwap.context.networkConfig.chainId,
+      assetKey: getSwapSessionAssetKey(preparedSwap.sellToken),
+      amountBaseUnits: preparedSwap.amountAtoms,
+    });
+
+    const approvalDetail = execution.approvalTxHash
+      ? `Approval tx ${execution.approvalTxHash} was submitted before posting the CoW order.`
+      : "No ERC-20 approval transaction was needed for this swap.";
+
+    return {
+      kind: "swap_result",
+      status: "executed",
+      actor: "eoa",
+      adapter: "cow",
+      summary: buildExecutionSummary(
+        "eoa",
+        preparedSwap.requestedSellAmount,
+        preparedSwap.sellToken,
+        preparedSwap.buyToken,
+        preparedSwap.context.chain.name,
+      ),
+      message: execution.orderId
+        ? "The swap order was signed and submitted to CoW."
+        : "The swap flow completed, but no order ID was returned.",
+      chain: {
+        id: preparedSwap.context.chain.id,
+        name: preparedSwap.context.chain.name,
+      },
+      plan: buildPlan({
+        actor: "eoa",
+        context: preparedSwap.context,
+        sellToken: preparedSwap.sellToken,
+        buyToken: preparedSwap.buyToken,
+        requestedSellAmount: preparedSwap.requestedSellAmount,
+        quote: preparedSwap.quoteSummary,
+        executionPath: "eoa_direct",
+        steps: [
+          {
+            key: "quote",
+            label: "Fetch CoW quote",
+            status: "complete",
+            detail: `${preparedSwap.quoteSummary.buyAmount} ${preparedSwap.buyToken.symbol} estimated output.`,
+          },
+          {
+            key: "approval",
+            label: "Handle token approval",
+            status: "complete",
+            detail: approvalDetail,
+          },
+          {
+            key: "execution",
+            label: "Post CoW order",
+            status: "complete",
+            detail: execution.orderId
+              ? `Order ${execution.orderId} is live in the CoW order book.`
+              : "Swap order posted.",
+          },
+        ],
+      }),
+      quote: preparedSwap.quoteSummary,
+      execution: {
+        orderId: execution.orderId,
+        txHash: execution.txHash,
+        approvalTxHash: execution.approvalTxHash,
+        owner: preparedSwap.owner,
+      },
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : "Could not route the swap through CoW.";
+
+    return {
+      kind: "swap_result",
+      status: "error",
+      actor: "eoa",
+      adapter: "cow",
+      summary: "Swap routing failed",
+      message,
+      chain: {
+        id: preparedSwap.context.chain.id,
+        name: preparedSwap.context.chain.name,
+      },
+      error: message,
+    };
+  }
+}
+
+export async function approveAndExecutePreparedEoaSwap(
+  confirmationId: string,
+  eoaPrivateKey: string,
+) {
+  const approved = markPreparedEoaSwapApproved(confirmationId);
+  if ("kind" in approved) {
+    return approved;
+  }
+
+  return executePreparedEoaSwapWithExecutor(
+    confirmationId,
+    eoaPrivateKey,
+    executeCowEoaSwap,
+  );
+}
+
 function buildExecutionSummary(
   actor: SwapActor,
   amount: string,
@@ -1139,19 +1600,35 @@ export function createSwapTools(
   const executeEoaSwap = dependencies.executeEoaSwap ?? executeCowEoaSwap;
   const executeSafeSwap = dependencies.executeSafeSwap ?? executeCowSafeSwap;
 
-  const swapTokens = tool({
-    description:
-      "Plan and execute a CoW-backed swap behind one mode-aware abstraction. Use this for prompts like 'Swap 1 ETH for USDC'. The tool resolves tokens, fetches a CoW quote, then executes differently for EOA, Safe, and Private mode.",
-    inputSchema: swapInputSchema,
-    execute: async ({ sellToken, buyToken, amount }): Promise<SwapResult> => {
-      const context = getActorChainContext(runtimeConfig);
+  async function resolveSwapRequest({
+    sellToken,
+    buyToken,
+    amount,
+  }: z.infer<typeof swapInputSchema>): Promise<
+    | {
+        error: SwapResult;
+      }
+    | {
+        context: SwapChainContext;
+        owner: Address;
+        amountAtoms: bigint;
+        sellToken: ResolvedSwapToken;
+        buyToken: ResolvedSwapToken;
+        quoteResults: QuoteResults;
+        quote: SwapQuoteSummary;
+        summary: string;
+        requestedSellAmount: string;
+      }
+  > {
+    const context = getActorChainContext(runtimeConfig);
 
-      if (!isSupportedChain(context.networkConfig.chainId)) {
-        return {
-          kind: "swap_result",
-          status: "error",
+    if (!isSupportedChain(context.networkConfig.chainId)) {
+      return {
+        error: {
+          kind: "swap_result" as const,
+          status: "error" as const,
           actor: context.actor,
-          adapter: "cow",
+          adapter: "cow" as const,
           summary: "Swap routing unavailable",
           message: `CoW swap support is not available on chain ID ${context.networkConfig.chainId}.`,
           chain: {
@@ -1159,29 +1636,31 @@ export function createSwapTools(
             name: context.chain.name,
           },
           error: `Unsupported CoW chain ${context.networkConfig.chainId}.`,
-        };
-      }
+        },
+      };
+    }
 
-      const publicClient = createActorPublicClient(context.networkConfig);
-      const [resolvedSellToken, resolvedBuyToken] = await Promise.all([
-        resolveToken({
-          query: sellToken,
-          context,
-          publicClient,
-        }),
-        resolveToken({
-          query: buyToken,
-          context,
-          publicClient,
-        }),
-      ]);
+    const publicClient = createActorPublicClient(context.networkConfig);
+    const [resolvedSellToken, resolvedBuyToken] = await Promise.all([
+      resolveToken({
+        query: sellToken,
+        context,
+        publicClient,
+      }),
+      resolveToken({
+        query: buyToken,
+        context,
+        publicClient,
+      }),
+    ]);
 
-      if (resolvedSellToken.status !== "resolved") {
-        return {
-          kind: "swap_result",
+    if (resolvedSellToken.status !== "resolved") {
+      return {
+        error: {
+          kind: "swap_result" as const,
           status: resolvedSellToken.status,
           actor: context.actor,
-          adapter: "cow",
+          adapter: "cow" as const,
           summary: "Need a clearer sell token",
           message: resolvedSellToken.message,
           chain: {
@@ -1190,15 +1669,17 @@ export function createSwapTools(
           },
           candidates: resolvedSellToken.candidates,
           error: resolvedSellToken.status === "error" ? resolvedSellToken.message : undefined,
-        };
-      }
+        },
+      };
+    }
 
-      if (resolvedBuyToken.status !== "resolved") {
-        return {
-          kind: "swap_result",
+    if (resolvedBuyToken.status !== "resolved") {
+      return {
+        error: {
+          kind: "swap_result" as const,
           status: resolvedBuyToken.status,
           actor: context.actor,
-          adapter: "cow",
+          adapter: "cow" as const,
           summary: "Need a clearer buy token",
           message: resolvedBuyToken.message,
           chain: {
@@ -1207,34 +1688,39 @@ export function createSwapTools(
           },
           candidates: resolvedBuyToken.candidates,
           error: resolvedBuyToken.status === "error" ? resolvedBuyToken.message : undefined,
-        };
-      }
+        },
+      };
+    }
 
-      if (resolvedSellToken.token.address === resolvedBuyToken.token.address) {
-        return {
-          kind: "swap_result",
-          status: "error",
+    if (resolvedSellToken.token.address === resolvedBuyToken.token.address) {
+      return {
+        error: {
+          kind: "swap_result" as const,
+          status: "error" as const,
           actor: context.actor,
-          adapter: "cow",
+          adapter: "cow" as const,
           summary: "Swap routing failed",
-          message: "Sell token and buy token resolved to the same asset. Choose two different assets.",
+          message:
+            "Sell token and buy token resolved to the same asset. Choose two different assets.",
           chain: {
             id: context.chain.id,
             name: context.chain.name,
           },
           error: "Sell token and buy token must differ.",
-        };
-      }
+        },
+      };
+    }
 
-      let amountAtoms: bigint;
-      try {
-        amountAtoms = parseUnits(amount, resolvedSellToken.token.decimals);
-      } catch {
-        return {
-          kind: "swap_result",
-          status: "error",
+    let amountAtoms: bigint;
+    try {
+      amountAtoms = parseUnits(amount, resolvedSellToken.token.decimals);
+    } catch {
+      return {
+        error: {
+          kind: "swap_result" as const,
+          status: "error" as const,
           actor: context.actor,
-          adapter: "cow",
+          adapter: "cow" as const,
           summary: "Swap routing failed",
           message: `Could not parse ${amount} ${resolvedSellToken.token.symbol}.`,
           chain: {
@@ -1242,15 +1728,17 @@ export function createSwapTools(
             name: context.chain.name,
           },
           error: `Invalid amount ${amount}.`,
-        };
-      }
+        },
+      };
+    }
 
-      if (amountAtoms <= 0n) {
-        return {
-          kind: "swap_result",
-          status: "error",
+    if (amountAtoms <= 0n) {
+      return {
+        error: {
+          kind: "swap_result" as const,
+          status: "error" as const,
           actor: context.actor,
-          adapter: "cow",
+          adapter: "cow" as const,
           summary: "Swap routing failed",
           message: "Swap amount must be greater than zero.",
           chain: {
@@ -1258,16 +1746,18 @@ export function createSwapTools(
             name: context.chain.name,
           },
           error: "Amount must be greater than zero.",
-        };
-      }
+        },
+      };
+    }
 
-      const owner = getOwnerAddress(runtimeConfig, context.actor);
-      if (!owner) {
-        return {
-          kind: "swap_result",
-          status: "error",
+    const owner = getOwnerAddress(runtimeConfig, context.actor);
+    if (!owner) {
+      return {
+        error: {
+          kind: "swap_result" as const,
+          status: "error" as const,
           actor: context.actor,
-          adapter: "cow",
+          adapter: "cow" as const,
           summary: "Swap execution needs a signer",
           message: "Configure an EOA private key before using the EOA or Railgun swap path.",
           chain: {
@@ -1275,57 +1765,183 @@ export function createSwapTools(
             name: context.chain.name,
           },
           error: "Missing EOA signer.",
+        },
+      };
+    }
+
+    const quoteResults = await getQuoteOnly(context.actor, {
+      networkConfig: context.networkConfig,
+      chainId: context.networkConfig.chainId as SupportedChainId,
+      owner,
+      sellToken: resolvedSellToken.token,
+      buyToken: resolvedBuyToken.token,
+      amountAtoms,
+    });
+
+    return {
+      context,
+      owner,
+      amountAtoms,
+      sellToken: resolvedSellToken.token,
+      buyToken: resolvedBuyToken.token,
+      quoteResults,
+      quote: buildQuoteSummary(
+        quoteResults,
+        resolvedSellToken.token,
+        resolvedBuyToken.token,
+      ),
+      summary: buildExecutionSummary(
+        context.actor,
+        amount,
+        resolvedSellToken.token,
+        resolvedBuyToken.token,
+        context.chain.name,
+      ),
+      requestedSellAmount: amount,
+    };
+  }
+
+  async function prepareEoaSwapResult(
+    input: z.infer<typeof swapInputSchema>,
+  ): Promise<SwapResult> {
+    cleanupPreparedEoaSwaps();
+
+    try {
+      const resolved = await resolveSwapRequest(input);
+      if ("error" in resolved) {
+        return resolved.error;
+      }
+
+      if (resolved.context.actor !== "eoa") {
+        return {
+          kind: "swap_result",
+          status: "error",
+          actor: resolved.context.actor,
+          adapter: "cow",
+          summary: "Swap preparation unavailable",
+          message: "prepare_swap is only available in EOA mode.",
+          chain: {
+            id: resolved.context.chain.id,
+            name: resolved.context.chain.name,
+          },
+          error: 'Tool "prepare_swap" is only available in EOA mode.',
         };
       }
 
-      try {
-        const quoteResults = await getQuoteOnly(context.actor, {
-          networkConfig: context.networkConfig,
-          chainId: context.networkConfig.chainId as SupportedChainId,
-          owner,
-          sellToken: resolvedSellToken.token,
-          buyToken: resolvedBuyToken.token,
-          amountAtoms,
-        });
-        const quote = buildQuoteSummary(
-          quoteResults,
-          resolvedSellToken.token,
-          resolvedBuyToken.token,
-        );
-        const summary = buildExecutionSummary(
-          context.actor,
-          amount,
-          resolvedSellToken.token,
-          resolvedBuyToken.token,
-          context.chain.name,
-        );
+      const preparedSwap: PreparedEoaSwap = {
+        internalConfirmationId: crypto.randomUUID(),
+        confirmationId: "",
+        createdAt: Date.now(),
+        expiresAt: Date.now() + PREPARED_EOA_SWAP_TTL_MS,
+        context: resolved.context,
+        owner: resolved.owner,
+        sellToken: resolved.sellToken,
+        buyToken: resolved.buyToken,
+        amountAtoms: resolved.amountAtoms,
+        requestedSellAmount: resolved.requestedSellAmount,
+        quote: resolved.quoteResults,
+        quoteSummary: resolved.quote,
+        approval: buildEoaSwapApproval(
+          runtimeConfig,
+          resolved.owner,
+          resolved.sellToken,
+          resolved.amountAtoms,
+        ),
+        approvalPolicySnapshot: runtimeConfig.wallet.approvalPolicy,
+      };
 
-        if (context.actor === "safe") {
+      preparedSwap.confirmationId = signLocalActionId(
+        preparedSwap.internalConfirmationId,
+        "eoa-swap",
+      );
+      preparedEoaSwaps.set(preparedSwap.internalConfirmationId, preparedSwap);
+
+      return buildPreparedEoaSwapResult(preparedSwap);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "Could not route the swap through CoW.";
+      const fallbackContext = getActorChainContext(runtimeConfig);
+
+      return {
+        kind: "swap_result",
+        status: "error",
+        actor: "eoa",
+        adapter: "cow",
+        summary: "Swap routing failed",
+        message,
+        chain: {
+          id: fallbackContext.chain.id,
+          name: fallbackContext.chain.name,
+        },
+        error: message,
+      };
+    }
+  }
+
+  const prepareSwap = tool({
+    description:
+      "Prepare an EOA CoW swap. Always call this first in EOA mode so you can show the quote, check local approval requirements, and ask for explicit confirmation before execution.",
+    inputSchema: swapInputSchema,
+    execute: async ({ sellToken, buyToken, amount }): Promise<SwapResult> =>
+      prepareEoaSwapResult({ sellToken, buyToken, amount }),
+  });
+
+  const executeSwap = tool({
+    description:
+      "Execute a previously prepared EOA swap. Only call this after the user explicitly confirms the prepared quote.",
+    inputSchema: z.object({
+      confirmationId: z
+        .string()
+        .describe("The confirmationId returned by prepare_swap for the exact swap the user approved."),
+    }),
+    execute: async ({ confirmationId }): Promise<SwapResult> => {
+      return executePreparedEoaSwapWithExecutor(
+        confirmationId,
+        runtimeConfig.wallet.eoaPrivateKey,
+        executeEoaSwap,
+      );
+    },
+  });
+
+  const swapTokens = tool({
+    description:
+      "Plan and execute a CoW-backed swap behind one mode-aware abstraction. Use this for prompts like 'Swap 1 ETH for USDC'. The tool resolves tokens, fetches a CoW quote, then executes differently for EOA, Safe, and Private mode.",
+    inputSchema: swapInputSchema,
+    execute: async ({ sellToken, buyToken, amount }): Promise<SwapResult> => {
+      try {
+        const resolved = await resolveSwapRequest({ sellToken, buyToken, amount });
+        if ("error" in resolved) {
+          return resolved.error;
+        }
+
+        if (resolved.context.actor === "safe") {
           return executeSafeSwap({
             runtimeConfig,
-            context,
-            owner,
-            sellToken: resolvedSellToken.token,
-            buyToken: resolvedBuyToken.token,
-            amountAtoms,
-            requestedSellAmount: amount,
+            context: resolved.context,
+            owner: resolved.owner,
+            sellToken: resolved.sellToken,
+            buyToken: resolved.buyToken,
+            amountAtoms: resolved.amountAtoms,
+            requestedSellAmount: resolved.requestedSellAmount,
           });
         }
 
-        if (context.actor === "railgun") {
+        if (resolved.context.actor === "railgun") {
           const plan = buildPlan({
-            actor: context.actor,
-            context,
-            sellToken: resolvedSellToken.token,
-            buyToken: resolvedBuyToken.token,
-            requestedSellAmount: amount,
-            quote,
+            actor: resolved.context.actor,
+            context: resolved.context,
+            sellToken: resolved.sellToken,
+            buyToken: resolved.buyToken,
+            requestedSellAmount: resolved.requestedSellAmount,
+            quote: resolved.quote,
             steps: [
               {
                 key: "quote",
                 label: "Fetch CoW quote",
                 status: "complete",
-                detail: `${quote.buyAmount} ${resolvedBuyToken.token.symbol} estimated output.`,
+                detail: `${resolved.quote.buyAmount} ${resolved.buyToken.symbol} estimated output.`,
               },
               {
                 key: "private-routing",
@@ -1340,85 +1956,21 @@ export function createSwapTools(
           return {
             kind: "swap_result",
             status: "unsupported",
-            actor: context.actor,
+            actor: resolved.context.actor,
             adapter: "cow",
-            summary,
+            summary: resolved.summary,
             message:
               "Private Railgun swap execution is not supported yet. The quote below is a public CoW route; switch to EOA mode to execute it.",
             chain: {
-              id: context.chain.id,
-              name: context.chain.name,
+              id: resolved.context.chain.id,
+              name: resolved.context.chain.name,
             },
             plan,
-            quote,
+            quote: resolved.quote,
           };
         }
 
-        const execution = await executeEoaSwap({
-          runtimeConfig,
-          context,
-          owner,
-          sellToken: resolvedSellToken.token,
-          buyToken: resolvedBuyToken.token,
-          amountAtoms,
-          quote: quoteResults,
-        });
-        const approvalDetail = execution.approvalTxHash
-          ? `Approval tx ${execution.approvalTxHash} was submitted before posting the CoW order.`
-          : "No ERC-20 approval transaction was needed for this swap.";
-        const plan = buildPlan({
-          actor: context.actor,
-          context,
-          sellToken: resolvedSellToken.token,
-          buyToken: resolvedBuyToken.token,
-          requestedSellAmount: amount,
-          quote,
-          steps: [
-            {
-              key: "quote",
-              label: "Fetch CoW quote",
-              status: "complete",
-              detail: `${quote.buyAmount} ${resolvedBuyToken.token.symbol} estimated output.`,
-            },
-            {
-              key: "approval",
-              label: "Handle token approval",
-              status: "complete",
-              detail: approvalDetail,
-            },
-            {
-              key: "execution",
-              label: "Post CoW order",
-              status: "complete",
-              detail: execution.orderId
-                ? `Order ${execution.orderId} is live in the CoW order book.`
-                : "Swap order posted.",
-            },
-          ],
-        });
-
-        return {
-          kind: "swap_result",
-          status: "executed",
-          actor: context.actor,
-          adapter: "cow",
-          summary,
-          message: execution.orderId
-            ? "The swap order was signed and submitted to CoW."
-            : "The swap flow completed, but no order ID was returned.",
-          chain: {
-            id: context.chain.id,
-            name: context.chain.name,
-          },
-          plan,
-          quote,
-          execution: {
-            orderId: execution.orderId,
-            txHash: execution.txHash,
-            approvalTxHash: execution.approvalTxHash,
-            owner,
-          },
-        };
+        return prepareEoaSwapResult({ sellToken, buyToken, amount });
       } catch (error) {
         const message =
           error instanceof Error && error.message.trim()
@@ -1428,13 +1980,13 @@ export function createSwapTools(
         return {
           kind: "swap_result",
           status: "error",
-          actor: context.actor,
+          actor: getActorChainContext(runtimeConfig).actor,
           adapter: "cow",
           summary: "Swap routing failed",
           message,
           chain: {
-            id: context.chain.id,
-            name: context.chain.name,
+            id: getActorChainContext(runtimeConfig).chain.id,
+            name: getActorChainContext(runtimeConfig).chain.name,
           },
           error: message,
         };
@@ -1443,6 +1995,8 @@ export function createSwapTools(
   });
 
   return {
+    prepareSwap,
+    executeSwap,
     swapTokens,
   };
 }

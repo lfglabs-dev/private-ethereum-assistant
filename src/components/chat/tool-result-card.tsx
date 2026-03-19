@@ -24,13 +24,11 @@ import {
   ActionStepList,
 } from "@/components/ui/action-result"
 import { TokenAvatar } from "@/components/ui/token-avatar"
-import type { RuntimeConfig } from "@/lib/runtime-config"
 import { cn } from "@/lib/utils"
 
 type ToolResultCardProps = {
   result: unknown
   preliminary?: boolean
-  runtimeConfig?: RuntimeConfig
 }
 
 function formatAgeMs(value: unknown) {
@@ -77,6 +75,8 @@ type TransactionPreviewData = {
     state: "not_required" | "pending" | "approved" | "rejected"
     thresholdAmount?: string
     thresholdAssetSymbol?: string
+    reason?: "single_transfer_threshold" | "session_cumulative_threshold"
+    cumulativeAmount?: string
     summary: {
       recipient: string
       asset: string
@@ -133,6 +133,41 @@ type TransactionProgressData = {
     gasCostNative?: string
   }
   revertReason?: string
+  error?: string
+}
+
+type SwapResultData = {
+  kind: "swap_result"
+  status:
+    | "awaiting_confirmation"
+    | "awaiting_local_approval"
+    | "aborted"
+    | "executed"
+    | "proposed"
+    | "manual_action_required"
+    | "unsupported"
+    | "input_required"
+    | "error"
+  actor: string
+  summary: string
+  message: string
+  confirmationId?: string
+  approval?: {
+    required: boolean
+    state: "not_required" | "pending" | "approved" | "rejected"
+    thresholdAmount?: string
+    thresholdAssetSymbol?: string
+    reason?: "single_transfer_threshold" | "session_cumulative_threshold"
+    cumulativeAmount?: string
+  }
+  chain?: {
+    id?: number
+    name?: string
+  }
+  quote?: Record<string, unknown>
+  plan?: Record<string, unknown>
+  execution?: Record<string, unknown>
+  candidates?: unknown[]
   error?: string
 }
 
@@ -838,6 +873,11 @@ function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
             Local approval threshold: {data.approval.thresholdAmount} {data.approval.thresholdAssetSymbol}
           </p>
         ) : null}
+        {data.approval?.reason === "session_cumulative_threshold" && data.approval.cumulativeAmount ? (
+          <p className="text-xs text-muted-foreground">
+            Cumulative session amount: {data.approval.cumulativeAmount}
+          </p>
+        ) : null}
         <p className={isAborted ? "text-sm text-destructive" : "text-sm text-muted-foreground"}>
           {data.message}
         </p>
@@ -1460,7 +1500,7 @@ function RailgunApprovalResult({ data }: { data: Record<string, unknown> }) {
   )
 }
 
-function SwapResultCard({ data }: { data: Record<string, unknown> }) {
+function SwapResultCard({ data }: { data: SwapResultData }) {
   const status = String(data.status ?? "")
   const actor = String(data.actor ?? "").toUpperCase()
   const summary = String(data.summary ?? "Swap")
@@ -1516,6 +1556,10 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
   const accentClass =
     status === "executed"
       ? "border-emerald-500/20 bg-emerald-500/5"
+      : status === "awaiting_local_approval"
+        ? "border-orange-500/20 bg-orange-500/5"
+      : status === "awaiting_confirmation"
+        ? "border-amber-500/20 bg-amber-500/5"
       : status === "proposed"
         ? "border-amber-500/20 bg-amber-500/5"
       : status === "manual_action_required"
@@ -1526,6 +1570,8 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
   const badgeVariant =
     status === "executed"
       ? "secondary"
+      : status === "awaiting_local_approval" || status === "awaiting_confirmation"
+        ? "outline"
       : status === "proposed"
         ? "secondary"
       : status === "manual_action_required"
@@ -1553,6 +1599,17 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p className="text-muted-foreground">{message}</p>
+
+        {data.approval?.required && data.approval.thresholdAmount && data.approval.thresholdAssetSymbol ? (
+          <p className="text-xs text-muted-foreground">
+            Local approval threshold: {data.approval.thresholdAmount} {data.approval.thresholdAssetSymbol}
+          </p>
+        ) : null}
+        {data.approval?.reason === "session_cumulative_threshold" && data.approval.cumulativeAmount ? (
+          <p className="text-xs text-muted-foreground">
+            Cumulative session amount: {data.approval.cumulativeAmount}
+          </p>
+        ) : null}
 
         {sellToken && buyToken ? (
           <div className="grid gap-3">
@@ -1655,7 +1712,7 @@ function SwapResultCard({ data }: { data: Record<string, unknown> }) {
   )
 }
 
-export function ToolResultCard({ result, preliminary, runtimeConfig }: ToolResultCardProps) {
+export function ToolResultCard({ result, preliminary }: ToolResultCardProps) {
   const [liveResult, setLiveResult] = useState(result)
   const [pendingAction, setPendingAction] = useState<"approve" | "reject" | null>(null)
   const [isLocalOverride, setIsLocalOverride] = useState(false)
@@ -1688,7 +1745,6 @@ export function ToolResultCard({ result, preliminary, runtimeConfig }: ToolResul
         body: JSON.stringify({
           action,
           confirmationId: preview.confirmationId,
-          runtimeConfig,
         }),
       })
 
@@ -1715,6 +1771,60 @@ export function ToolResultCard({ result, preliminary, runtimeConfig }: ToolResul
           preview,
         ),
       )
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  const handleLocalSwapApproval = async (
+    swap: SwapResultData,
+    action: "approve" | "reject",
+  ) => {
+    if (!swap.confirmationId || pendingAction) {
+      return
+    }
+
+    setPendingAction(action)
+    setIsLocalOverride(true)
+    try {
+      const response = await fetch("/api/eoa-swap-approval", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action,
+          confirmationId: swap.confirmationId,
+        }),
+      })
+
+      const payload = await readJsonResponse(response)
+      if (!response.ok) {
+        const message =
+          typeof payload?.error === "string"
+            ? payload.error
+            : "Local approval failed."
+        setLiveResult({
+          ...swap,
+          kind: "swap_result",
+          status: "error",
+          message,
+          error: message,
+        } satisfies SwapResultData)
+        return
+      }
+
+      setLiveResult(payload)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Local approval failed."
+      setLiveResult({
+        ...swap,
+        kind: "swap_result",
+        status: "error",
+        message,
+        error: message,
+      } satisfies SwapResultData)
     } finally {
       setPendingAction(null)
     }
@@ -1769,7 +1879,41 @@ export function ToolResultCard({ result, preliminary, runtimeConfig }: ToolResul
     return <TransactionErrorResult data={data as unknown as TransactionErrorData} />
   }
   if ("kind" in data && data.kind === "swap_result") {
-    return <SwapResultCard data={data} />
+    const swapData = data as unknown as SwapResultData
+    const canApproveLocally =
+      swapData.status === "awaiting_local_approval" &&
+      swapData.approval?.required === true &&
+      swapData.approval.state !== "rejected" &&
+      Boolean(swapData.confirmationId)
+
+    return (
+      <div className="space-y-3">
+        <SwapResultCard data={swapData} />
+        {canApproveLocally ? (
+          <div className="flex gap-2">
+            <Button
+              data-testid="local-swap-approval-approve"
+              size="sm"
+              onClick={() => handleLocalSwapApproval(swapData, "approve")}
+              disabled={pendingAction !== null}
+            >
+              {pendingAction === "approve" ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              Approve and swap
+            </Button>
+            <Button
+              data-testid="local-swap-approval-reject"
+              size="sm"
+              variant="outline"
+              onClick={() => handleLocalSwapApproval(swapData, "reject")}
+              disabled={pendingAction !== null}
+            >
+              {pendingAction === "reject" ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              Reject
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    )
   }
   if ("nativeBalance" in data && "tokens" in data) return <BalanceResult data={data} />
   if (data.railgun === true) return <RailgunResult data={data} />

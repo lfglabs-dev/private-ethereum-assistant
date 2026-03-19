@@ -7,7 +7,7 @@ import {
 } from "ai";
 import type { TextStreamPart } from "ai";
 import { networkConfigSchema, DEFAULT_NETWORK_CONFIG } from "@/lib/ethereum";
-import { mergeRuntimeConfigWithEnvSecrets, mergeDeveloperRuntimeConfig } from "@/lib/env-secrets";
+import { mergeDeveloperRuntimeConfig } from "@/lib/env-secrets";
 import { getSystemPrompt } from "@/lib/system-prompt";
 import { createTools } from "@/lib/tools";
 import { createRuntimeModel } from "@/lib/llm";
@@ -23,6 +23,11 @@ import {
   getProviderLabel,
   runtimeConfigSchema,
 } from "@/lib/runtime-config";
+import {
+  createForbiddenLocalRequestResponse,
+  validateTrustedLocalRequest,
+} from "@/lib/local-request-auth";
+import { createStandardRuntimeConfig } from "@/lib/server-runtime-config";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
@@ -99,6 +104,11 @@ function getLastUserMessageText(messages: unknown) {
 }
 
 export async function POST(req: Request) {
+  const trustedRequest = validateTrustedLocalRequest(req);
+  if (!trustedRequest.ok) {
+    return createForbiddenLocalRequestResponse(trustedRequest.error);
+  }
+
   try {
     const appMode = getAppMode();
     const { messages, networkConfig, runtimeConfig } = await req.json();
@@ -143,10 +153,18 @@ export async function POST(req: Request) {
         selectedNetworkConfig,
       );
     } else {
-      if (networkConfig != null && !parsedNetworkConfig.success) {
+      try {
+        const resolved = await createStandardRuntimeConfig({
+          requestedNetworkConfig: networkConfig,
+          requestedRuntimeConfig: runtimeConfig,
+        });
+        selectedNetworkConfig = resolved.selectedNetworkConfig;
+        selectedRuntimeConfig = resolved.selectedRuntimeConfig;
+      } catch (error) {
         return new Response(
           JSON.stringify({
-            error: "Invalid network config. Provide a valid RPC_URL and CHAIN_ID.",
+            error:
+              error instanceof Error ? error.message : "Invalid standard-mode runtime config.",
           }),
           {
             status: 400,
@@ -154,26 +172,6 @@ export async function POST(req: Request) {
           }
         );
       }
-
-      if (!parsedRuntimeConfig.success) {
-        return new Response(
-          JSON.stringify({
-            error: parsedRuntimeConfig.error.issues[0]?.message ?? "Invalid runtime config.",
-          }),
-          {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
-
-      selectedNetworkConfig = parsedNetworkConfig.success
-        ? parsedNetworkConfig.data
-        : DEFAULT_NETWORK_CONFIG;
-      selectedRuntimeConfig = await mergeRuntimeConfigWithEnvSecrets({
-        ...parsedRuntimeConfig.data,
-        network: selectedNetworkConfig,
-      });
     }
 
     const lastUserMessageText = getLastUserMessageText(messages);

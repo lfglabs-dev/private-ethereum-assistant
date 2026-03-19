@@ -17,6 +17,7 @@ const ENS_MAINNET_FALLBACK_RPC_URLS = [
 ] as const;
 const ENS_REGISTRY_ADDRESS =
   "0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e" as const;
+const ENS_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const ensRegistryAbi = [
   {
@@ -134,8 +135,14 @@ function getErrorMessage(error: unknown) {
 }
 
 export function createEnsService(client: EnsClient = mainnetEnsClient) {
-  const forwardCache = new Map<string, Promise<CachedForwardResolution>>();
-  const reverseCache = new Map<string, Promise<CachedReverseResolution>>();
+  const forwardCache = new Map<
+    string,
+    { expiresAt: number; resolution: Promise<CachedForwardResolution> }
+  >();
+  const reverseCache = new Map<
+    string,
+    { expiresAt: number; resolution: Promise<CachedReverseResolution> }
+  >();
 
   async function resolveExactRegistryRecord(name: string) {
     const node = namehash(name);
@@ -219,13 +226,16 @@ export function createEnsService(client: EnsClient = mainnetEnsClient) {
     try {
       const normalizedName = normalize(rawName);
 
-      let resolution = forwardCache.get(normalizedName);
-      if (!resolution) {
-        resolution = resolveNameUncached(normalizedName);
-        forwardCache.set(normalizedName, resolution);
+      let cachedResolution = forwardCache.get(normalizedName);
+      if (!cachedResolution || cachedResolution.expiresAt <= Date.now()) {
+        cachedResolution = {
+          expiresAt: Date.now() + ENS_CACHE_TTL_MS,
+          resolution: resolveNameUncached(normalizedName),
+        };
+        forwardCache.set(normalizedName, cachedResolution);
       }
 
-      const result = await resolution;
+      const result = await cachedResolution.resolution;
       return {
         name: rawName,
         normalizedName: result.normalizedName,
@@ -315,13 +325,16 @@ export function createEnsService(client: EnsClient = mainnetEnsClient) {
     try {
       const address = getAddress(inputAddress);
 
-      let resolution = reverseCache.get(address);
-      if (!resolution) {
-        resolution = reverseResolveUncached(address);
-        reverseCache.set(address, resolution);
+      let cachedResolution = reverseCache.get(address);
+      if (!cachedResolution || cachedResolution.expiresAt <= Date.now()) {
+        cachedResolution = {
+          expiresAt: Date.now() + ENS_CACHE_TTL_MS,
+          resolution: reverseResolveUncached(address),
+        };
+        reverseCache.set(address, cachedResolution);
       }
 
-      return await resolution;
+      return await cachedResolution.resolution;
     } catch (error) {
       return {
         address: zeroAddress,

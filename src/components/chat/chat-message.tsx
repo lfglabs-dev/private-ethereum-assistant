@@ -13,7 +13,6 @@ import { MessageActions } from "@/components/chat/message-actions"
 import { ModeSwitchCard } from "@/components/chat/mode-switch-card"
 import type { DebugLogEntry, AssistantUIMessage } from "@/lib/chat-stream"
 import type { ModeSwitchRequiredResult } from "@/lib/mode"
-import type { RuntimeConfig } from "@/lib/runtime-config"
 
 type Part = { type: string; [key: string]: unknown }
 
@@ -61,6 +60,10 @@ function getToolLabel(toolName: string): string {
       return "Generating Railgun unshield proof"
     case "swap_tokens":
       return "Planning mode-aware CoW swap"
+    case "prepare_swap":
+      return "Preparing EOA CoW swap"
+    case "execute_swap":
+      return "Executing prepared EOA swap"
     default:
       return `Running ${toolName}`
   }
@@ -73,7 +76,6 @@ interface ChatMessageProps {
   showTrace?: boolean
   canToggleTrace?: boolean
   onToggleTrace?: () => void
-  runtimeConfig?: RuntimeConfig
   onConfirmModeSwitch?: (request: ModeSwitchRequiredResult) => void | Promise<void>
   pendingModeSwitchKey?: string | null
 }
@@ -85,7 +87,6 @@ export function ChatMessage({
   showTrace = false,
   canToggleTrace = false,
   onToggleTrace,
-  runtimeConfig,
   onConfirmModeSwitch,
   pendingModeSwitchKey = null,
 }: ChatMessageProps) {
@@ -174,11 +175,7 @@ export function ChatMessage({
                     transition={{ duration: 0.2 }}
                   >
                     {toolInfo.state === "output-available" ? (
-                      <ToolResultCard
-                        result={toolInfo.output}
-                        preliminary={toolInfo.preliminary}
-                        runtimeConfig={runtimeConfig}
-                      />
+                      <ToolResultCard result={toolInfo.output} preliminary={toolInfo.preliminary} />
                     ) : toolInfo.state === "output-error" ? (
                       <ToolResultCard
                         result={{
@@ -187,7 +184,6 @@ export function ChatMessage({
                           error: toolInfo.errorText || "Tool execution failed.",
                           toolName: toolInfo.toolName,
                         }}
-                        runtimeConfig={runtimeConfig}
                       />
                     ) : (
                       <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">
