@@ -2,6 +2,7 @@ import { describe, expect, mock, test } from "bun:test";
 import {
   applyLegacyRuntimeConfigDefaults,
   createDefaultRuntimeConfig,
+  createDeveloperDisplayRuntimeConfig,
   createRuntimeConfigDraft,
   getActiveModel,
   parseRuntimeConfigDraft,
@@ -20,14 +21,19 @@ mock.module("./secret-store", () => ({
   },
   invalidateSecretCache: () => {},
   getSecretBackend: () => null,
-  SECRET_STORE_KEYS: ["EOA_PRIVATE_KEY", "SAFE_SIGNER_PRIVATE_KEY", "SAFE_API_KEY"],
+  SECRET_STORE_KEYS: [
+    "EOA_PRIVATE_KEY",
+    "SAFE_SIGNER_PRIVATE_KEY",
+    "SAFE_API_KEY",
+    "RAILGUN_MNEMONIC",
+  ],
 }));
 
 describe("runtime-config helpers", () => {
   test("keeps onboarding defaults unvalidated until save time", () => {
     const defaults = createDefaultRuntimeConfig();
 
-    expect(defaults.llm.provider).toBe("openrouter");
+    expect(defaults.llm.provider).toBe("local");
     expect(defaults.wallet.eoaPrivateKey).toBe("");
     expect(defaults.safe.signerPrivateKey).toBe("");
     expect(defaults.actor.type).toBe("eoa");
@@ -51,13 +57,11 @@ describe("runtime-config helpers", () => {
     expect(getActiveModel(runtimeConfig)).toBe("qwen/qwen3.5-27b");
   });
 
-  test("standard mode requires an explicit Railgun mnemonic", () => {
+  test("standard mode accepts a secret-free stored runtime config", () => {
     const draft = createRuntimeConfigDraft(createDefaultRuntimeConfig());
     draft.railgun.mnemonic = "";
 
-    expect(() => validateRuntimeConfigDraftForAppMode(draft, "standard")).toThrow(
-      "Generate or import a Railgun mnemonic before continuing. If you lose it, you can lose access to shielded Railgun funds.",
-    );
+    expect(() => validateRuntimeConfigDraftForAppMode(draft, "standard")).not.toThrow();
   });
 
   test("developer mode ignores any Railgun mnemonic draft value", () => {
@@ -67,6 +71,12 @@ describe("runtime-config helpers", () => {
     const runtimeConfig = validateRuntimeConfigDraftForAppMode(draft, "developer");
 
     expect(runtimeConfig.railgun.mnemonic).toBe("");
+  });
+
+  test("developer mode keeps OpenRouter as the display provider", () => {
+    const runtimeConfig = createDeveloperDisplayRuntimeConfig();
+
+    expect(runtimeConfig.llm.provider).toBe("openrouter");
   });
 
   test("preserves provider-specific models when switching", () => {
@@ -145,11 +155,16 @@ describe("runtime-config helpers", () => {
         signerPrivateKey:
           "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       },
+      railgun: {
+        ...createDefaultRuntimeConfig().railgun,
+        mnemonic: "test test test test test test test test test test test junk",
+      },
     };
     const stripped = stripRuntimeConfigSecrets(runtimeConfig);
 
     expect(stripped.wallet.eoaPrivateKey).toBe("");
     expect(stripped.safe.signerPrivateKey).toBe("");
+    expect(stripped.railgun.mnemonic).toBe("");
     expect(stripped.wallet.approvalPolicy).toEqual(runtimeConfig.wallet.approvalPolicy);
   });
 });

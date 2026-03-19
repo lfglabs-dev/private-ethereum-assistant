@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  createForbiddenLocalRequestResponse,
+  validateTrustedLocalRequest,
+} from "@/lib/local-request-auth";
 
 export const runtime = "nodejs";
 
@@ -8,6 +12,11 @@ const approvalRequestSchema = z.object({
 });
 
 export async function POST(req: Request) {
+  const trustedRequest = validateTrustedLocalRequest(req);
+  if (!trustedRequest.ok) {
+    return createForbiddenLocalRequestResponse(trustedRequest.error);
+  }
+
   const startedAt = Date.now();
   try {
     const {
@@ -17,7 +26,6 @@ export async function POST(req: Request) {
     const { approvalId, decision } = approvalRequestSchema.parse(await req.json());
     console.info(
       `[railgun-approval] ${JSON.stringify({
-        approvalId,
         decision,
         event: "request",
         timestamp: new Date().toISOString(),
@@ -29,7 +37,6 @@ export async function POST(req: Request) {
         : rejectRailgunAction(approvalId);
     console.info(
       `[railgun-approval] ${JSON.stringify({
-        approvalId,
         decision,
         durationMs: Date.now() - startedAt,
         event: "success",

@@ -116,7 +116,6 @@ export function detectModeSwitchRequired(
   }
 
   const requestedModeLabel = getModeLabel(requestedMode);
-  const currentModeLabel = getModeLabel(currentMode);
 
   return {
     kind: "mode_switch_required",

@@ -175,7 +175,7 @@ export function getAppMode(): AppMode {
 export function createDefaultRuntimeConfig(): RuntimeConfig {
   return {
     llm: {
-      provider: "openrouter",
+      provider: "local",
       localBaseUrl: config.llm.baseURL,
       localModel: LOCAL_DEFAULT_MODEL,
       openRouterModel: OPENROUTER_DEFAULT_MODEL,
@@ -209,7 +209,7 @@ export function createDefaultRuntimeConfig(): RuntimeConfig {
       explorerTxBaseUrl: config.railgun.explorerTxBaseUrl,
       privacyGuidanceText: config.railgun.privacyGuidanceText,
       poiNodeUrls: config.railgun.poiNodeUrls,
-      mnemonic: config.railgun.mnemonic || "",
+      mnemonic: "",
       walletCreationBlock: config.railgun.walletCreationBlock,
       scanTimeoutMs: config.railgun.scanTimeoutMs,
       pollingIntervalMs: config.railgun.pollingIntervalMs,
@@ -434,12 +434,6 @@ export function validateRuntimeConfigDraftForAppMode(
     return normalizeDeveloperRuntimeConfig(runtimeConfig);
   }
 
-  if (appMode === "standard" && runtimeConfig.railgun.mnemonic.trim().length === 0) {
-    throw new Error(
-      "Generate or import a Railgun mnemonic before continuing. If you lose it, you can lose access to shielded Railgun funds.",
-    );
-  }
-
   return runtimeConfig;
 }
 
@@ -565,6 +559,10 @@ export function stripRuntimeConfigSecrets(runtimeConfig: RuntimeConfig): Runtime
     wallet: {
       ...runtimeConfig.wallet,
       eoaPrivateKey: "",
+    },
+    railgun: {
+      ...runtimeConfig.railgun,
+      mnemonic: "",
     },
   };
 }

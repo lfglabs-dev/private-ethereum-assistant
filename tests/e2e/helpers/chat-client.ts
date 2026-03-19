@@ -227,14 +227,17 @@ async function readAssistantMessage(
 export async function sendChatPrompt({
   prompt,
   messages = [],
-  runtimeConfig = createOpenRouterRuntimeConfig(),
-  networkConfig = runtimeConfig.network,
+  runtimeConfig,
+  networkConfig,
 }: {
   prompt: string
   messages?: AssistantUIMessage[]
   runtimeConfig?: RuntimeConfig
   networkConfig?: NetworkConfig
 }): Promise<ChatExchange> {
+  const resolvedRuntimeConfig =
+    runtimeConfig ?? (await createOpenRouterRuntimeConfig())
+  const resolvedNetworkConfig = networkConfig ?? resolvedRuntimeConfig.network
   const transport = new DefaultChatTransport<AssistantUIMessage>({
     api: `${APP_URL}/api/chat`,
   })
@@ -244,8 +247,8 @@ export async function sendChatPrompt({
     messages: nextMessages,
     abortSignal: undefined,
     body: {
-      networkConfig,
-      runtimeConfig,
+      networkConfig: resolvedNetworkConfig,
+      runtimeConfig: resolvedRuntimeConfig,
     },
     metadata: undefined,
     headers: undefined,

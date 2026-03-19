@@ -140,7 +140,7 @@ describe("EOA approval policy E2E", () => {
   });
 
   test("rejected high-value sends abort cleanly without broadcasting", async () => {
-    const tools = createApprovalPolicyTools("0.0000001");
+    const tools = await createApprovalPolicyTools("0.0000001");
     const preview = await executeTool(tools.prepare_eoa_transfer, {
       to: walletAddress,
       amount: TEST_AMOUNT,

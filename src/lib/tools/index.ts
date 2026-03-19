@@ -4,6 +4,7 @@ import { createReadChainTools } from "./read-chain";
 import { createRailgunTools } from "./railgun";
 import { createSafeTools } from "./safe";
 import { createSwapTools } from "./swap";
+import { guardToolRegistryForMode } from "./access-control";
 import {
   createDefaultRuntimeConfig,
   getRuntimeConfigForNetwork,
@@ -28,7 +29,8 @@ type UniversalToolRegistry = {
 export type EoaToolRegistry = UniversalToolRegistry & {
   prepare_eoa_transfer: EoaToolSet["prepareEoaTransfer"];
   send_eoa_transfer: EoaToolSet["sendEoaTransfer"];
-  swap_tokens: SwapToolSet["swapTokens"];
+  prepare_swap: SwapToolSet["prepareSwap"];
+  execute_swap: SwapToolSet["executeSwap"];
 };
 
 export type SafeToolRegistry = UniversalToolRegistry & {
@@ -104,7 +106,7 @@ export function getTools(
     ...resolvedRuntimeConfig.railgun,
     signerPrivateKey: resolvedRuntimeConfig.wallet.eoaPrivateKey,
   });
-  const { swapTokens } = createSwapTools(resolvedRuntimeConfig);
+  const { prepareSwap, executeSwap, swapTokens } = createSwapTools(resolvedRuntimeConfig);
 
   const universalTools = {
     get_balance: getBalance,
@@ -115,32 +117,33 @@ export function getTools(
   };
 
   if (activeMode === "safe") {
-    return {
+    return guardToolRegistryForMode(activeMode, {
       ...universalTools,
       get_safe_info: getSafeInfo,
       get_pending_transactions: getPendingTransactions,
       propose_transaction: proposeTransaction,
       swap_tokens: swapTokens,
-    } satisfies SafeToolRegistry;
+    } satisfies SafeToolRegistry);
   }
 
   if (activeMode === "railgun") {
-    return {
+    return guardToolRegistryForMode(activeMode, {
       ...universalTools,
       railgun_balance: getRailgunBalance,
       railgun_balance_route: routeRailgunBalance,
       railgun_shield: railgunShieldTokens,
       railgun_transfer: railgunPrivateTransfer,
       railgun_unshield: railgunWithdraw,
-    } satisfies PrivateToolRegistry;
+    } satisfies PrivateToolRegistry);
   }
 
-  return {
+  return guardToolRegistryForMode(activeMode, {
     ...universalTools,
     prepare_eoa_transfer: prepareEoaTransfer,
     send_eoa_transfer: sendEoaTransfer,
-    swap_tokens: swapTokens,
-  } satisfies EoaToolRegistry;
+    prepare_swap: prepareSwap,
+    execute_swap: executeSwap,
+  } satisfies EoaToolRegistry);
 }
 
 export function createTools<M extends ExecutionMode>(

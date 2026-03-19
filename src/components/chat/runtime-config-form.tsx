@@ -42,12 +42,15 @@ type EnvSecretStatus = {
   eoaPrivateKey: boolean;
   safeSignerPrivateKey: boolean;
   safeApiKey: boolean;
+  railgunMnemonic: boolean;
+  accessDenied: boolean;
 };
 
 type EnvSecretDraft = {
   eoaPrivateKey: string;
   safeSignerPrivateKey: string;
   safeApiKey: string;
+  railgunMnemonic: string;
 };
 
 type SaveKeysResult = { ok: true } | { ok: false; message: string };
@@ -71,11 +74,14 @@ const EMPTY_ENV_STATUS: EnvSecretStatus = {
   eoaPrivateKey: false,
   safeSignerPrivateKey: false,
   safeApiKey: false,
+  railgunMnemonic: false,
+  accessDenied: false,
 };
 const EMPTY_ENV_SECRET_DRAFT: EnvSecretDraft = {
   eoaPrivateKey: "",
   safeSignerPrivateKey: "",
   safeApiKey: "",
+  railgunMnemonic: "",
 };
 
 function updateDraftSection<K extends keyof RuntimeConfigDraft>(
@@ -125,6 +131,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
   ) {
     const visibleSections = new Set(sections);
     const includesKeys = visibleSections.has("keys");
+    const includesRailgun = visibleSections.has("railgun");
     const allowedProviders: LlmProvider[] =
       providerOptions.length > 0 ? [...providerOptions] : ["local"];
     const selectedProviderLabel = getProviderLabel(draft.llm.provider);
@@ -138,6 +145,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
     const [keyMessage, setKeyMessage] = useState<string | null>(null);
     const [isLoadingEnvStatus, setIsLoadingEnvStatus] = useState(false);
     const [didGenerateRailgunMnemonic, setDidGenerateRailgunMnemonic] = useState(false);
+    const [saveEnvConfirmationToken, setSaveEnvConfirmationToken] = useState("");
     const isDeveloperMode = appMode === "developer";
     const hasRailgunMnemonic = draft.railgun.mnemonic.trim().length > 0;
 
@@ -149,7 +157,9 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
           method: "GET",
           cache: "no-store",
         });
-        const payload = (await response.json()) as Partial<EnvSecretStatus>;
+        const payload = (await response.json()) as Partial<EnvSecretStatus> & {
+          saveEnvConfirmationToken?: string;
+        };
 
         if (!response.ok) {
           throw new Error("Could not load key status.");
@@ -159,12 +169,21 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
           eoaPrivateKey: Boolean(payload.eoaPrivateKey),
           safeSignerPrivateKey: Boolean(payload.safeSignerPrivateKey),
           safeApiKey: Boolean(payload.safeApiKey),
+          railgunMnemonic: Boolean(payload.railgunMnemonic),
+          accessDenied: Boolean(payload.accessDenied),
         });
-        setKeyMessage(null);
+        setSaveEnvConfirmationToken(payload.saveEnvConfirmationToken ?? "");
+        setKeyMessage(
+          payload.accessDenied
+            ? "macOS Keychain access was denied while checking configured keys."
+            : null,
+        );
+        return payload;
       } catch (error) {
         setKeyMessage(
           error instanceof Error ? error.message : "Could not load key status.",
         );
+        return null;
       } finally {
         setIsLoadingEnvStatus(false);
       }
@@ -198,9 +217,28 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
           if (safeApiKey) {
             payload.safeApiKey = safeApiKey;
           }
+          if (!isDeveloperMode) {
+            const railgunMnemonic = draft.railgun.mnemonic.trim();
+            if (railgunMnemonic) {
+              payload.railgunMnemonic = railgunMnemonic;
+            }
+          }
 
           if (mode === "onboarding" && !envStatus.eoaPrivateKey && !payload.eoaPrivateKey) {
             const message = "Enter an EOA private key to continue.";
+            setKeyMessage(message);
+            return { ok: false, message };
+          }
+
+          if (
+            mode === "onboarding" &&
+            includesRailgun &&
+            !isDeveloperMode &&
+            !envStatus.railgunMnemonic &&
+            !payload.railgunMnemonic
+          ) {
+            const message =
+              "Generate or import a Railgun mnemonic before continuing.";
             setKeyMessage(message);
             return { ok: false, message };
           }
@@ -210,12 +248,26 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
           }
 
           try {
+            const refreshedEnvStatus =
+              saveEnvConfirmationToken.length > 0 ? null : await loadEnvStatus();
+            const confirmationToken =
+              refreshedEnvStatus?.saveEnvConfirmationToken ?? saveEnvConfirmationToken;
+
+            if (!confirmationToken) {
+              const message = "Could not prepare secure key save. Refresh and try again.";
+              setKeyMessage(message);
+              return { ok: false, message };
+            }
+
             const response = await fetch("/api/save-env", {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
               },
-              body: JSON.stringify(payload),
+              body: JSON.stringify({
+                ...payload,
+                saveEnvConfirmationToken: confirmationToken,
+              }),
             });
             const result = (await response.json()) as
               | { error?: string; saved?: string[] }
@@ -238,6 +290,10 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
                 Boolean(result?.saved?.includes("safeSignerPrivateKey")),
               safeApiKey:
                 current.safeApiKey || Boolean(result?.saved?.includes("safeApiKey")),
+              railgunMnemonic:
+                current.railgunMnemonic ||
+                Boolean(result?.saved?.includes("railgunMnemonic")),
+              accessDenied: false,
             }));
             await loadEnvStatus();
             return { ok: true };
@@ -249,7 +305,16 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
           }
         },
       }),
-      [envStatus.eoaPrivateKey, keysDraft, mode],
+      [
+        draft.railgun.mnemonic,
+        envStatus.eoaPrivateKey,
+        envStatus.railgunMnemonic,
+        includesRailgun,
+        isDeveloperMode,
+        keysDraft,
+        mode,
+        saveEnvConfirmationToken,
+      ],
     );
 
     const formMessages = [keyMessage, validationMessage].filter(

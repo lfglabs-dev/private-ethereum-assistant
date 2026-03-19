@@ -50,7 +50,7 @@ const safeSwapRuntimeConfig = {
     type: "safe" as const,
   },
 }
-const balanceRoutingRuntimeConfig = createBalanceRoutingRuntimeConfig(ARBITRUM_CONFIG)
+const balanceRoutingRuntimeConfig = await createBalanceRoutingRuntimeConfig(ARBITRUM_CONFIG)
 const longRunningRuntimeConfig = {
   ...runtimeConfig,
   llm: {

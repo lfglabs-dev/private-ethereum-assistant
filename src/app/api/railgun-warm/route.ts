@@ -1,13 +1,22 @@
-import { mergeRuntimeConfigWithEnvSecrets, createDeveloperRuntimeConfig } from "@/lib/env-secrets";
 import {
   getAppMode,
-  runtimeConfigSchema,
 } from "@/lib/runtime-config";
+import { createDeveloperRuntimeConfig } from "@/lib/env-secrets";
+import {
+  createForbiddenLocalRequestResponse,
+  validateTrustedLocalRequest,
+} from "@/lib/local-request-auth";
+import { createStandardRuntimeConfig } from "@/lib/server-runtime-config";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
+  const trustedRequest = validateTrustedLocalRequest(req);
+  if (!trustedRequest.ok) {
+    return createForbiddenLocalRequestResponse(trustedRequest.error);
+  }
+
   try {
     const { warmRailgun } = await import("@/lib/railgun");
     let selectedRuntimeConfig;
@@ -16,24 +25,12 @@ export async function POST(req: Request) {
     if (appMode === "developer") {
       selectedRuntimeConfig = await createDeveloperRuntimeConfig();
     } else {
-      const { runtimeConfig } = await req.json();
-      const parsedRuntimeConfig = runtimeConfigSchema.safeParse(runtimeConfig);
-
-      if (!parsedRuntimeConfig.success) {
-        return new Response(
-          JSON.stringify({
-            error:
-              parsedRuntimeConfig.error.issues[0]?.message ??
-              "Invalid runtime config.",
-          }),
-          {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
-          },
-        );
-      }
-
-      selectedRuntimeConfig = await mergeRuntimeConfigWithEnvSecrets(parsedRuntimeConfig.data);
+      selectedRuntimeConfig = (
+        await createStandardRuntimeConfig({
+          requestedRuntimeConfig: undefined,
+          requestedNetworkConfig: undefined,
+        })
+      ).selectedRuntimeConfig;
     }
 
     const result = await warmRailgun({

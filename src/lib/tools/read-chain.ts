@@ -14,6 +14,7 @@ import { createEnsService } from "../ens";
 import { createEthereumContext, type NetworkConfig } from "../ethereum";
 import { resolveTokenMetadata, resolveTokenQuery } from "../token-metadata";
 import { getTrustWalletChainSlug } from "../trustwallet-assets";
+import { formatUntrustedDataLiteral } from "../untrusted-data";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const symbolBytes32Abi = parseAbi(["function symbol() view returns (bytes32)"]);
@@ -286,13 +287,17 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
 
   async function readTokenSymbol(tokenAddress: Address, blockNumber: bigint) {
     try {
-      return await withRetry(() =>
-        publicClient.readContract({
-          address: tokenAddress,
-          abi: erc20Abi,
-          functionName: "symbol",
-          blockNumber,
-        })
+      return formatUntrustedDataLiteral(
+        await withRetry(() =>
+          publicClient.readContract({
+            address: tokenAddress,
+            abi: erc20Abi,
+            functionName: "symbol",
+            blockNumber,
+          })
+        ),
+        32,
+        tokenAddress,
       );
     } catch {
       try {
@@ -304,7 +309,11 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
             blockNumber,
           })
         );
-        return hexToString(symbol, { size: 32 }).replace(/\0/g, "") || tokenAddress;
+        return formatUntrustedDataLiteral(
+          hexToString(symbol, { size: 32 }).replace(/\0/g, ""),
+          32,
+          tokenAddress,
+        );
       } catch {
         return tokenAddress;
       }
@@ -313,13 +322,17 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
 
   async function readTokenName(tokenAddress: Address, blockNumber: bigint) {
     try {
-      return await withRetry(() =>
+      return formatUntrustedDataLiteral(
+        await withRetry(() =>
         publicClient.readContract({
           address: tokenAddress,
           abi: erc20Abi,
           functionName: "name",
           blockNumber,
         })
+      ),
+        64,
+        "",
       );
     } catch {
       try {
@@ -331,7 +344,11 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
             blockNumber,
           })
         );
-        return hexToString(name, { size: 32 }).replace(/\0/g, "") || undefined;
+        return formatUntrustedDataLiteral(
+          hexToString(name, { size: 32 }).replace(/\0/g, ""),
+          64,
+          "",
+        );
       } catch {
         return undefined;
       }
@@ -634,13 +651,23 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
     execute: async ({ name, names }) => {
       const requestedNames = names ?? (name ? [name] : []);
       const results = await ensService.resolveNames(requestedNames);
+      const sanitizedResults = results.map((result) => ({
+        ...result,
+        normalizedName: result.normalizedName
+          ? formatUntrustedDataLiteral(
+              result.normalizedName,
+              128,
+              result.normalizedName,
+            )
+          : null,
+      }));
 
       if (requestedNames.length === 1) {
-        return results[0];
+        return sanitizedResults[0];
       }
 
       return {
-        results,
+        results: sanitizedResults,
         resolutionChainId: mainnet.id,
       };
     },
@@ -652,7 +679,15 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
     inputSchema: z.object({
       address: z.string().describe("The Ethereum address (0x...)"),
     }),
-    execute: async ({ address }) => ensService.reverseResolveAddress(address),
+    execute: async ({ address }) => {
+      const result = await ensService.reverseResolveAddress(address);
+      return {
+        ...result,
+        name: result.name
+          ? formatUntrustedDataLiteral(result.name, 128, result.name)
+          : null,
+      };
+    },
   });
 
   return {

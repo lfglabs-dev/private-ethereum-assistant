@@ -24,6 +24,14 @@ import {
   type ChainMetadata,
   type NetworkConfig,
 } from "../ethereum";
+import {
+  consumeTransferRateLimitSlot,
+  evaluateSessionTransferApproval,
+  recordConfirmedSessionTransfer,
+  resetEoaSessionGuardState,
+  type SessionTransferApprovalReason,
+} from "./eoa-session-guard";
+import { signLocalActionId, verifyLocalActionId } from "../signed-action-id";
 
 const transferInputSchema = z.object({
   to: z
@@ -80,11 +88,14 @@ type PreparedTransferApproval = {
   state: ApprovalState;
   thresholdAmount?: string;
   thresholdAssetSymbol?: string;
+  reason?: SessionTransferApprovalReason;
+  cumulativeAmount?: string;
   summary: ApprovalSummary;
 };
 
 type PreparedTransfer = {
   confirmationId: string;
+  internalConfirmationId: string;
   expiresAt: number;
   network: NetworkConfig;
   chain: ChainMetadata;
@@ -100,6 +111,7 @@ type PreparedTransfer = {
   gasLimitOverride?: bigint;
   balance: PreviewBalance;
   gasEstimate: PreviewGasEstimate;
+  approvalPolicySnapshot: EoaApprovalPolicy;
   approval: PreparedTransferApproval;
 };
 
@@ -148,6 +160,8 @@ type PreviewResult = {
     state: ApprovalState;
     thresholdAmount?: string;
     thresholdAssetSymbol?: string;
+    reason?: SessionTransferApprovalReason;
+    cumulativeAmount?: string;
     summary: ApprovalSummary;
   };
   error?: string;
@@ -203,6 +217,7 @@ type ToolError = {
 };
 
 const PREPARED_TRANSFER_TTL_MS = 10 * 60 * 1000;
+const TRANSFER_RATE_LIMIT_WINDOW_MS = 30_000;
 const preparedTransfers = new Map<string, PreparedTransfer>();
 const fallbackChainMetadata = createEthereumContext(
   DEFAULT_NETWORK_CONFIG
@@ -399,6 +414,20 @@ function formatApprovalEstimatedGas(gasEstimate: PreviewGasEstimate, chain: Chai
   return `${gasEstimate.gasLimit} gas @ max ${gasEstimate.maxFeePerGasGwei} gwei (~${gasEstimate.gasCostNative} ${chain.nativeSymbol})`;
 }
 
+function getSessionAssetKey(prepared: Pick<PreparedTransfer, "token">) {
+  return prepared.token?.address ?? "native";
+}
+
+function formatPreparedAmount(
+  prepared: Pick<PreparedTransfer, "token" | "chain">,
+  amountBaseUnits: bigint,
+) {
+  const amount = prepared.token
+    ? formatUnits(amountBaseUnits, prepared.token.decimals)
+    : formatEther(amountBaseUnits);
+  return `${amount} ${getAssetLabel(prepared)}`;
+}
+
 function buildApprovalSummary(
   prepared: Pick<
     PreparedTransfer,
@@ -430,7 +459,9 @@ function buildPreviewFromPrepared(
   const message =
     overrides?.message ??
     (status === "awaiting_local_approval"
-      ? "Local approval is required on this device before signing. Use the approval card to approve or reject the transfer."
+      ? prepared.approval.reason === "session_cumulative_threshold"
+        ? "Local approval is required because this transfer would exceed the cumulative session limit. Use the approval card to approve or reject it."
+        : "Local approval is required on this device before signing. Use the approval card to approve or reject the transfer."
       : status === "aborted"
         ? "Local approval was rejected. The transaction was not signed or broadcast."
         : "Transaction prepared. Summarize it for the user, ask for explicit confirmation, and only call send_eoa_transfer after the user says yes.");
@@ -464,6 +495,8 @@ function buildPreviewFromPrepared(
       state: prepared.approval.state,
       thresholdAmount: prepared.approval.thresholdAmount,
       thresholdAssetSymbol: prepared.approval.thresholdAssetSymbol,
+      reason: prepared.approval.reason,
+      cumulativeAmount: prepared.approval.cumulativeAmount,
       summary: prepared.approval.summary,
     },
     ...(overrides?.error ? { error: overrides.error } : {}),
@@ -497,7 +530,15 @@ function getApprovalThreshold(
 function buildApprovalRequirement(
   prepared: Pick<
     PreparedTransfer,
-    "token" | "chain" | "amountBaseUnits" | "recipient" | "resolvedEnsName" | "amount" | "gasEstimate"
+    | "amount"
+    | "amountBaseUnits"
+    | "chain"
+    | "gasEstimate"
+    | "network"
+    | "recipient"
+    | "resolvedEnsName"
+    | "sender"
+    | "token"
   >,
   approvalPolicy: EoaApprovalPolicy
 ): PreparedTransferApproval | ToolError {
@@ -515,21 +556,62 @@ function buildApprovalRequirement(
     return threshold;
   }
 
-  const required = prepared.amountBaseUnits > threshold.thresholdBaseUnits;
-  return {
-    required,
-    state: required ? "pending" : "not_required",
+  const sessionApproval = evaluateSessionTransferApproval({
+    sender: prepared.sender,
+    chainId: prepared.network.chainId,
+    assetKey: getSessionAssetKey(prepared),
+    amountBaseUnits: prepared.amountBaseUnits,
+    thresholdBaseUnits: threshold.thresholdBaseUnits,
     thresholdAmount: threshold.thresholdAmount,
     thresholdAssetSymbol: threshold.thresholdAssetSymbol,
+    formatAmount: (amountBaseUnits) => formatPreparedAmount(prepared, amountBaseUnits),
+  });
+
+  return {
+    required: sessionApproval.required,
+    state: sessionApproval.required ? "pending" : "not_required",
+    thresholdAmount: threshold.thresholdAmount,
+    thresholdAssetSymbol: threshold.thresholdAssetSymbol,
+    reason: sessionApproval.reason,
+    cumulativeAmount: sessionApproval.cumulativeAmount,
     summary,
   };
+}
+
+function refreshPreparedTransferApproval(
+  prepared: PreparedTransfer
+): PreparedTransferApproval | ToolError {
+  const nextApproval = buildApprovalRequirement(
+    prepared,
+    prepared.approvalPolicySnapshot
+  );
+  if (hasToolError(nextApproval)) {
+    return nextApproval;
+  }
+
+  prepared.approval = {
+    ...nextApproval,
+    state: nextApproval.required
+      ? prepared.approval.state === "approved" || prepared.approval.state === "rejected"
+        ? prepared.approval.state
+        : "pending"
+      : "not_required",
+  };
+
+  return prepared.approval;
 }
 
 function getPreparedTransferOrError(
   confirmationId: string
 ): { prepared: PreparedTransfer } | { error: PreviewResult } {
   cleanupPreparedTransfers();
-  const prepared = preparedTransfers.get(confirmationId);
+  const internalConfirmationId = verifyLocalActionId(
+    confirmationId,
+    "eoa-transfer",
+  );
+  const prepared = internalConfirmationId
+    ? preparedTransfers.get(internalConfirmationId)
+    : undefined;
   if (!prepared || prepared.expiresAt <= Date.now()) {
     return {
       error: buildPreviewError(
@@ -551,6 +633,11 @@ function markPreparedTransferApproved(
   }
 
   const { prepared } = lookup;
+  const nextApproval = refreshPreparedTransferApproval(prepared);
+  if (hasToolError(nextApproval)) {
+    return buildPreviewError(nextApproval.error, prepared.chain);
+  }
+
   if (!prepared.approval.required) {
     return prepared;
   }
@@ -572,6 +659,11 @@ export function rejectPreparedEoaTransfer(confirmationId: string): PreviewResult
   }
 
   const { prepared } = lookup;
+  const nextApproval = refreshPreparedTransferApproval(prepared);
+  if (hasToolError(nextApproval)) {
+    return buildPreviewError(nextApproval.error, prepared.chain);
+  }
+
   prepared.approval.state = prepared.approval.required ? "rejected" : "not_required";
   return buildPreviewFromPrepared(prepared, {
     status: "aborted",
@@ -773,11 +865,13 @@ async function prepareTransfer(
     {
       token,
       chain: chainMetadata,
+      network,
       amountBaseUnits,
       recipient: recipient.address,
       resolvedEnsName: recipient.resolvedEnsName,
       amount: amountText,
       gasEstimate,
+      sender,
     },
     walletConfig.approvalPolicy
   );
@@ -789,7 +883,8 @@ async function prepareTransfer(
   }
 
   const prepared: PreparedTransfer = {
-    confirmationId: crypto.randomUUID(),
+    internalConfirmationId: crypto.randomUUID(),
+    confirmationId: "",
     expiresAt: Date.now() + PREPARED_TRANSFER_TTL_MS,
     network,
     chain: chainMetadata,
@@ -805,10 +900,18 @@ async function prepareTransfer(
     gasLimitOverride: gasLimitOverride?.gasLimit,
     balance,
     gasEstimate,
+    approvalPolicySnapshot: {
+      ...walletConfig.approvalPolicy,
+    },
     approval,
   };
 
-  preparedTransfers.set(prepared.confirmationId, prepared);
+  prepared.confirmationId = signLocalActionId(
+    prepared.internalConfirmationId,
+    "eoa-transfer",
+  );
+
+  preparedTransfers.set(prepared.internalConfirmationId, prepared);
 
   return {
     ok: true,
@@ -1002,6 +1105,12 @@ export async function* executePreparedEoaTransfer(
   }
 
   const { prepared } = lookup;
+  const nextApproval = refreshPreparedTransferApproval(prepared);
+  if (hasToolError(nextApproval)) {
+    yield buildPreviewError(nextApproval.error, prepared.chain);
+    return;
+  }
+
   if (prepared.approval.required) {
     if (prepared.approval.state === "rejected") {
       yield buildPreviewFromPrepared(prepared, {
@@ -1033,7 +1142,22 @@ export async function* executePreparedEoaTransfer(
     return;
   }
 
-  preparedTransfers.delete(confirmationId);
+  const rateLimit = consumeTransferRateLimitSlot({
+    sender: prepared.sender,
+    chainId: prepared.network.chainId,
+    minimumIntervalMs: TRANSFER_RATE_LIMIT_WINDOW_MS,
+  });
+  if (!rateLimit.allowed) {
+    yield buildPreviewError(
+      `Transfer rate limit active. Wait ${Math.ceil(
+        rateLimit.retryAfterMs / 1_000
+      )}s before sending another transaction from this EOA.`,
+      prepared.chain
+    );
+    return;
+  }
+
+  preparedTransfers.delete(prepared.internalConfirmationId);
 
   const { publicClient, chain } = createEthereumContext(prepared.network);
   const walletClient = createWalletClient({
@@ -1169,6 +1293,12 @@ export async function* executePreparedEoaTransfer(
     } as const;
 
     if (receipt.status === "success") {
+      recordConfirmedSessionTransfer({
+        sender: prepared.sender,
+        chainId: prepared.network.chainId,
+        assetKey: getSessionAssetKey(prepared),
+        amountBaseUnits: prepared.amountBaseUnits,
+      });
       yield {
         ...base,
         status: "confirmed",
@@ -1314,3 +1444,5 @@ export function createEoaTransferTools(
     sendEoaTransfer,
   };
 }
+
+export { resetEoaSessionGuardState };

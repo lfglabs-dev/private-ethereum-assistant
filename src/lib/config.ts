@@ -48,7 +48,7 @@ export const config = {
       .split(",")
       .map((url) => url.trim())
       .filter(Boolean),
-    mnemonic: process.env.RAILGUN_MNEMONIC,
+    mnemonic: "",
     walletCreationBlock: Number(process.env.RAILGUN_WALLET_CREATION_BLOCK || "56109834"),
     scanTimeoutMs: Number(process.env.RAILGUN_SCAN_TIMEOUT_MS || "180000"),
     pollingIntervalMs: Number(process.env.RAILGUN_POLLING_INTERVAL_MS || "15000"),

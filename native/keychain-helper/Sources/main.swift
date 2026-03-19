@@ -13,6 +13,7 @@ private func usage() {
     keychain-helper get <service> <account>
     keychain-helper delete <service> <account>
     keychain-helper list <service>
+    keychain-helper export <service>
   """
   FileHandle.standardError.write(Data(message.utf8))
   FileHandle.standardError.write(Data("\n".utf8))
@@ -110,6 +111,15 @@ private func listSecrets(service: String) throws -> [String] {
   return items.compactMap { $0[kSecAttrAccount as String] as? String }.sorted()
 }
 
+private func exportSecrets(service: String) throws -> [String: String] {
+  var exported: [String: String] = [:]
+  for account in try listSecrets(service: service) {
+    exported[account] = try getSecret(service: service, account: account)
+  }
+
+  return exported
+}
+
 private func exitCode(for status: OSStatus) -> Int32 {
   switch status {
   case errSecItemNotFound:
@@ -173,6 +183,14 @@ do {
     }
 
     let value = try JSONSerialization.data(withJSONObject: listSecrets(service: service))
+    FileHandle.standardOutput.write(value)
+  case "export":
+    guard arguments.count == 3 else {
+      usage()
+      throw KeychainFailure.invalidArguments
+    }
+
+    let value = try JSONSerialization.data(withJSONObject: exportSecrets(service: service))
     FileHandle.standardOutput.write(value)
   default:
     usage()

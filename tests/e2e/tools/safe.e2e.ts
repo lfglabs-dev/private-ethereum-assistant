@@ -20,6 +20,9 @@ const safeRuntimeConfig = {
   },
 }
 const tools = createTools(ARBITRUM_CONFIG, safeRuntimeConfig)
+const hasSafeSwapPrereqs = Boolean(
+  (await getSecret("SAFE_API_KEY")) && (await getSecret("EOA_PRIVATE_KEY")),
+)
 
 describe("Safe E2E", () => {
   test("get_safe_info returns owners, threshold, and ETH balance", async () => {
@@ -78,7 +81,7 @@ describe("Safe E2E", () => {
     )
   })
 
-  if ((await getSecret("SAFE_API_KEY")) && (await getSecret("EOA_PRIVATE_KEY"))) {
+  if (hasSafeSwapPrereqs) {
     test("swap_tokens can propose a Safe-native swap transaction", async () => {
       const swapTools = createTools(ARBITRUM_CONFIG, {
         ...safeRuntimeConfig,

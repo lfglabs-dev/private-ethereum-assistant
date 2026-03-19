@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { getSecret, getSecretBackend, hasSecret, invalidateSecretCache } from "./secret-store";
+import {
+  getSecret,
+  getSecretBackend,
+  listStoredSecretKeys,
+  rememberStoredSecret,
+  type SecretStoreKey,
+} from "./secret-store";
+import { isMacKeychainAccessDeniedError } from "./backends/macos-keychain";
 import {
   createDeveloperDisplayRuntimeConfig,
   mergeRuntimeConfigOverrides,
@@ -24,12 +31,14 @@ export const envSecretsPayloadSchema = z
     eoaPrivateKey: envPrivateKeySchema.optional(),
     safeSignerPrivateKey: envPrivateKeySchema.optional(),
     safeApiKey: envApiKeySchema.optional(),
+    railgunMnemonic: z.string().trim().min(1, "Enter a Railgun mnemonic.").optional(),
   })
   .refine(
     (value) =>
       value.eoaPrivateKey !== undefined ||
       value.safeSignerPrivateKey !== undefined ||
-      value.safeApiKey !== undefined,
+      value.safeApiKey !== undefined ||
+      value.railgunMnemonic !== undefined,
     "Provide at least one key to save.",
   );
 
@@ -37,14 +46,21 @@ export type EnvSecretStatus = {
   eoaPrivateKey: boolean;
   safeSignerPrivateKey: boolean;
   safeApiKey: boolean;
+  railgunMnemonic: boolean;
+  accessDenied: boolean;
 };
 
-type SavedEnvVariable = "eoaPrivateKey" | "safeSignerPrivateKey" | "safeApiKey";
+type SavedEnvVariable =
+  | "eoaPrivateKey"
+  | "safeSignerPrivateKey"
+  | "safeApiKey"
+  | "railgunMnemonic";
 
-const ENV_SECRET_VARIABLES: Record<SavedEnvVariable, string> = {
+const ENV_SECRET_VARIABLES: Record<SavedEnvVariable, SecretStoreKey> = {
   eoaPrivateKey: "EOA_PRIVATE_KEY",
   safeSignerPrivateKey: "SAFE_SIGNER_PRIVATE_KEY",
   safeApiKey: "SAFE_API_KEY",
+  railgunMnemonic: "RAILGUN_MNEMONIC",
 };
 
 function normalizePrivateKey(value: string | undefined) {
@@ -56,21 +72,38 @@ function normalizePrivateKey(value: string | undefined) {
 }
 
 export async function getEnvSecretStatus(): Promise<EnvSecretStatus> {
-  const [eoaPrivateKey, safeSignerPrivateKey, safeApiKey] = await Promise.all([
-    hasSecret("EOA_PRIVATE_KEY"),
-    hasSecret("SAFE_SIGNER_PRIVATE_KEY"),
-    hasSecret("SAFE_API_KEY"),
-  ]);
+  try {
+    const configuredKeys = new Set((await listStoredSecretKeys()) ?? []);
 
-  return { eoaPrivateKey, safeSignerPrivateKey, safeApiKey };
+    return {
+      eoaPrivateKey: configuredKeys.has("EOA_PRIVATE_KEY"),
+      safeSignerPrivateKey: configuredKeys.has("SAFE_SIGNER_PRIVATE_KEY"),
+      safeApiKey: configuredKeys.has("SAFE_API_KEY"),
+      railgunMnemonic: configuredKeys.has("RAILGUN_MNEMONIC"),
+      accessDenied: false,
+    };
+  } catch (error) {
+    if (isMacKeychainAccessDeniedError(error)) {
+      return {
+        eoaPrivateKey: false,
+        safeSignerPrivateKey: false,
+        safeApiKey: false,
+        railgunMnemonic: false,
+        accessDenied: true,
+      };
+    }
+
+    throw error;
+  }
 }
 
 export async function mergeRuntimeConfigWithEnvSecrets(
   runtimeConfig: RuntimeConfig,
 ): Promise<RuntimeConfig> {
-  const [signerKey, eoaKey] = await Promise.all([
+  const [signerKey, eoaKey, railgunMnemonic] = await Promise.all([
     getSecret("SAFE_SIGNER_PRIVATE_KEY"),
     getSecret("EOA_PRIVATE_KEY"),
+    getSecret("RAILGUN_MNEMONIC"),
   ]);
 
   return {
@@ -82,6 +115,10 @@ export async function mergeRuntimeConfigWithEnvSecrets(
     wallet: {
       ...runtimeConfig.wallet,
       eoaPrivateKey: normalizePrivateKey(eoaKey?.trim()),
+    },
+    railgun: {
+      ...runtimeConfig.railgun,
+      mnemonic: railgunMnemonic?.trim() || "",
     },
   };
 }
@@ -100,6 +137,10 @@ async function getDeveloperWalletPrivateKey() {
   }
 
   return normalized;
+}
+
+export async function getConfiguredEoaPrivateKey() {
+  return getDeveloperWalletPrivateKey();
 }
 
 export async function createDeveloperRuntimeConfig(): Promise<RuntimeConfig> {
@@ -160,9 +201,8 @@ export async function saveEnvSecrets(
     [SavedEnvVariable, string]
   >) {
     await backend.set(ENV_SECRET_VARIABLES[fieldName], value);
+    rememberStoredSecret(ENV_SECRET_VARIABLES[fieldName], value);
   }
-
-  invalidateSecretCache();
   return {
     success: true as const,
     saved,

@@ -7,20 +7,25 @@ export interface SecretBackend {
   set(account: string, value: string): Promise<void>;
   delete(account: string): Promise<void>;
   list(): Promise<string[]>;
+  loadAll(): Promise<Record<string, string>>;
 }
 
 export const SECRET_STORE_KEYS = [
   "EOA_PRIVATE_KEY",
   "SAFE_SIGNER_PRIVATE_KEY",
   "SAFE_API_KEY",
+  "RAILGUN_MNEMONIC",
 ] as const;
 
 export type SecretStoreKey = (typeof SECRET_STORE_KEYS)[number];
 
 const SECRET_STORE_KEY_SET = new Set<string>(SECRET_STORE_KEYS);
-
-const CACHE_TTL_MS = 30_000;
-const secretCache = new Map<string, { value: string; expiresAt: number }>();
+const loadedSecretValues: Partial<Record<SecretStoreKey, string | null>> = {};
+const loadedSecretKeys = new Set<SecretStoreKey>();
+const loadedSecretPromises: Partial<Record<SecretStoreKey, Promise<string | null>>> = {};
+let listedSecretKeys: SecretStoreKey[] | null = null;
+let listedSecretKeysReady = false;
+let listedSecretKeysPromise: Promise<SecretStoreKey[] | null> | null = null;
 
 function isDeveloperMode() {
   return process.env.APP_MODE === "developer" ||
@@ -54,9 +59,12 @@ export async function getSecret(key: SecretStoreKey): Promise<string | null> {
     return envValue;
   }
 
-  const cached = secretCache.get(key);
-  if (cached && Date.now() < cached.expiresAt) {
-    return cached.value;
+  if (loadedSecretKeys.has(key)) {
+    return loadedSecretValues[key] ?? null;
+  }
+
+  if (loadedSecretPromises[key]) {
+    return loadedSecretPromises[key];
   }
 
   const backend = getSecretBackend();
@@ -64,15 +72,23 @@ export async function getSecret(key: SecretStoreKey): Promise<string | null> {
     return null;
   }
 
-  const value = await backend.get(key);
+  loadedSecretPromises[key] = (async () => {
+    const value = await backend.get(key);
+    loadedSecretValues[key] = value;
+    loadedSecretKeys.add(key);
 
-  if (value !== null) {
-    secretCache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
-  } else {
-    secretCache.delete(key);
+    if (listedSecretKeysReady) {
+      syncListedSecretKey(key, value);
+    }
+
+    return value;
+  })();
+
+  try {
+    return await loadedSecretPromises[key];
+  } finally {
+    delete loadedSecretPromises[key];
   }
-
-  return value;
 }
 
 export async function hasSecret(key: SecretStoreKey): Promise<boolean> {
@@ -80,8 +96,59 @@ export async function hasSecret(key: SecretStoreKey): Promise<boolean> {
   return value !== null && value.trim().length > 0;
 }
 
+export async function listStoredSecretKeys(): Promise<SecretStoreKey[] | null> {
+  if (isDeveloperMode()) {
+    return SECRET_STORE_KEYS.filter((key) => getDeveloperModeEnvSecret(key) !== null);
+  }
+
+  if (listedSecretKeysReady) {
+    return [...(listedSecretKeys ?? [])];
+  }
+
+  if (listedSecretKeysPromise) {
+    return listedSecretKeysPromise;
+  }
+
+  const backend = getSecretBackend();
+  if (!backend) {
+    return null;
+  }
+
+  listedSecretKeysPromise = (async () => {
+    const storedKeys = (await backend.list()).filter(
+      (key): key is SecretStoreKey => SECRET_STORE_KEY_SET.has(key),
+    );
+    listedSecretKeys = storedKeys;
+    listedSecretKeysReady = true;
+    return [...storedKeys];
+  })();
+
+  try {
+    return await listedSecretKeysPromise;
+  } finally {
+    listedSecretKeysPromise = null;
+  }
+}
+
 export function invalidateSecretCache() {
-  secretCache.clear();
+  for (const key of SECRET_STORE_KEYS) {
+    delete loadedSecretValues[key];
+    delete loadedSecretPromises[key];
+  }
+
+  loadedSecretKeys.clear();
+  listedSecretKeys = null;
+  listedSecretKeysReady = false;
+  listedSecretKeysPromise = null;
+}
+
+export function rememberStoredSecret(key: SecretStoreKey, value: string) {
+  loadedSecretValues[key] = value;
+  loadedSecretKeys.add(key);
+
+  if (listedSecretKeysReady) {
+    syncListedSecretKey(key, value);
+  }
 }
 
 export async function loadAllSecrets(): Promise<Record<string, string> | null> {
@@ -101,19 +168,36 @@ export async function loadAllSecrets(): Promise<Record<string, string> | null> {
     return null;
   }
 
-  const accounts = await backend.list();
-  const secrets: Record<string, string> = {};
+  const exported = await backend.loadAll();
+  const filteredEntries = Object.entries(exported).filter(([key]) => SECRET_STORE_KEY_SET.has(key));
+  const filteredSecrets = Object.fromEntries(filteredEntries) as Record<SecretStoreKey, string>;
 
-  for (const account of accounts) {
-    if (!SECRET_STORE_KEY_SET.has(account)) {
-      continue;
-    }
+  listedSecretKeys = [];
+  listedSecretKeysReady = true;
 
-    const value = await backend.get(account);
-    if (value !== null) {
-      secrets[account] = value;
+  for (const key of SECRET_STORE_KEYS) {
+    const value = filteredSecrets[key] ?? null;
+    loadedSecretValues[key] = value;
+    loadedSecretKeys.add(key);
+    if (value && value.trim().length > 0) {
+      listedSecretKeys.push(key);
     }
   }
 
-  return secrets;
+  return { ...filteredSecrets };
+}
+
+function syncListedSecretKey(key: SecretStoreKey, value: string | null) {
+  if (!listedSecretKeys) {
+    listedSecretKeys = [];
+  }
+
+  const nextListedSecretKeys = new Set(listedSecretKeys);
+  if (value && value.trim().length > 0) {
+    nextListedSecretKeys.add(key);
+  } else {
+    nextListedSecretKeys.delete(key);
+  }
+
+  listedSecretKeys = SECRET_STORE_KEYS.filter((candidate) => nextListedSecretKeys.has(candidate));
 }
