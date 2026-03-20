@@ -1,4 +1,5 @@
 import { MacKeychainBackend } from "./backends/macos-keychain";
+import { WindowsCredentialBackend } from "./backends/windows-credential";
 
 export interface SecretBackend {
   readonly name: string;
@@ -42,7 +43,10 @@ function getDeveloperModeEnvSecret(key: SecretStoreKey): string | null {
 }
 
 export function getSecretBackend(): SecretBackend | null {
-  const backends: SecretBackend[] = [new MacKeychainBackend()];
+  const backends: SecretBackend[] = [
+    new MacKeychainBackend(),
+    new WindowsCredentialBackend(),
+  ];
 
   for (const backend of backends) {
     if (backend.isAvailable()) {
