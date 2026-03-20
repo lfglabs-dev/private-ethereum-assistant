@@ -175,7 +175,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
         setSaveEnvConfirmationToken(payload.saveEnvConfirmationToken ?? "");
         setKeyMessage(
           payload.accessDenied
-            ? "macOS Keychain access was denied while checking configured keys."
+            ? "Access to the local system secret store was denied while checking configured keys."
             : null,
         );
         return payload;
@@ -353,7 +353,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
               </CardTitle>
               <CardDescription>
                 Non-secret preferences stay in browser storage. Wallet keys are saved
-                later to the macOS Keychain on this machine instead.
+                later to the local system secret store on this machine instead.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -562,7 +562,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
             <CardHeader>
               <CardTitle>Keys</CardTitle>
               <CardDescription>
-                Saved to the macOS Keychain on this machine. These values never enter
+                Saved to the local system secret store on this machine. These values never enter
                 browser storage.
               </CardDescription>
             </CardHeader>
@@ -659,7 +659,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
               )}
 
               <p className="text-xs text-muted-foreground">
-                Keys are stored in the macOS Keychain on this machine. Use dedicated
+                Keys are stored in the local system secret store on this machine. Use dedicated
                 low-value wallets.
               </p>
 

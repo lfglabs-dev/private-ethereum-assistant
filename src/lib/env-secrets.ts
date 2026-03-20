@@ -194,7 +194,7 @@ export async function saveEnvSecrets(
 
   const backend = getSecretBackend();
   if (!backend) {
-    throw new Error("No secret backend is available. macOS Keychain is required.");
+    throw new Error("No secret backend is available.");
   }
 
   for (const [fieldName, value] of Object.entries(updates) as Array<

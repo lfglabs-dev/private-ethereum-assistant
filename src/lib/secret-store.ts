@@ -1,4 +1,7 @@
+import { EncryptedFileBackend } from "./backends/encrypted-file";
+import { LinuxSecretServiceBackend } from "./backends/linux-secret-service";
 import { MacKeychainBackend } from "./backends/macos-keychain";
+import { SECRET_STORE_SERVICE } from "./backends/constants";
 import { WindowsCredentialBackend } from "./backends/windows-credential";
 
 export interface SecretBackend {
@@ -43,12 +46,22 @@ function getDeveloperModeEnvSecret(key: SecretStoreKey): string | null {
 }
 
 export function getSecretBackend(): SecretBackend | null {
-  const backends: SecretBackend[] = [
-    new MacKeychainBackend(),
-    new WindowsCredentialBackend(),
-  ];
+  return selectSecretBackend(createSecretBackends());
+}
 
-  for (const backend of backends) {
+export function createSecretBackends(): SecretBackend[] {
+  return [
+    new MacKeychainBackend(SECRET_STORE_SERVICE),
+    new WindowsCredentialBackend(SECRET_STORE_SERVICE),
+    new LinuxSecretServiceBackend(SECRET_STORE_KEYS, SECRET_STORE_SERVICE),
+    new EncryptedFileBackend(SECRET_STORE_SERVICE),
+  ];
+}
+
+export function selectSecretBackend(backends: readonly SecretBackend[]) {
+  const candidates = [...backends];
+
+  for (const backend of candidates) {
     if (backend.isAvailable()) {
       return backend;
     }

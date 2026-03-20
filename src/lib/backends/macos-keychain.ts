@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { SecretBackend } from "../secret-store";
+import { SECRET_STORE_SERVICE } from "./constants";
 
-export const MAC_KEYCHAIN_SERVICE = "com.lfglabs.private-ethereum-assistant";
+export const MAC_KEYCHAIN_SERVICE = SECRET_STORE_SERVICE;
 const KEYCHAIN_HELPER_RELATIVE_PATH = "native/keychain-helper/.build/release/keychain-helper";
 
 type SpawnResult = Pick<

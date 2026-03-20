@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { SecretBackend } from "../secret-store";
+import { SECRET_STORE_SERVICE } from "./constants";
 
-export const WINDOWS_CREDENTIAL_SERVICE = "com.lfglabs.private-ethereum-assistant";
+export const WINDOWS_CREDENTIAL_SERVICE = SECRET_STORE_SERVICE;
 const CREDENTIAL_HELPER_RELATIVE_PATH = "native/credential-helper/credential-helper.ps1";
 
 type SpawnResult = Pick<
@@ -99,8 +100,10 @@ export class WindowsCredentialBackend implements SecretBackend {
       cmd: [
         "powershell.exe",
         "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-File", this.helperPath,
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        this.helperPath,
         command,
         this.serviceName,
         ...(account ? [account] : []),

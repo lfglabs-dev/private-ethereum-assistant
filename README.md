@@ -18,7 +18,7 @@ Install the following before starting:
 | [Ollama](https://ollama.com) | Local LLM server (Normal mode only) | Download from ollama.com or `brew install ollama` |
 | [dotenvx](https://dotenvx.com) | Encrypted env loader for OpenRouter config (Developer mode only) | `brew install dotenvx/brew/dotenvx` |
 
-The project runs on macOS. On Linux, everything works except the automatic browser-open step (you will need to open `http://localhost:3000` manually).
+The project runs on macOS and Linux. On some Linux setups, the automatic browser-open step may fail; if it does, open `http://localhost:3000` manually.
 
 ## Getting started
 
@@ -43,7 +43,7 @@ bun run local
 2. The launcher will automatically:
    - start Ollama if it is not already running
    - pull the default model (`llama3.2:3b`) if not already downloaded
-   - build the macOS Keychain helper if needed
+   - build the macOS Keychain helper if needed on macOS
    - start the Next.js dev server on `http://localhost:3000`
    - open the browser
 
@@ -67,7 +67,7 @@ dotenvx run -f .env.tianjin -- bun run dev -- --developer-mode
 
 2. Open `http://localhost:3000` in your browser.
 
-3. Start using the app. Developer-mode wallet and Safe secrets come from `.env.tianjin`; standard mode secrets are still stored in the macOS Keychain.
+3. Start using the app. Developer-mode wallet and Safe secrets come from `.env.tianjin`; standard mode secrets are stored in the local platform credential backend.
 
 ## Runtime configuration
 
@@ -81,15 +81,17 @@ The app uses a UI onboarding wizard for runtime settings. Secrets are saved serv
 - wallet approval thresholds
 - Railgun RPC, POI (Proof of Innocence) nodes, explorer URL, mnemonic, and timing settings
 
-**Stored in the macOS Keychain on the machine**:
+**Stored in the local credential backend on the machine**:
 - `EOA_PRIVATE_KEY` — the Ethereum wallet private key
 - `SAFE_SIGNER_PRIVATE_KEY` — the Safe multisig signer key (optional)
 - `SAFE_API_KEY` — Safe Transaction Service API key (optional)
 
+On macOS this uses the native Keychain helper. On Linux the app prefers Secret Service via `secret-tool` and falls back to an encrypted file when `PEA_SECRET_STORE_PASSPHRASE` is set and no Secret Service provider is available. You can override the fallback file path with `PEA_SECRET_STORE_FILE`.
+
 **Security notes:**
 - Secrets never enter browser storage
 - Use dedicated low-value wallets for local testing
-- "Delete all" in settings clears browser preferences only, not Keychain entries
+- "Delete all" in settings clears browser preferences only, not stored secrets
 
 ## LLM providers
 
