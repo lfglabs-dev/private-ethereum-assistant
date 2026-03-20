@@ -3,8 +3,8 @@ import path from "node:path";
 import type { SecretBackend } from "../secret-store";
 import { SECRET_STORE_SERVICE } from "./constants";
 
-export const MAC_KEYCHAIN_SERVICE = SECRET_STORE_SERVICE;
-const KEYCHAIN_HELPER_RELATIVE_PATH = "native/keychain-helper/.build/release/keychain-helper";
+export const WINDOWS_CREDENTIAL_SERVICE = SECRET_STORE_SERVICE;
+const CREDENTIAL_HELPER_RELATIVE_PATH = "native/credential-helper/credential-helper.ps1";
 
 type SpawnResult = Pick<
   Bun.Subprocess<Blob | "ignore", "pipe", "pipe">,
@@ -13,8 +13,8 @@ type SpawnResult = Pick<
 
 type SpawnLike = typeof Bun.spawn;
 
-export function getMacKeychainHelperPath(rootDir = process.cwd()) {
-  return path.resolve(rootDir, KEYCHAIN_HELPER_RELATIVE_PATH);
+export function getWindowsCredentialHelperPath(rootDir = process.cwd()) {
+  return path.resolve(rootDir, CREDENTIAL_HELPER_RELATIVE_PATH);
 }
 
 async function readOutput(
@@ -27,33 +27,17 @@ async function readOutput(
   return new Response(stream).text();
 }
 
-export class MacKeychainAccessDeniedError extends Error {
-  constructor(
-    backendName: string,
-    readonly command: string,
-  ) {
-    super(`${backendName} access was denied while running "${command}".`);
-    this.name = "MacKeychainAccessDeniedError";
-  }
-}
-
-export function isMacKeychainAccessDeniedError(
-  error: unknown,
-): error is MacKeychainAccessDeniedError {
-  return error instanceof MacKeychainAccessDeniedError;
-}
-
-export class MacKeychainBackend implements SecretBackend {
-  readonly name = "macOS Keychain";
+export class WindowsCredentialBackend implements SecretBackend {
+  readonly name = "Windows Credential Manager";
 
   constructor(
-    private readonly serviceName = MAC_KEYCHAIN_SERVICE,
-    private readonly helperPath = getMacKeychainHelperPath(),
+    private readonly serviceName = WINDOWS_CREDENTIAL_SERVICE,
+    private readonly helperPath = getWindowsCredentialHelperPath(),
     private readonly spawn: SpawnLike = Bun.spawn,
   ) {}
 
   isAvailable() {
-    return process.platform === "darwin" && existsSync(this.helperPath);
+    return process.platform === "win32" && existsSync(this.helperPath);
   }
 
   async get(account: string) {
@@ -113,7 +97,17 @@ export class MacKeychainBackend implements SecretBackend {
 
   private async run(command: string, account?: string, input?: string) {
     const proc = this.spawn({
-      cmd: [this.helperPath, command, this.serviceName, ...(account ? [account] : [])],
+      cmd: [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        this.helperPath,
+        command,
+        this.serviceName,
+        ...(account ? [account] : []),
+      ],
       cwd: process.cwd(),
       env: process.env,
       stdin: input === undefined ? "ignore" : new Blob([input]),
@@ -141,10 +135,6 @@ export class MacKeychainBackend implements SecretBackend {
   ) {
     if (result.exitCode === 0) {
       return;
-    }
-
-    if (result.exitCode === 2) {
-      throw new MacKeychainAccessDeniedError(this.name, command);
     }
 
     const scope = account ? ` for ${account}` : "";
