@@ -231,8 +231,12 @@ try {
             foreach ($target in $targets) {
                 $accounts += Get-AccountFromTargetName -Service $service -TargetName $target
             }
-            $accounts = $accounts | Sort-Object
-            [Console]::Out.Write(($accounts | ConvertTo-Json -Compress))
+            $accounts = @($accounts | Sort-Object)
+            if ($accounts.Count -eq 0) {
+                [Console]::Out.Write("[]")
+            } else {
+                [Console]::Out.Write((ConvertTo-Json -InputObject $accounts -Compress))
+            }
         }
         'export' {
             if ($args.Count -ne 2) {
