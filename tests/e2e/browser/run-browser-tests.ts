@@ -602,6 +602,38 @@ async function main() {
   );
 
   await runTest(
+    "Sidebar shows Railgun 0zk address and shielded balances in Private mode",
+    async () => {
+      await ensureDeveloperModeReady();
+
+      // Verify EOA mode shows a 0x address in the sidebar
+      const eoaBody = await getText("body");
+      if (!eoaBody.includes("0x")) {
+        throw new Error("EOA mode should show a 0x address in sidebar");
+      }
+
+      // Switch to Private mode
+      await selectMode("railgun");
+
+      // Wait for the sidebar to update with a Railgun 0zk address
+      // The portfolio re-fetches on mode switch (config key changes).
+      // Railgun wallet init may take time, so use a generous timeout.
+      await waitForBodyCondition(
+        (text) => text.includes("0zk"),
+        180_000,
+      );
+
+      // Switch back to EOA and verify public address returns
+      await selectMode("eoa");
+      await waitForBodyCondition(
+        (text) => text.includes("0x") && !text.includes("0zk"),
+        60_000,
+      );
+    },
+    "railgun-sidebar-address.png",
+  );
+
+  await runTest(
     "Private-mode swap requests ask for an EOA mode switch",
     async () => {
       await ensureDeveloperModeReady();

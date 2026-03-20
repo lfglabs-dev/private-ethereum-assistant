@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useChat } from "@ai-sdk/react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDown, RefreshCw, Settings2, Trash2, X } from "lucide-react";
+import { ArrowDown, RefreshCw, Trash2, X } from "lucide-react";
 import { ZodError } from "zod";
 import { EthereumIcon } from "@/components/icons/ethereum-icon";
 import {
@@ -19,6 +19,7 @@ import { ChatWelcome } from "@/components/chat/chat-welcome";
 import { ChatInput } from "@/components/chat/chat-input";
 import { ChatError } from "@/components/chat/chat-error";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { WalletSidebar } from "@/components/sidebar/wallet-sidebar";
 import { useScrollToBottom } from "@/hooks/use-scroll-to-bottom";
 import {
   assistantDataPartSchemas,
@@ -356,66 +357,21 @@ function ConfiguredAssistant({
   };
 
   return (
-    <div className="flex h-dvh flex-col bg-background">
-      <header className="flex items-center justify-between border-b px-6 py-3">
-        <div className="flex items-center gap-3">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
-            <EthereumIcon className="size-4 text-primary" />
-          </div>
-          <div>
-            <h1 className="font-serif text-sm font-semibold">
-              Private Ethereum Assistant
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              {providerLabel} · {activeNetworkLabel} · Mode {activeModeLabel}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div
-            data-testid="runtime-mode-picker"
-            className="flex items-center gap-1 rounded-full border p-1 text-xs"
-            aria-label="Execution mode"
-          >
-            {executionModeOptions.map((modeOption) => {
-              const isActive = runtimeConfig.actor.type === modeOption.value;
-
-              return (
-                <button
-                  key={modeOption.value}
-                  type="button"
-                  data-testid={`runtime-mode-picker-${modeOption.value}`}
-                  className={`rounded-full px-2.5 py-1 transition-colors ${
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-secondary"
-                  }`}
-                  onClick={() => handleModeChange(modeOption.value)}
-                >
-                  {modeOption.label}
-                </button>
-              );
-            })}
-          </div>
-          {settingsEnabled ? (
-            <Button
-              data-testid="runtime-settings-trigger"
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={() => {
-                setSettingsDraft(createRuntimeConfigDraft(runtimeConfig));
-                setSettingsError(null);
-                setSettingsOpen(true);
-              }}
-            >
-              <Settings2 className="size-3.5" />
-              Settings
-            </Button>
-          ) : null}
-          <ThemeToggle />
-        </div>
-      </header>
+    <div className="flex h-dvh bg-background">
+      <WalletSidebar
+        runtimeConfig={runtimeConfig}
+        providerLabel={providerLabel}
+        networkLabel={activeNetworkLabel}
+        modeLabel={activeModeLabel}
+        executionModeOptions={executionModeOptions}
+        onModeChange={handleModeChange}
+        onOpenSettings={settingsEnabled ? () => {
+          setSettingsDraft(createRuntimeConfigDraft(runtimeConfig));
+          setSettingsError(null);
+          setSettingsOpen(true);
+        } : undefined}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
 
       <div ref={containerRef} className="relative flex-1 overflow-y-auto">
         <div ref={endRef} className="mx-auto max-w-3xl space-y-6 px-4 py-6">
@@ -606,6 +562,7 @@ function ConfiguredAssistant({
           </motion.div>
         ) : null}
       </AnimatePresence>
+      </div>
     </div>
   );
 }

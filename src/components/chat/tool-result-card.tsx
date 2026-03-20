@@ -350,10 +350,8 @@ function BalanceResult({ data }: { data: Record<string, unknown> }) {
   )
 }
 
-function shortenAddress(value: string) {
-  if (!value || value.length < 12) return value
-  return `${value.slice(0, 6)}...${value.slice(-4)}`
-}
+// Re-export from shared utility for backward compatibility
+import { shortenAddress } from "@/lib/format"
 
 function formatSignedTokenAmount(
   amount: string | undefined,
