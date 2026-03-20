@@ -113,7 +113,7 @@ describe("env secret helpers", () => {
       saveEnvSecrets({
         eoaPrivateKey: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       }),
-    ).rejects.toThrow("No secret backend is available. macOS Keychain is required.");
+    ).rejects.toThrow("No secret backend is available.");
   });
 
   test("stores secrets in the credential backend when available", async () => {

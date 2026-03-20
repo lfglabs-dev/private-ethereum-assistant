@@ -63,7 +63,7 @@ const STANDARD_ONBOARDING_STEPS = [
   },
   {
     title: "Keys",
-    description: "Add your private keys and API credentials. These are saved in the macOS Keychain only.",
+    description: "Add your private keys and API credentials. These are saved in the local system secret store only.",
     sections: ["keys"] as const,
   },
   {
@@ -719,7 +719,7 @@ export default function Home() {
     setOnboardingDraft(createRuntimeConfigDraft(runtimeConfig));
     if (standardEnvReadiness.accessDenied) {
       setOnboardingError(
-        "macOS Keychain access was denied while checking configured keys.",
+        "Access to the local system secret store was denied while checking configured keys.",
       );
     }
   }, [runtimeConfig, shouldResumeStandardOnboarding, standardEnvReadiness]);

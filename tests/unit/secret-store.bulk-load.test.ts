@@ -63,7 +63,12 @@ describe("secret store access", () => {
       writeFileSync(helperPath, "#!/bin/sh\nexit 0\n", "utf8");
       chmodSync(helperPath, 0o755);
 
-      const spawn = spyOn(Bun, "spawn").mockImplementation(({ cmd }) => {
+      const spawn = spyOn(Bun, "spawn").mockImplementation((options) => {
+        if (Array.isArray(options)) {
+          throw new Error("Expected Bun.spawn options.");
+        }
+
+        const { cmd } = options;
         const [, command, , account] = cmd;
 
         if (command !== "get") {
@@ -129,7 +134,12 @@ describe("secret store access", () => {
       writeFileSync(helperPath, "#!/bin/sh\nexit 0\n", "utf8");
       chmodSync(helperPath, 0o755);
 
-      const spawn = spyOn(Bun, "spawn").mockImplementation(({ cmd }) => {
+      const spawn = spyOn(Bun, "spawn").mockImplementation((options) => {
+        if (Array.isArray(options)) {
+          throw new Error("Expected Bun.spawn options.");
+        }
+
+        const { cmd } = options;
         const [, command] = cmd;
         if (command !== "list") {
           throw new Error(`Unexpected helper command: ${command}`);
@@ -224,7 +234,12 @@ describe("secret store access", () => {
       writeFileSync(helperPath, "#!/bin/sh\nexit 0\n", "utf8");
       chmodSync(helperPath, 0o755);
 
-      const spawn = spyOn(Bun, "spawn").mockImplementation(({ cmd }) => {
+      const spawn = spyOn(Bun, "spawn").mockImplementation((options) => {
+        if (Array.isArray(options)) {
+          throw new Error("Expected Bun.spawn options.");
+        }
+
+        const { cmd } = options;
         const [, command] = cmd;
         if (command !== "export") {
           throw new Error(`Unexpected helper command: ${command}`);
