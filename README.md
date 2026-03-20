@@ -18,7 +18,9 @@ Install the following before starting:
 | [Ollama](https://ollama.com) | Local LLM server (Normal mode only) | Download from ollama.com or `brew install ollama` |
 | [dotenvx](https://dotenvx.com) | Encrypted env loader for OpenRouter config (Developer mode only) | `brew install dotenvx/brew/dotenvx` |
 
-The project runs on macOS and Linux. On some Linux setups, the automatic browser-open step may fail; if it does, open `http://localhost:3000` manually.
+The project runs on **macOS**, **Linux**, and **Windows**. Secret storage adapts to each platform automatically (macOS Keychain, libsecret/Secret Service on Linux, Windows Credential Manager). On Linux, the automatic browser-open step is skipped — open `http://localhost:3000` manually.
+
+> **Note:** Linux and Windows secret backends have not been fully tested across all distributions and versions. If you run into issues on your machine, contributions and bug reports are very welcome — see the open issues for [Linux (#58)](https://github.com/lfglabs-dev/private-ethereum-assistant/issues/58) and [Windows (#59)](https://github.com/lfglabs-dev/private-ethereum-assistant/issues/59).
 
 ## Getting started
 
@@ -81,7 +83,7 @@ The app uses a UI onboarding wizard for runtime settings. Secrets are saved serv
 - wallet approval thresholds
 - Railgun RPC, POI (Proof of Innocence) nodes, explorer URL, mnemonic, and timing settings
 
-**Stored in the local credential backend on the machine**:
+**Stored in the OS secret store** (macOS Keychain · Linux libsecret/encrypted file · Windows Credential Manager):
 - `EOA_PRIVATE_KEY` — the Ethereum wallet private key
 - `SAFE_SIGNER_PRIVATE_KEY` — the Safe multisig signer key (optional)
 - `SAFE_API_KEY` — Safe Transaction Service API key (optional)
@@ -91,7 +93,7 @@ On macOS this uses the native Keychain helper. On Linux the app prefers Secret S
 **Security notes:**
 - Secrets never enter browser storage
 - Use dedicated low-value wallets for local testing
-- "Delete all" in settings clears browser preferences only, not stored secrets
+- "Delete all" in settings clears browser preferences only, not OS secret store entries
 
 ## LLM providers
 
