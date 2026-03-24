@@ -27,7 +27,7 @@ type UniversalToolRegistry = {
 };
 
 export type EoaToolRegistry = UniversalToolRegistry & {
-  prepare_eoa_transfer: EoaToolSet["prepareEoaTransfer"];
+  send_token: EoaToolSet["sendToken"];
   send_eoa_transfer: EoaToolSet["sendEoaTransfer"];
   prepare_swap: SwapToolSet["prepareSwap"];
   execute_swap: SwapToolSet["executeSwap"];
@@ -83,7 +83,7 @@ export function getTools(
 ): ToolRegistry {
   const resolvedRuntimeConfig = resolveRuntimeConfig(networkConfig, runtimeConfig);
   const activeMode = resolvedRuntimeConfig.actor.type as ExecutionMode;
-  const { prepareEoaTransfer, sendEoaTransfer } = createEoaTransferTools(
+  const { sendToken, sendEoaTransfer } = createEoaTransferTools(
     resolvedRuntimeConfig.network,
     resolvedRuntimeConfig.wallet,
   );
@@ -117,33 +117,36 @@ export function getTools(
   };
 
   if (activeMode === "safe") {
-    return guardToolRegistryForMode(activeMode, {
+    const registry: SafeToolRegistry = {
       ...universalTools,
       get_safe_info: getSafeInfo,
       get_pending_transactions: getPendingTransactions,
       propose_transaction: proposeTransaction,
       swap_tokens: swapTokens,
-    } satisfies SafeToolRegistry);
+    };
+    return guardToolRegistryForMode(activeMode, registry as never) as ToolRegistry;
   }
 
   if (activeMode === "railgun") {
-    return guardToolRegistryForMode(activeMode, {
+    const registry: PrivateToolRegistry = {
       ...universalTools,
       railgun_balance: getRailgunBalance,
       railgun_balance_route: routeRailgunBalance,
       railgun_shield: railgunShieldTokens,
       railgun_transfer: railgunPrivateTransfer,
       railgun_unshield: railgunWithdraw,
-    } satisfies PrivateToolRegistry);
+    };
+    return guardToolRegistryForMode(activeMode, registry as never) as ToolRegistry;
   }
 
-  return guardToolRegistryForMode(activeMode, {
+  const registry: EoaToolRegistry = {
     ...universalTools,
-    prepare_eoa_transfer: prepareEoaTransfer,
+    send_token: sendToken,
     send_eoa_transfer: sendEoaTransfer,
     prepare_swap: prepareSwap,
     execute_swap: executeSwap,
-  } satisfies EoaToolRegistry);
+  };
+  return guardToolRegistryForMode(activeMode, registry as never) as ToolRegistry;
 }
 
 export function createTools<M extends ExecutionMode>(

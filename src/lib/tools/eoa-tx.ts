@@ -24,6 +24,7 @@ import {
   type ChainMetadata,
   type NetworkConfig,
 } from "../ethereum";
+import { resolveTokenBySymbolOrAddress } from "../token-aliases";
 import {
   consumeTransferRateLimitSlot,
   evaluateSessionTransferApproval,
@@ -36,15 +37,15 @@ import { signLocalActionId, verifyLocalActionId } from "../signed-action-id";
 const transferInputSchema = z.object({
   to: z
     .string()
-    .describe("Recipient address or ENS name such as vitalik.eth."),
+    .describe("Recipient address or ENS name like vitalik.eth"),
   amount: z
     .string()
-    .describe("Amount to send as a decimal string, e.g. '0.01'."),
-  tokenAddress: z
+    .describe("Amount to send, e.g. '5' or '0.01'"),
+  token: z
     .string()
     .optional()
     .describe(
-      "Optional ERC-20 token contract address. Omit it for native ETH transfers."
+      "Token to send: ETH, USDC, DAI, or a contract address. Omit or pass 'ETH' for native ETH."
     ),
   gasLimit: z
     .string()
@@ -615,7 +616,7 @@ function getPreparedTransferOrError(
   if (!prepared || prepared.expiresAt <= Date.now()) {
     return {
       error: buildPreviewError(
-        "The prepared transaction expired or was not found. Run prepare_eoa_transfer again.",
+        "The prepared transaction expired or was not found. Run send_token again.",
         fallbackChainMetadata
       ),
     } as const;
@@ -717,8 +718,33 @@ async function prepareTransfer(
   let value = BigInt(0);
   let data = "0x" as Hex;
 
-  if (input.tokenAddress) {
-    const tokenInfo = await getTokenInfo(input.tokenAddress, publicClient);
+  const tokenInput = (input.token ?? "ETH").trim();
+  const isNativeToken =
+    tokenInput.toUpperCase() === "ETH" ||
+    tokenInput.toUpperCase() === chainMetadata.nativeSymbol.toUpperCase() ||
+    tokenInput.toUpperCase() === "NATIVE";
+
+  if (!isNativeToken) {
+    let resolvedAddress: string;
+
+    if (isAddress(tokenInput)) {
+      resolvedAddress = tokenInput;
+    } else {
+      const resolution = await resolveTokenBySymbolOrAddress(
+        tokenInput,
+        network.chainId,
+        chainMetadata.nativeSymbol,
+      );
+      if (resolution.status === "error") {
+        return {
+          ok: false,
+          result: buildPreviewError(resolution.message, chainMetadata),
+        } as const;
+      }
+      resolvedAddress = resolution.token.address;
+    }
+
+    const tokenInfo = await getTokenInfo(resolvedAddress, publicClient);
     if (hasToolError(tokenInfo)) {
       return {
         ok: false,
@@ -1388,9 +1414,9 @@ export function createEoaTransferTools(
 ) {
   const chainMetadata = createEthereumContext(networkConfig).chainMetadata;
 
-  const prepareEoaTransfer = tool({
+  const sendToken = tool({
     description:
-      "Prepare an ETH or ERC-20 transfer from the configured EOA. Always call this first for send requests so you can show gas estimates and ask the user to confirm before signing.",
+      "Send ETH or any token (USDC, DAI, etc.) to an address or ENS name. Pass the token name like 'USDC' or a contract address. Always call this before send_eoa_transfer.",
     inputSchema: transferInputSchema,
     execute: async (input: TransferInput) => {
       const result = await prepareTransfer(input, networkConfig, walletConfig);
@@ -1400,12 +1426,12 @@ export function createEoaTransferTools(
 
   const sendEoaTransfer = tool({
     description:
-      "Send a previously prepared ETH or ERC-20 transfer from the configured EOA. Only use this after the user has explicitly confirmed the prepared transfer.",
+      "Confirm and broadcast a transfer prepared by send_token. Only call after the user explicitly confirms.",
     inputSchema: z.object({
       confirmationId: z
         .string()
         .describe(
-          "The confirmationId returned by prepare_eoa_transfer for the exact transaction the user approved."
+          "The confirmationId returned by send_token for the transaction the user approved."
         ),
     }),
     execute: async function* ({
@@ -1424,7 +1450,7 @@ export function createEoaTransferTools(
         if (
           update.kind === "transaction_error" &&
           update.error ===
-            "The prepared transaction expired or was not found. Run prepare_eoa_transfer again."
+            "The prepared transaction expired or was not found. Run send_token again."
         ) {
           const missingPreparedError: PreviewResult = {
             ...update,
@@ -1440,7 +1466,7 @@ export function createEoaTransferTools(
   });
 
   return {
-    prepareEoaTransfer,
+    sendToken,
     sendEoaTransfer,
   };
 }

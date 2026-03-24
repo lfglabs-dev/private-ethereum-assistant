@@ -78,7 +78,7 @@ async function createApprovalPolicyTools(nativeThreshold: string) {
 describe("EOA approval policy E2E", () => {
   test("below-threshold sends keep the normal confirmation flow", async () => {
     const tools = await createApprovalPolicyTools("1");
-    const preview = await executeTool(tools.prepare_eoa_transfer, {
+    const preview = await executeTool(tools.send_token, {
       to: walletAddress,
       amount: TEST_AMOUNT,
     });
@@ -90,7 +90,7 @@ describe("EOA approval policy E2E", () => {
 
   test("above-threshold sends require local approval and expose an exact summary", async () => {
     const tools = await createApprovalPolicyTools("0.0000001");
-    const preview = await executeTool(tools.prepare_eoa_transfer, {
+    const preview = await executeTool(tools.send_token, {
       to: walletAddress,
       amount: TEST_AMOUNT,
     });
@@ -116,7 +116,7 @@ describe("EOA approval policy E2E", () => {
 
   test("approved high-value sends broadcast only after local approval", async () => {
     const tools = await createApprovalPolicyTools("0.0000001");
-    const preview = await executeTool(tools.prepare_eoa_transfer, {
+    const preview = await executeTool(tools.send_token, {
       to: walletAddress,
       amount: TEST_AMOUNT,
     });
@@ -141,7 +141,7 @@ describe("EOA approval policy E2E", () => {
 
   test("rejected high-value sends abort cleanly without broadcasting", async () => {
     const tools = await createApprovalPolicyTools("0.0000001");
-    const preview = await executeTool(tools.prepare_eoa_transfer, {
+    const preview = await executeTool(tools.send_token, {
       to: walletAddress,
       amount: TEST_AMOUNT,
     });

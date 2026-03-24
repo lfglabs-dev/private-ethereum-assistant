@@ -41,7 +41,7 @@ describe("read-chain E2E", () => {
   test("get_balance returns the real USDC balance on Arbitrum", async () => {
     const result = await executeTool(tools.get_balance, {
       address: walletAddress,
-      tokenAddress: ARBITRUM_USDC_ADDRESS,
+      token: ARBITRUM_USDC_ADDRESS,
     })
 
     expect(result.tokens).toHaveLength(1)
@@ -60,7 +60,7 @@ describe("read-chain E2E", () => {
   test("get_balance resolves a verified token by symbol on Arbitrum", async () => {
     const result = await executeTool(tools.get_balance, {
       address: walletAddress,
-      tokenSymbol: "USDC",
+      token: "USDC",
     })
 
     expect(result.tokens).toHaveLength(1)
@@ -127,7 +127,7 @@ describe("read-chain E2E", () => {
   test("get_balance handles multiple token addresses with an invalid entry", async () => {
     const result = await executeTool(tools.get_balance, {
       address: walletAddress,
-      tokenAddresses: [
+      tokens: [
         ARBITRUM_USDC_ADDRESS,
         "0x0000000000000000000000000000000000000001",
       ],

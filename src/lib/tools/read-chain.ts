@@ -13,20 +13,13 @@ import { base, mainnet } from "viem/chains";
 import { createEnsService } from "../ens";
 import { createEthereumContext, type NetworkConfig } from "../ethereum";
 import { resolveTokenMetadata, resolveTokenQuery } from "../token-metadata";
+import { getTokenAliasAddress } from "../token-aliases";
 import { getTrustWalletChainSlug } from "../trustwallet-assets";
 import { formatUntrustedDataLiteral } from "../untrusted-data";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const symbolBytes32Abi = parseAbi(["function symbol() view returns (bytes32)"]);
 const nameBytes32Abi = parseAbi(["function name() view returns (bytes32)"]);
-const VERIFIED_TOKEN_QUERY_OVERRIDES: Partial<Record<number, Record<string, Address>>> = {
-  8453: {
-    USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-  },
-  42161: {
-    USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-  },
-};
 
 export const BASE_PORTFOLIO_TOKEN_ADDRESSES = [
   {
@@ -215,11 +208,9 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
       (value): value is string => Boolean(value?.trim())
     );
     const errors: string[] = [];
-    const overrideEntries = VERIFIED_TOKEN_QUERY_OVERRIDES[chainMetadata.id] ?? {};
-
     if (
       !supportsTrustWalletTokenSearch &&
-      requested.some((value) => !overrideEntries[value.trim().toUpperCase()])
+      requested.some((value) => !getTokenAliasAddress(chainMetadata.id, value))
     ) {
       errors.push(
         `Verified token search is not configured for ${chainMetadata.name}. Provide token contract addresses instead.`
@@ -236,9 +227,9 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
     const seenCandidates = new Set<string>();
 
     for (const value of requested) {
-      const overrideAddress = overrideEntries[value.trim().toUpperCase()];
-      if (overrideAddress) {
-        resolved.push(overrideAddress);
+      const aliasAddress = getTokenAliasAddress(chainMetadata.id, value);
+      if (aliasAddress) {
+        resolved.push(aliasAddress);
         continue;
       }
 
@@ -481,18 +472,34 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
     }
   }
 
+  function classifyTokenInputs(
+    token?: string,
+    tokens?: string[],
+  ) {
+    const all = [token, ...(tokens ?? [])].filter(
+      (v): v is string => Boolean(v?.trim()),
+    );
+    const addresses: string[] = [];
+    const symbols: string[] = [];
+    for (const entry of all) {
+      const trimmed = entry.trim();
+      if (trimmed.startsWith("0x") && trimmed.length === 42) {
+        addresses.push(trimmed);
+      } else {
+        symbols.push(trimmed);
+      }
+    }
+    return { addresses, symbols };
+  }
+
   async function fetchBalanceSnapshot({
     address,
-    tokenAddress,
-    tokenAddresses,
-    tokenSymbol,
-    tokenSymbols,
+    token,
+    tokens,
   }: {
     address: string;
-    tokenAddress?: string;
-    tokenAddresses?: string[];
-    tokenSymbol?: string;
-    tokenSymbols?: string[];
+    token?: string;
+    tokens?: string[];
   }): Promise<BalanceSnapshot> {
     let ownerAddress: Address;
 
@@ -505,9 +512,15 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
       );
     }
 
+    const { addresses: tokenAddresses, symbols: tokenSymbols } =
+      classifyTokenInputs(token, tokens);
+
     const [blockNumber, resolvedQueries] = await Promise.all([
       withRetry(() => publicClient.getBlockNumber()),
-      resolveSelectedNetworkTokenQueries(tokenSymbol, tokenSymbols),
+      resolveSelectedNetworkTokenQueries(
+        tokenSymbols[0],
+        tokenSymbols.length > 1 ? tokenSymbols.slice(1) : undefined,
+      ),
     ]);
     const nativeBalance = await withRetry(() =>
       publicClient.getBalance({
@@ -515,11 +528,11 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
         blockNumber,
       })
     );
-    const requestedTokenAddresses = resolveRequestedTokenAddresses(tokenAddress, [
-      ...(tokenAddresses ?? []),
+    const requestedTokenAddresses = resolveRequestedTokenAddresses(undefined, [
+      ...tokenAddresses,
       ...resolvedQueries.resolved,
     ]);
-    const tokens = await Promise.all(
+    const tokenResults = await Promise.all(
       requestedTokenAddresses.map((requestedTokenAddress) =>
         readTokenBalance(ownerAddress, requestedTokenAddress, blockNumber)
       )
@@ -536,54 +549,34 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
         rawBalance: nativeBalance.toString(),
         formattedBalance: formatWithGrouping(formatEther(nativeBalance)),
       },
-      tokens,
+      tokens: tokenResults,
       tokenCandidates: resolvedQueries.candidates,
       errors: [
         ...resolvedQueries.errors,
-        ...tokens.flatMap((token) => (token.error ? [token.error] : [])),
+        ...tokenResults.flatMap((t) => (t.error ? [t.error] : [])),
       ],
     };
   }
 
   const getBalance = tool({
-    description: `Get the ${chainMetadata.nativeSymbol} balance and optional ERC-20 token balances for an address on ${chainMetadata.name}.`,
+    description: `Check ${chainMetadata.nativeSymbol} and token balances on ${chainMetadata.name}. Pass token names like USDC or contract addresses.`,
     inputSchema: z.object({
       address: z.string().describe("The Ethereum address (0x...)"),
-      tokenAddress: z
-        .string()
-        .optional()
-        .describe("Optional ERC-20 token contract address."),
-      tokenAddresses: z
-        .array(z.string())
-        .optional()
-        .describe("Optional list of ERC-20 token contract addresses to query."),
-      tokenSymbol: z
+      token: z
         .string()
         .optional()
         .describe(
-          "Optional verified token symbol or name for the active network when Trust Wallet indexing is available."
+          "A token symbol like USDC or a contract address (0x...). Omit for native balance only."
         ),
-      tokenSymbols: z
+      tokens: z
         .array(z.string())
         .optional()
         .describe(
-          "Optional list of verified token symbols or names for the active network when Trust Wallet indexing is available."
+          "Multiple token symbols or contract addresses to query."
         ),
     }),
-    execute: async ({
-      address,
-      tokenAddress,
-      tokenAddresses,
-      tokenSymbol,
-      tokenSymbols,
-    }) =>
-      fetchBalanceSnapshot({
-        address,
-        tokenAddress,
-        tokenAddresses,
-        tokenSymbol,
-        tokenSymbols,
-      }),
+    execute: async ({ address, token, tokens }) =>
+      fetchBalanceSnapshot({ address, token, tokens }),
   });
 
   const getPortfolio = tool({
@@ -596,13 +589,13 @@ export function createReadChainTools(networkConfig: NetworkConfig) {
       if (!supportsBasePresets) {
         return buildErrorResult(
           address,
-          `Portfolio token presets are only configured for Base. On ${chainMetadata.name}, use get_balance with tokenAddresses instead.`
+          `Portfolio token presets are only configured for Base. On ${chainMetadata.name}, use get_balance with token names or addresses instead.`
         );
       }
 
       return fetchBalanceSnapshot({
         address,
-        tokenAddresses: BASE_PORTFOLIO_TOKEN_ADDRESSES.map((token) => token.address),
+        tokens: BASE_PORTFOLIO_TOKEN_ADDRESSES.map((t) => t.address),
       });
     },
   });

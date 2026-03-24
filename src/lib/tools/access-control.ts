@@ -7,7 +7,7 @@ const TOOL_MODE_ALLOWLIST = {
   get_transaction: ["eoa", "safe", "railgun"],
   resolve_ens: ["eoa", "safe", "railgun"],
   reverse_resolve_ens: ["eoa", "safe", "railgun"],
-  prepare_eoa_transfer: ["eoa"],
+  send_token: ["eoa"],
   send_eoa_transfer: ["eoa"],
   prepare_swap: ["eoa"],
   execute_swap: ["eoa"],

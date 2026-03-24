@@ -98,7 +98,7 @@ const PROMPTS: PromptSpec[] = [
   {
     id: 4,
     prompt: "Send 0.001 ETH to fricoben.eth",
-    expectedTools: ["resolve_ens", "prepare_eoa_transfer"],
+    expectedTools: ["resolve_ens", "send_token"],
     qualityCheck(text) {
       const normalized = text.toLowerCase();
       const hasAmount = normalized.includes("0.001");

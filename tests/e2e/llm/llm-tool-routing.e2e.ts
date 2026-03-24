@@ -193,12 +193,12 @@ describe("LLM tool routing E2E", () => {
       runtimeConfig,
     })
 
-    const previewCall = findToolCall(result.toolCalls, "prepare_eoa_transfer")
+    const previewCall = findToolCall(result.toolCalls, "send_token")
     expect(isRecord(previewCall.input) ? previewCall.input.to : undefined).toBe(walletAddress)
     expect(isRecord(previewCall.input) ? previewCall.input.amount : undefined).toBe("0.000001")
 
     if (!isRecord(previewCall.output)) {
-      throw new Error("Expected prepare_eoa_transfer to return a preview payload.")
+      throw new Error("Expected send_token to return a preview payload.")
     }
 
     expect(previewCall.output.kind).toBe("transaction_preview")
@@ -211,13 +211,13 @@ describe("LLM tool routing E2E", () => {
       runtimeConfig,
     })
 
-    const previewCall = findToolCall(result.toolCalls, "prepare_eoa_transfer")
+    const previewCall = findToolCall(result.toolCalls, "send_token")
     expect(isRecord(previewCall.input) ? previewCall.input.to : undefined).toBe("vitalik.eth")
     expect(isRecord(previewCall.input) ? previewCall.input.amount : undefined).toBe("0.00002")
     expect(result.toolCalls.some((entry) => entry.toolName === "send_eoa_transfer")).toBe(false)
 
     if (!isRecord(previewCall.output)) {
-      throw new Error("Expected prepare_eoa_transfer to return a preview payload.")
+      throw new Error("Expected send_token to return a preview payload.")
     }
 
     expect(previewCall.output.kind).toBe("transaction_preview")
