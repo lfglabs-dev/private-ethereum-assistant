@@ -38,7 +38,7 @@ describe("WindowsCredentialBackend", () => {
       "/tmp/credential-helper.ps1",
     );
 
-    await expect(backend.get("EOA_PRIVATE_KEY")).resolves.toBe("secret-value");
+    await expect(backend.get("SEED_PHRASE")).resolves.toBe("secret-value");
     expect(spawn).toHaveBeenCalledWith({
       cmd: [
         "powershell.exe",
@@ -49,7 +49,7 @@ describe("WindowsCredentialBackend", () => {
         "/tmp/credential-helper.ps1",
         "get",
         WINDOWS_CREDENTIAL_SERVICE,
-        "EOA_PRIVATE_KEY",
+        "SEED_PHRASE",
       ],
       cwd: process.cwd(),
       env: process.env,
@@ -85,7 +85,7 @@ describe("WindowsCredentialBackend", () => {
 
   test("parses list output as JSON", async () => {
     spyOn(Bun, "spawn").mockImplementation(() =>
-      createSpawnResult(0, '["EOA_PRIVATE_KEY","SAFE_API_KEY"]'),
+      createSpawnResult(0, '["SEED_PHRASE","SAFE_API_KEY"]'),
     );
     const backend = new WindowsCredentialBackend(
       WINDOWS_CREDENTIAL_SERVICE,
@@ -93,7 +93,7 @@ describe("WindowsCredentialBackend", () => {
     );
 
     await expect(backend.list()).resolves.toEqual([
-      "EOA_PRIVATE_KEY",
+      "SEED_PHRASE",
       "SAFE_API_KEY",
     ]);
   });
@@ -102,7 +102,7 @@ describe("WindowsCredentialBackend", () => {
     const spawn = spyOn(Bun, "spawn").mockImplementation(() =>
       createSpawnResult(
         0,
-        '{"EOA_PRIVATE_KEY":"secret-value","SAFE_API_KEY":"safe-api-key"}',
+        '{"SEED_PHRASE":"secret-value","SAFE_API_KEY":"safe-api-key"}',
       ),
     );
     const backend = new WindowsCredentialBackend(
@@ -111,7 +111,7 @@ describe("WindowsCredentialBackend", () => {
     );
 
     await expect(backend.loadAll()).resolves.toEqual({
-      EOA_PRIVATE_KEY: "secret-value",
+      SEED_PHRASE: "secret-value",
       SAFE_API_KEY: "safe-api-key",
     });
     expect(spawn).toHaveBeenCalledWith({
@@ -142,7 +142,7 @@ describe("WindowsCredentialBackend", () => {
       "/tmp/credential-helper.ps1",
     );
 
-    await expect(backend.set("EOA_PRIVATE_KEY", "secret")).rejects.toThrow(
+    await expect(backend.set("SEED_PHRASE", "secret")).rejects.toThrow(
       "access denied",
     );
   });

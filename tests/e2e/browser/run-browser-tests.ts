@@ -5,7 +5,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { privateKeyToAccount } from "viem/accounts";
+import { seedPhraseToAddress } from "@/lib/seed-phrase";
 import { getSecret } from "@/lib/secret-store";
 import {
   BALANCE_ROUTING_ETH_AMOUNT,
@@ -24,16 +24,12 @@ const APP_URL = process.env.E2E_APP_URL ?? "http://127.0.0.1:3100";
 const DEV_PORT = new URL(APP_URL).port || "3000";
 const SESSION = `private-ethereum-assistant-e2e-${Date.now()}`;
 const SCREENSHOT_DIR = join(process.cwd(), "tests/e2e/browser/screenshots");
-const E2E_WALLET_PRIVATE_KEY = (await getSecret("EOA_PRIVATE_KEY")) ?? "";
+const E2E_SEED_PHRASE = ((await getSecret("SEED_PHRASE")) ?? "").trim();
 const HAS_SAFE_AUTOMATION = Boolean(
-  (await getSecret("SAFE_API_KEY")) && E2E_WALLET_PRIVATE_KEY,
+  (await getSecret("SAFE_API_KEY")) && E2E_SEED_PHRASE,
 );
-const E2E_WALLET_ADDRESS = E2E_WALLET_PRIVATE_KEY
-  ? privateKeyToAccount(
-      (E2E_WALLET_PRIVATE_KEY.startsWith("0x")
-        ? E2E_WALLET_PRIVATE_KEY
-        : `0x${E2E_WALLET_PRIVATE_KEY}`) as `0x${string}`,
-    ).address
+const E2E_WALLET_ADDRESS = E2E_SEED_PHRASE
+  ? seedPhraseToAddress(E2E_SEED_PHRASE)
   : "";
 const VITALIK_ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 

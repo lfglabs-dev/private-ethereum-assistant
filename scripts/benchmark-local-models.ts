@@ -520,10 +520,10 @@ ${detailSections}
 
 async function main() {
   const { getSecret } = await import("../src/lib/secret-store");
-  const eoaKey = await getSecret("EOA_PRIVATE_KEY");
-  if (!eoaKey) {
+  const seedPhrase = await getSecret("SEED_PHRASE");
+  if (!seedPhrase) {
     throw new Error(
-      "Missing EOA_PRIVATE_KEY in Keychain. Store it first via: bun run local",
+      "Missing SEED_PHRASE in Keychain. Store it first via: bun run local",
     );
   }
 

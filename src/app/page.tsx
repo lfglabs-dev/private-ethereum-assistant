@@ -98,8 +98,7 @@ function getValidationMessage(error: unknown) {
 }
 
 type StandardEnvReadiness = {
-  eoaPrivateKey: boolean;
-  railgunMnemonic: boolean;
+  seedPhrase: boolean;
   accessDenied: boolean;
 };
 
@@ -120,10 +119,7 @@ function ConfiguredAssistant({
   const [pendingModeSwitchKey, setPendingModeSwitchKey] = useState<string | null>(null);
   const [showDebugTrace, setShowDebugTrace] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [hasServerWalletKey, setHasServerWalletKey] = useState(appMode === "developer");
-  const [hasServerRailgunMnemonic, setHasServerRailgunMnemonic] = useState(
-    appMode === "developer",
-  );
+  const [hasServerSeedPhrase, setHasServerSeedPhrase] = useState(appMode === "developer");
   const [settingsDraft, setSettingsDraft] = useState<RuntimeConfigDraft>(() =>
     createRuntimeConfigDraft(runtimeConfig),
   );
@@ -193,18 +189,15 @@ function ConfiguredAssistant({
           cache: "no-store",
         });
         const payload = (await response.json()) as {
-          eoaPrivateKey?: boolean;
-          railgunMnemonic?: boolean;
+          seedPhrase?: boolean;
         };
 
         if (!cancelled) {
-          setHasServerWalletKey(Boolean(payload.eoaPrivateKey));
-          setHasServerRailgunMnemonic(Boolean(payload.railgunMnemonic));
+          setHasServerSeedPhrase(Boolean(payload.seedPhrase));
         }
       } catch {
         if (!cancelled) {
-          setHasServerWalletKey(false);
-          setHasServerRailgunMnemonic(false);
+          setHasServerSeedPhrase(false);
         }
       }
     };
@@ -219,8 +212,7 @@ function ConfiguredAssistant({
   useEffect(() => {
     const hasRailgunCredential =
       appMode === "developer" ||
-      hasServerWalletKey ||
-      hasServerRailgunMnemonic ||
+      hasServerSeedPhrase ||
       runtimeConfig.railgun.mnemonic.trim().length > 0;
 
     if (!hasRailgunCredential) {
@@ -256,7 +248,7 @@ function ConfiguredAssistant({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [appMode, hasServerRailgunMnemonic, hasServerWalletKey, runtimeConfig]);
+  }, [appMode, hasServerSeedPhrase, runtimeConfig]);
 
   const sendChatMessage = (
     text: string,
@@ -607,16 +599,14 @@ export default function Home() {
 
         if (!cancelled) {
           setStandardEnvReadiness({
-            eoaPrivateKey: Boolean(payload.eoaPrivateKey),
-            railgunMnemonic: Boolean(payload.railgunMnemonic),
+            seedPhrase: Boolean(payload.seedPhrase),
             accessDenied: Boolean(payload.accessDenied),
           });
         }
       } catch {
         if (!cancelled) {
           setStandardEnvReadiness({
-            eoaPrivateKey: false,
-            railgunMnemonic: false,
+            seedPhrase: false,
             accessDenied: false,
           });
         }
@@ -634,7 +624,7 @@ export default function Home() {
     appMode === "standard" &&
     runtimeConfig !== null &&
     standardEnvReadiness !== null &&
-    (!standardEnvReadiness.eoaPrivateKey || !standardEnvReadiness.railgunMnemonic);
+    !standardEnvReadiness.seedPhrase;
   const effectiveOnboardingStep = shouldResumeStandardOnboarding
     ? Math.max(onboardingStep, 2)
     : onboardingStep;

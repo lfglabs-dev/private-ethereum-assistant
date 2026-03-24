@@ -22,10 +22,9 @@ mock.module("./secret-store", () => ({
   invalidateSecretCache: () => {},
   getSecretBackend: () => null,
   SECRET_STORE_KEYS: [
-    "EOA_PRIVATE_KEY",
+    "SEED_PHRASE",
     "SAFE_SIGNER_PRIVATE_KEY",
     "SAFE_API_KEY",
-    "RAILGUN_MNEMONIC",
   ],
 }));
 
@@ -64,13 +63,15 @@ describe("runtime-config helpers", () => {
     expect(() => validateRuntimeConfigDraftForAppMode(draft, "standard")).not.toThrow();
   });
 
-  test("developer mode ignores any Railgun mnemonic draft value", () => {
+  test("developer mode preserves the Railgun mnemonic (seed phrase)", () => {
     const draft = createRuntimeConfigDraft(createDefaultRuntimeConfig());
     draft.railgun.mnemonic = "test test test test test test test test test test test junk";
 
     const runtimeConfig = validateRuntimeConfigDraftForAppMode(draft, "developer");
 
-    expect(runtimeConfig.railgun.mnemonic).toBe("");
+    expect(runtimeConfig.railgun.mnemonic).toBe(
+      "test test test test test test test test test test test junk",
+    );
   });
 
   test("developer mode keeps OpenRouter as the display provider", () => {
@@ -103,23 +104,21 @@ describe("runtime-config helpers", () => {
     expect(getActiveModel(localConfig)).toBe("qwen3:8b");
   });
 
-  test("developer mode reuses the EOA key as the Safe signer key", async () => {
+  test("developer mode derives EOA and Safe keys from seed phrase", async () => {
+    const testSeedPhrase =
+      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
     mockGetSecret.mockImplementation(async (key: string) => {
-      if (key === "EOA_PRIVATE_KEY") {
-        return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      if (key === "SEED_PHRASE") {
+        return testSeedPhrase;
       }
       return null;
     });
 
     const runtimeConfig = await createDeveloperRuntimeConfig();
 
-    expect(runtimeConfig.wallet.eoaPrivateKey).toBe(
-      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    );
-    expect(runtimeConfig.safe.signerPrivateKey).toBe(
-      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    );
-    expect(runtimeConfig.railgun.mnemonic).toBe("");
+    expect(runtimeConfig.wallet.eoaPrivateKey).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(runtimeConfig.safe.signerPrivateKey).toBe(runtimeConfig.wallet.eoaPrivateKey);
+    expect(runtimeConfig.railgun.mnemonic).toBe(testSeedPhrase);
 
     mockGetSecret.mockReset();
   });

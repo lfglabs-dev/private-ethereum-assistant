@@ -243,13 +243,7 @@ export function createDeveloperDisplayRuntimeConfig(): RuntimeConfig {
 }
 
 export function normalizeDeveloperRuntimeConfig(runtimeConfig: RuntimeConfig): RuntimeConfig {
-  return {
-    ...runtimeConfig,
-    railgun: {
-      ...runtimeConfig.railgun,
-      mnemonic: "",
-    },
-  };
+  return runtimeConfig;
 }
 
 export function mergeRuntimeConfigOverrides(

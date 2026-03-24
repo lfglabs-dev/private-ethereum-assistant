@@ -15,10 +15,9 @@ export interface SecretBackend {
 }
 
 export const SECRET_STORE_KEYS = [
-  "EOA_PRIVATE_KEY",
+  "SEED_PHRASE",
   "SAFE_SIGNER_PRIVATE_KEY",
   "SAFE_API_KEY",
-  "RAILGUN_MNEMONIC",
 ] as const;
 
 export type SecretStoreKey = (typeof SECRET_STORE_KEYS)[number];
