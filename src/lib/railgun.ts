@@ -5,10 +5,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { groth16 } from "snarkjs";
 import {
-  ByteUtils,
-  Mnemonic,
-} from "@railgun-community/engine";
-import {
   ArtifactStore,
   awaitWalletScan,
   balanceForERC20Token,
@@ -68,8 +64,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrum } from "viem/chains";
 import { config } from "./config";
-import { getAppMode, type RuntimeConfig } from "./runtime-config";
-import { getSecret } from "./secret-store";
+import { type RuntimeConfig } from "./runtime-config";
 import { signLocalActionId, verifyLocalActionId } from "./signed-action-id";
 
 const RAILGUN_NETWORK = NetworkName.Arbitrum;
@@ -992,52 +987,13 @@ const getWalletClient = () =>
   });
 
 const deriveRailgunMnemonic = async () => {
-  if (getAppMode() === "developer") {
-    const privateKey = currentConfig.signerPrivateKey.trim();
-    if (!privateKey) {
-      throw new Error(
-        "Developer mode requires an EOA private key to derive the Railgun wallet.",
-      );
-    }
-
-    if (process.env.RAILGUN_DERIVE_NAMESPACE_MNEMONIC === "1") {
-      const namespaceEntropy = keccak256(
-        stringToHex(
-          `railgun-test-wallet:${privateKey}:${getRailgunStorageNamespace()}`,
-        ),
-      );
-      return Mnemonic.fromEntropy(ByteUtils.strip0x(namespaceEntropy));
-    }
-
-    return Mnemonic.fromEntropy(ByteUtils.strip0x(privateKey));
+  const mnemonic = currentConfig.mnemonic.trim();
+  if (!mnemonic) {
+    throw new Error(
+      "Missing seed phrase. Configure it in Settings first.",
+    );
   }
-
-  const explicitMnemonic = currentConfig.mnemonic.trim();
-  if (explicitMnemonic) {
-    return explicitMnemonic;
-  }
-
-  const storedMnemonic = (await getSecret("RAILGUN_MNEMONIC"))?.trim();
-  if (storedMnemonic) {
-    return storedMnemonic;
-  }
-
-  const privateKey = currentConfig.signerPrivateKey.trim();
-  if (privateKey) {
-    if (process.env.RAILGUN_DERIVE_NAMESPACE_MNEMONIC === "1") {
-      const namespaceEntropy = keccak256(
-        stringToHex(
-          `railgun-test-wallet:${privateKey}:${getRailgunStorageNamespace()}`,
-        ),
-      );
-      return Mnemonic.fromEntropy(ByteUtils.strip0x(namespaceEntropy));
-    }
-    return Mnemonic.fromEntropy(ByteUtils.strip0x(privateKey));
-  }
-
-  throw new Error(
-    "Missing Railgun mnemonic and EOA private key. Add one of them in Settings first.",
-  );
+  return mnemonic;
 };
 
 const deriveEncryptionKey = (mnemonic: string) =>

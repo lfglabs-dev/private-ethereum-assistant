@@ -4,11 +4,8 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
-  useRef,
   useState,
 } from "react";
-import { generateMnemonic } from "@scure/bip39";
-import { wordlist } from "@scure/bip39/wordlists/english";
 import { ShieldAlert, Sparkles, Wallet } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -39,18 +36,16 @@ type RuntimeConfigSection =
   | "railgun";
 
 type EnvSecretStatus = {
-  eoaPrivateKey: boolean;
+  seedPhrase: boolean;
   safeSignerPrivateKey: boolean;
   safeApiKey: boolean;
-  railgunMnemonic: boolean;
   accessDenied: boolean;
 };
 
 type EnvSecretDraft = {
-  eoaPrivateKey: string;
+  seedPhrase: string;
   safeSignerPrivateKey: string;
   safeApiKey: string;
-  railgunMnemonic: string;
 };
 
 type SaveKeysResult = { ok: true } | { ok: false; message: string };
@@ -71,17 +66,15 @@ export type RuntimeConfigFormHandle = {
 
 const MODE_OPTIONS = getExecutionModeOptions();
 const EMPTY_ENV_STATUS: EnvSecretStatus = {
-  eoaPrivateKey: false,
+  seedPhrase: false,
   safeSignerPrivateKey: false,
   safeApiKey: false,
-  railgunMnemonic: false,
   accessDenied: false,
 };
 const EMPTY_ENV_SECRET_DRAFT: EnvSecretDraft = {
-  eoaPrivateKey: "",
+  seedPhrase: "",
   safeSignerPrivateKey: "",
   safeApiKey: "",
-  railgunMnemonic: "",
 };
 
 function updateDraftSection<K extends keyof RuntimeConfigDraft>(
@@ -131,23 +124,19 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
   ) {
     const visibleSections = new Set(sections);
     const includesKeys = visibleSections.has("keys");
-    const includesRailgun = visibleSections.has("railgun");
     const allowedProviders: LlmProvider[] =
       providerOptions.length > 0 ? [...providerOptions] : ["local"];
     const selectedProviderLabel = getProviderLabel(draft.llm.provider);
     const selectedPresetId = getSelectedPresetId(draft);
     const activeModel = getActiveModelDraftValue(draft);
     const suggestedModels = getSuggestedModels(draft.llm.provider);
-    const railgunMnemonicRef = useRef<HTMLTextAreaElement | null>(null);
     const [envStatus, setEnvStatus] = useState<EnvSecretStatus>(EMPTY_ENV_STATUS);
     const [keysDraft, setKeysDraft] = useState<EnvSecretDraft>(EMPTY_ENV_SECRET_DRAFT);
     const [editingKeys, setEditingKeys] = useState(false);
     const [keyMessage, setKeyMessage] = useState<string | null>(null);
     const [isLoadingEnvStatus, setIsLoadingEnvStatus] = useState(false);
-    const [didGenerateRailgunMnemonic, setDidGenerateRailgunMnemonic] = useState(false);
     const [saveEnvConfirmationToken, setSaveEnvConfirmationToken] = useState("");
     const isDeveloperMode = appMode === "developer";
-    const hasRailgunMnemonic = draft.railgun.mnemonic.trim().length > 0;
 
     const loadEnvStatus = async () => {
       setIsLoadingEnvStatus(true);
@@ -166,10 +155,9 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
         }
 
         setEnvStatus({
-          eoaPrivateKey: Boolean(payload.eoaPrivateKey),
+          seedPhrase: Boolean(payload.seedPhrase),
           safeSignerPrivateKey: Boolean(payload.safeSignerPrivateKey),
           safeApiKey: Boolean(payload.safeApiKey),
-          railgunMnemonic: Boolean(payload.railgunMnemonic),
           accessDenied: Boolean(payload.accessDenied),
         });
         setSaveEnvConfirmationToken(payload.saveEnvConfirmationToken ?? "");
@@ -204,12 +192,12 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
           setKeyMessage(null);
 
           const payload: Partial<EnvSecretDraft> = {};
-          const eoaPrivateKey = keysDraft.eoaPrivateKey.trim();
+          const seedPhrase = keysDraft.seedPhrase.trim();
           const safeSignerPrivateKey = keysDraft.safeSignerPrivateKey.trim();
           const safeApiKey = keysDraft.safeApiKey.trim();
 
-          if (eoaPrivateKey) {
-            payload.eoaPrivateKey = eoaPrivateKey;
+          if (seedPhrase) {
+            payload.seedPhrase = seedPhrase;
           }
           if (safeSignerPrivateKey) {
             payload.safeSignerPrivateKey = safeSignerPrivateKey;
@@ -217,28 +205,9 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
           if (safeApiKey) {
             payload.safeApiKey = safeApiKey;
           }
-          if (!isDeveloperMode) {
-            const railgunMnemonic = draft.railgun.mnemonic.trim();
-            if (railgunMnemonic) {
-              payload.railgunMnemonic = railgunMnemonic;
-            }
-          }
 
-          if (mode === "onboarding" && !envStatus.eoaPrivateKey && !payload.eoaPrivateKey) {
-            const message = "Enter an EOA private key to continue.";
-            setKeyMessage(message);
-            return { ok: false, message };
-          }
-
-          if (
-            mode === "onboarding" &&
-            includesRailgun &&
-            !isDeveloperMode &&
-            !envStatus.railgunMnemonic &&
-            !payload.railgunMnemonic
-          ) {
-            const message =
-              "Generate or import a Railgun mnemonic before continuing.";
+          if (mode === "onboarding" && !envStatus.seedPhrase && !payload.seedPhrase) {
+            const message = "Enter a seed phrase to continue.";
             setKeyMessage(message);
             return { ok: false, message };
           }
@@ -282,17 +251,14 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
             setKeysDraft(EMPTY_ENV_SECRET_DRAFT);
             setEditingKeys(false);
             setEnvStatus((current) => ({
-              eoaPrivateKey:
-                current.eoaPrivateKey ||
-                Boolean(result?.saved?.includes("eoaPrivateKey")),
+              seedPhrase:
+                current.seedPhrase ||
+                Boolean(result?.saved?.includes("seedPhrase")),
               safeSignerPrivateKey:
                 current.safeSignerPrivateKey ||
                 Boolean(result?.saved?.includes("safeSignerPrivateKey")),
               safeApiKey:
                 current.safeApiKey || Boolean(result?.saved?.includes("safeApiKey")),
-              railgunMnemonic:
-                current.railgunMnemonic ||
-                Boolean(result?.saved?.includes("railgunMnemonic")),
               accessDenied: false,
             }));
             await loadEnvStatus();
@@ -306,10 +272,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
         },
       }),
       [
-        draft.railgun.mnemonic,
-        envStatus.eoaPrivateKey,
-        envStatus.railgunMnemonic,
-        includesRailgun,
+        envStatus.seedPhrase,
         isDeveloperMode,
         keysDraft,
         mode,
@@ -321,26 +284,6 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
       (message, index, values): message is string =>
         typeof message === "string" && values.indexOf(message) === index,
     );
-
-    const updateRailgunMnemonic = (mnemonic: string) => {
-      onChange(
-        updateDraftSection(draft, "railgun", {
-          ...draft.railgun,
-          mnemonic,
-        }),
-      );
-    };
-
-    const handleGenerateRailgunMnemonic = () => {
-      updateRailgunMnemonic(generateMnemonic(wordlist));
-      setDidGenerateRailgunMnemonic(true);
-    };
-
-    const handleImportRailgunMnemonic = () => {
-      setDidGenerateRailgunMnemonic(false);
-      railgunMnemonicRef.current?.focus();
-      railgunMnemonicRef.current?.select();
-    };
 
     return (
       <div className="space-y-4">
@@ -569,24 +512,29 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
             <CardContent className="space-y-4">
               <label className="block space-y-1">
                 <span className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                  <span>EOA private key</span>
-                  <FieldStatusBadge configured={envStatus.eoaPrivateKey} />
+                  <span>Seed phrase (12 or 24 words)</span>
+                  <FieldStatusBadge configured={envStatus.seedPhrase} />
                 </span>
-                <Input
-                  data-testid="runtime-eoa-private-key"
-                  type="password"
-                  value={keysDraft.eoaPrivateKey}
+                <Textarea
+                  data-testid="runtime-seed-phrase"
+                  value={keysDraft.seedPhrase}
                   onChange={(event) =>
                     setKeysDraft((current) => ({
                       ...current,
-                      eoaPrivateKey: event.target.value,
+                      seedPhrase: event.target.value,
                     }))
                   }
                   placeholder={
-                    envStatus.eoaPrivateKey ? "••••••• (already configured)" : "0x..."
+                    envStatus.seedPhrase
+                      ? "••••••• (already configured)"
+                      : "Enter your BIP39 seed phrase"
                   }
-                  disabled={envStatus.eoaPrivateKey && !editingKeys}
+                  disabled={envStatus.seedPhrase && !editingKeys}
+                  rows={2}
                 />
+                <span className="text-xs text-muted-foreground">
+                  Your seed phrase derives both the EOA wallet and the Railgun private wallet.
+                </span>
               </label>
 
               <label className="block space-y-1">
@@ -641,7 +589,7 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
                 </span>
               </label>
 
-              {(envStatus.eoaPrivateKey ||
+              {(envStatus.seedPhrase ||
                 envStatus.safeSignerPrivateKey ||
                 envStatus.safeApiKey) && (
                 <Button
@@ -866,53 +814,14 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
             <CardHeader>
               <CardTitle>Railgun Settings</CardTitle>
               <CardDescription>
-                {isDeveloperMode
-                  ? "These settings are used only for private Railgun operations."
-                  : "Railgun uses a separate private wallet. Generate or import its recovery phrase before you shield funds."}
+                Railgun uses the same seed phrase as your EOA wallet for private operations.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {isDeveloperMode ? (
-                <div className="rounded-xl border bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">
-                  Developer mode hardcodes the Railgun wallet to the configured EOA
-                  private key. The mnemonic is not editable here.
-                </div>
-              ) : (
-                <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-foreground">
-                      Save the Railgun recovery phrase before shielding.
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Railgun is a separate private wallet from your public EOA. If you
-                      lose this mnemonic, you can lose access to shielded Railgun funds.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={handleGenerateRailgunMnemonic}
-                    >
-                      {hasRailgunMnemonic ? "Generate new mnemonic" : "Generate mnemonic"}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={handleImportRailgunMnemonic}
-                    >
-                      Import existing mnemonic
-                    </Button>
-                  </div>
-                  {didGenerateRailgunMnemonic ? (
-                    <p className="text-xs text-foreground">
-                      A new Railgun mnemonic was generated below. Back it up now before
-                      continuing.
-                    </p>
-                  ) : null}
-                </div>
-              )}
+              <div className="rounded-xl border bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">
+                The Railgun private wallet is derived from your seed phrase. Both your
+                public EOA and Railgun wallet share the same recovery phrase.
+              </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block space-y-1">
@@ -1018,36 +927,6 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
                 />
               </label>
 
-              {isDeveloperMode ? (
-                <div className="block space-y-1">
-                  <span className="text-xs text-muted-foreground">
-                    Railgun mnemonic source
-                  </span>
-                  <div className="rounded-xl border bg-secondary/20 px-3 py-2 text-sm text-muted-foreground">
-                    Fixed to the EOA private key configured for developer mode.
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    Developer mode always derives the same Railgun wallet from that EOA
-                    key. Switch to standard mode if you want a dedicated Railgun mnemonic.
-                  </span>
-                </div>
-              ) : (
-                <label className="block space-y-1">
-                  <span className="text-xs text-muted-foreground">Railgun mnemonic</span>
-                  <Textarea
-                    ref={railgunMnemonicRef}
-                    data-testid="runtime-railgun-mnemonic"
-                    value={draft.railgun.mnemonic}
-                    onChange={(event) => updateRailgunMnemonic(event.target.value)}
-                    rows={2}
-                    placeholder="Generate a new Railgun mnemonic or paste an existing one"
-                  />
-                  <span className="text-xs text-muted-foreground">
-                    This phrase controls your private Railgun balance. Store it in a
-                    password manager or offline backup before using Railgun.
-                  </span>
-                </label>
-              )}
 
               <div className="grid gap-4 sm:grid-cols-3">
                 <label className="block space-y-1">

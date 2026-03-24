@@ -75,7 +75,7 @@ describe("secret store access", () => {
           throw new Error(`Unexpected helper command: ${command}`);
         }
 
-        if (account === "EOA_PRIVATE_KEY") {
+        if (account === "SEED_PHRASE") {
           return createSpawnResult(0, "eoa-secret");
         }
         if (account === "SAFE_API_KEY") {
@@ -87,8 +87,8 @@ describe("secret store access", () => {
 
       await expect(
         Promise.all([
-          getSecret("EOA_PRIVATE_KEY"),
-          getSecret("EOA_PRIVATE_KEY"),
+          getSecret("SEED_PHRASE"),
+          getSecret("SEED_PHRASE"),
         ]),
       ).resolves.toEqual(["eoa-secret", "eoa-secret"]);
       expect(spawn).toHaveBeenCalledTimes(1);
@@ -96,7 +96,7 @@ describe("secret store access", () => {
         realpathSync(helperPath),
         "get",
         "com.lfglabs.private-ethereum-assistant",
-        "EOA_PRIVATE_KEY",
+        "SEED_PHRASE",
       ]);
 
       await expect(getSecret("SAFE_API_KEY")).resolves.toBe("safe-api-key");
@@ -145,11 +145,11 @@ describe("secret store access", () => {
           throw new Error(`Unexpected helper command: ${command}`);
         }
 
-        return createSpawnResult(0, '["EOA_PRIVATE_KEY","SAFE_API_KEY"]');
+        return createSpawnResult(0, '["SEED_PHRASE","SAFE_API_KEY"]');
       });
 
       await expect(listStoredSecretKeys()).resolves.toEqual([
-        "EOA_PRIVATE_KEY",
+        "SEED_PHRASE",
         "SAFE_API_KEY",
       ]);
       expect(spawn).toHaveBeenCalledTimes(1);
@@ -160,7 +160,7 @@ describe("secret store access", () => {
       ]);
 
       await expect(listStoredSecretKeys()).resolves.toEqual([
-        "EOA_PRIVATE_KEY",
+        "SEED_PHRASE",
         "SAFE_API_KEY",
       ]);
       expect(spawn).toHaveBeenCalledTimes(1);
@@ -177,19 +177,15 @@ describe("secret store access", () => {
 
   test("developer mode prefers encrypted env secrets over Keychain", async () => {
     const originalAppMode = process.env.APP_MODE;
-    const originalEoaPrivateKey = process.env.EOA_PRIVATE_KEY;
-    const originalRailgunMnemonic = process.env.RAILGUN_MNEMONIC;
+    const originalSeedPhrase = process.env.SEED_PHRASE;
 
     process.env.APP_MODE = "developer";
-    process.env.EOA_PRIVATE_KEY = "env-eoa-secret";
-    process.env.RAILGUN_MNEMONIC =
-      "test test test test test test test test test test test junk";
+    process.env.SEED_PHRASE = "env-eoa-secret";
 
     try {
-      await expect(getSecret("EOA_PRIVATE_KEY")).resolves.toBe("env-eoa-secret");
+      await expect(getSecret("SEED_PHRASE")).resolves.toBe("env-eoa-secret");
       await expect(listStoredSecretKeys()).resolves.toEqual([
-        "EOA_PRIVATE_KEY",
-        "RAILGUN_MNEMONIC",
+        "SEED_PHRASE",
       ]);
     } finally {
       if (originalAppMode === undefined) {
@@ -198,16 +194,10 @@ describe("secret store access", () => {
         process.env.APP_MODE = originalAppMode;
       }
 
-      if (originalEoaPrivateKey === undefined) {
-        delete process.env.EOA_PRIVATE_KEY;
+      if (originalSeedPhrase === undefined) {
+        delete process.env.SEED_PHRASE;
       } else {
-        process.env.EOA_PRIVATE_KEY = originalEoaPrivateKey;
-      }
-
-      if (originalRailgunMnemonic === undefined) {
-        delete process.env.RAILGUN_MNEMONIC;
-      } else {
-        process.env.RAILGUN_MNEMONIC = originalRailgunMnemonic;
+        process.env.SEED_PHRASE = originalSeedPhrase;
       }
     }
   });
@@ -248,14 +238,14 @@ describe("secret store access", () => {
         return createSpawnResult(
           0,
           JSON.stringify({
-            EOA_PRIVATE_KEY: "eoa-secret",
+            SEED_PHRASE: "eoa-secret",
             SAFE_API_KEY: "safe-api-key",
           }),
         );
       });
 
       await expect(loadAllSecrets()).resolves.toEqual({
-        EOA_PRIVATE_KEY: "eoa-secret",
+        SEED_PHRASE: "eoa-secret",
         SAFE_API_KEY: "safe-api-key",
       });
       expect(spawn).toHaveBeenCalledTimes(1);
@@ -265,9 +255,9 @@ describe("secret store access", () => {
         "com.lfglabs.private-ethereum-assistant",
       ]);
 
-      await expect(getSecret("EOA_PRIVATE_KEY")).resolves.toBe("eoa-secret");
+      await expect(getSecret("SEED_PHRASE")).resolves.toBe("eoa-secret");
       await expect(listStoredSecretKeys()).resolves.toEqual([
-        "EOA_PRIVATE_KEY",
+        "SEED_PHRASE",
         "SAFE_API_KEY",
       ]);
       expect(spawn).toHaveBeenCalledTimes(1);

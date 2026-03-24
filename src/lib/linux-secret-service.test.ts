@@ -75,11 +75,11 @@ describe("LinuxSecretServiceBackend", () => {
 
       if (command === "store") {
         expect(args).toEqual([
-          "--label=private-ethereum-assistant:EOA_PRIVATE_KEY",
+          "--label=private-ethereum-assistant:SEED_PHRASE",
           "service",
           "com.lfglabs.private-ethereum-assistant",
           "account",
-          "EOA_PRIVATE_KEY",
+          "SEED_PHRASE",
         ]);
         expect(options.stdin).toBeInstanceOf(Blob);
         return createSpawnResult(0);
@@ -88,21 +88,21 @@ describe("LinuxSecretServiceBackend", () => {
       throw new Error(`Unexpected command: ${options.cmd.join(" ")}`);
     }) as unknown as typeof Bun.spawn;
     const backend = new LinuxSecretServiceBackend(
-      ["EOA_PRIVATE_KEY"],
+      ["SEED_PHRASE"],
       "com.lfglabs.private-ethereum-assistant",
       spawn,
       () => ({ exitCode: 0, stdout: "", stderr: "" }),
       { ...process.env, DBUS_SESSION_BUS_ADDRESS: "unix:path=/tmp/dbus" },
     );
 
-    await backend.set("EOA_PRIVATE_KEY", "secret-value");
+    await backend.set("SEED_PHRASE", "secret-value");
     await expect((calls[0]?.stdin as Blob).text()).resolves.toBe("secret-value");
-    await expect(backend.get("EOA_PRIVATE_KEY")).resolves.toBe("secret-value");
+    await expect(backend.get("SEED_PHRASE")).resolves.toBe("secret-value");
   });
 
   test("lists and exports only configured accounts", async () => {
     const values = new Map<string, string>([
-      ["EOA_PRIVATE_KEY", "eoa-secret"],
+      ["SEED_PHRASE", "eoa-secret"],
       ["SAFE_API_KEY", "safe-api-key"],
     ]);
     const spawn = (({ cmd }: { cmd: string[] }) => {
@@ -110,7 +110,7 @@ describe("LinuxSecretServiceBackend", () => {
       return createSpawnResult(values.has(account) ? 0 : 1, values.get(account) ?? "");
     }) as unknown as typeof Bun.spawn;
     const backend = new LinuxSecretServiceBackend(
-      ["EOA_PRIVATE_KEY", "SAFE_API_KEY", "RAILGUN_MNEMONIC"],
+      ["SEED_PHRASE", "SAFE_API_KEY"],
       "com.lfglabs.private-ethereum-assistant",
       spawn,
       () => ({ exitCode: 0, stdout: "", stderr: "" }),
@@ -118,11 +118,11 @@ describe("LinuxSecretServiceBackend", () => {
     );
 
     await expect(backend.list()).resolves.toEqual([
-      "EOA_PRIVATE_KEY",
+      "SEED_PHRASE",
       "SAFE_API_KEY",
     ]);
     await expect(backend.loadAll()).resolves.toEqual({
-      EOA_PRIVATE_KEY: "eoa-secret",
+      SEED_PHRASE: "eoa-secret",
       SAFE_API_KEY: "safe-api-key",
     });
   });

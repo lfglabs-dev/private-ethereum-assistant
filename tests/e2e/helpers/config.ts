@@ -1,12 +1,11 @@
 import type { Tool, ToolExecutionOptions } from "ai"
 import type { NetworkConfig } from "@/lib/ethereum"
 import { createDefaultRuntimeConfig, type ActiveActor } from "@/lib/runtime-config"
+import { seedPhraseToAddress, seedPhraseToPrivateKey } from "@/lib/seed-phrase"
 import { getSecret } from "@/lib/secret-store"
 import type { Address, Hex } from "viem"
-import { privateKeyToAccount } from "viem/accounts"
 
 process.env.RAILGUN_STORAGE_NAMESPACE ??= "railgun-e2e"
-process.env.RAILGUN_DERIVE_NAMESPACE_MNEMONIC ??= "1"
 
 export const ARBITRUM_CONFIG: NetworkConfig = {
   chainId: 42161,
@@ -18,22 +17,20 @@ export const ARBITRUM_USDC_ADDRESS =
 
 export const E2E_TEST_TIMEOUT_MS = 120_000
 
-export async function getWalletPrivateKey(): Promise<Hex> {
-  const value = await getSecret("EOA_PRIVATE_KEY")
+export async function getSeedPhrase(): Promise<string> {
+  const value = await getSecret("SEED_PHRASE")
   if (!value) {
-    throw new Error("Missing EOA_PRIVATE_KEY in the configured developer env or Keychain.")
+    throw new Error("Missing SEED_PHRASE in the configured developer env or Keychain.")
   }
+  return value.trim()
+}
 
-  const normalized = value.startsWith("0x") ? value : `0x${value}`
-  if (!/^0x[0-9a-fA-F]{64}$/.test(normalized)) {
-    throw new Error("Configured private key is not a valid 32-byte hex value.")
-  }
-
-  return normalized as Hex
+export async function getWalletPrivateKey(): Promise<Hex> {
+  return seedPhraseToPrivateKey(await getSeedPhrase())
 }
 
 export async function getWalletAddress() {
-  return privateKeyToAccount(await getWalletPrivateKey()).address
+  return seedPhraseToAddress(await getSeedPhrase())
 }
 
 export async function createE2ERuntimeConfig<M extends ActiveActor = "eoa">(

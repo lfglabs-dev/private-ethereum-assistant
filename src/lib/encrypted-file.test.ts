@@ -38,20 +38,20 @@ describe("EncryptedFileBackend", () => {
 
     expect(backend.isAvailable()).toBe(process.platform === "linux");
 
-    await backend.set("EOA_PRIVATE_KEY", "super-secret");
+    await backend.set("SEED_PHRASE", "super-secret");
     await backend.set("SAFE_API_KEY", "safe-api-key");
 
     expect(existsSync(filePath)).toBe(true);
     expect(readFileSync(filePath, "utf8")).not.toContain("super-secret");
     expect(statSync(filePath).mode & 0o777).toBe(0o600);
 
-    await expect(backend.get("EOA_PRIVATE_KEY")).resolves.toBe("super-secret");
+    await expect(backend.get("SEED_PHRASE")).resolves.toBe("super-secret");
     await expect(backend.list()).resolves.toEqual([
-      "EOA_PRIVATE_KEY",
+      "SEED_PHRASE",
       "SAFE_API_KEY",
     ]);
     await expect(backend.loadAll()).resolves.toEqual({
-      EOA_PRIVATE_KEY: "super-secret",
+      SEED_PHRASE: "super-secret",
       SAFE_API_KEY: "safe-api-key",
     });
   });
@@ -74,8 +74,8 @@ describe("EncryptedFileBackend", () => {
       env,
     );
 
-    await backend.set("EOA_PRIVATE_KEY", "super-secret");
-    await backend.delete("EOA_PRIVATE_KEY");
+    await backend.set("SEED_PHRASE", "super-secret");
+    await backend.delete("SEED_PHRASE");
 
     expect(existsSync(filePath)).toBe(false);
   });

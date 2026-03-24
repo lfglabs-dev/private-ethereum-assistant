@@ -29,13 +29,16 @@ mock.module("./secret-store", () => ({
   listStoredSecretKeys: mockListStoredSecretKeys,
   invalidateSecretCache: () => {},
   getSecretBackend: mockGetSecretBackend,
+  rememberStoredSecret: () => {},
   SECRET_STORE_KEYS: [
-    "EOA_PRIVATE_KEY",
+    "SEED_PHRASE",
     "SAFE_SIGNER_PRIVATE_KEY",
     "SAFE_API_KEY",
-    "RAILGUN_MNEMONIC",
   ],
 }));
+
+const TEST_SEED_PHRASE =
+  "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
 describe("env secret helpers", () => {
   afterEach(() => {
@@ -51,15 +54,13 @@ describe("env secret helpers", () => {
 
   test("reports configured secrets from a single listed-key lookup", async () => {
     mockListStoredSecretKeys.mockResolvedValue([
-      "EOA_PRIVATE_KEY",
-      "RAILGUN_MNEMONIC",
+      "SEED_PHRASE",
     ]);
 
     await expect(getEnvSecretStatus()).resolves.toEqual({
-      eoaPrivateKey: true,
+      seedPhrase: true,
       safeSignerPrivateKey: false,
       safeApiKey: false,
-      railgunMnemonic: true,
       accessDenied: false,
     });
     expect(mockGetSecret).not.toHaveBeenCalled();
@@ -71,39 +72,31 @@ describe("env secret helpers", () => {
     );
 
     await expect(getEnvSecretStatus()).resolves.toEqual({
-      eoaPrivateKey: false,
+      seedPhrase: false,
       safeSignerPrivateKey: false,
       safeApiKey: false,
-      railgunMnemonic: false,
       accessDenied: true,
     });
   });
 
   test("merges runtime config secrets from secret store", async () => {
     mockGetSecret.mockImplementation(async (key: string) => {
-      if (key === "EOA_PRIVATE_KEY") {
-        return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+      if (key === "SEED_PHRASE") {
+        return TEST_SEED_PHRASE;
       }
       if (key === "SAFE_SIGNER_PRIVATE_KEY") {
         return "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-      }
-      if (key === "RAILGUN_MNEMONIC") {
-        return "test test test test test test test test test test test junk";
       }
       return null;
     });
 
     const runtimeConfig = await mergeRuntimeConfigWithEnvSecrets(createDefaultRuntimeConfig());
 
-    expect(runtimeConfig.wallet.eoaPrivateKey).toBe(
-      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    );
+    expect(runtimeConfig.wallet.eoaPrivateKey).toMatch(/^0x[0-9a-f]{64}$/);
     expect(runtimeConfig.safe.signerPrivateKey).toBe(
       "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     );
-    expect(runtimeConfig.railgun.mnemonic).toBe(
-      "test test test test test test test test test test test junk",
-    );
+    expect(runtimeConfig.railgun.mnemonic).toBe(TEST_SEED_PHRASE);
   });
 
   test("requires a secret backend when storing keys", async () => {
@@ -111,7 +104,7 @@ describe("env secret helpers", () => {
 
     await expect(
       saveEnvSecrets({
-        eoaPrivateKey: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        seedPhrase: TEST_SEED_PHRASE,
       }),
     ).rejects.toThrow("No secret backend is available.");
   });
@@ -149,15 +142,15 @@ describe("env secret helpers", () => {
       chmodSync(helperPath, 0o755);
 
       const result = await saveEnvSecrets({
-        eoaPrivateKey: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        seedPhrase: TEST_SEED_PHRASE,
       });
 
       expect(result).toEqual({
         success: true,
-        saved: ["eoaPrivateKey"],
+        saved: ["seedPhrase"],
       });
       expect(readFileSync("helper.log", "utf8")).toContain(
-        "set|com.lfglabs.private-ethereum-assistant|EOA_PRIVATE_KEY|0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        `set|com.lfglabs.private-ethereum-assistant|SEED_PHRASE|${TEST_SEED_PHRASE}`,
       );
     } finally {
       process.chdir(originalCwd);

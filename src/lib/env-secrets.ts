@@ -10,10 +10,10 @@ import { isMacKeychainAccessDeniedError } from "./backends/macos-keychain";
 import {
   createDeveloperDisplayRuntimeConfig,
   mergeRuntimeConfigOverrides,
-  normalizeDeveloperRuntimeConfig,
   type RuntimeConfig,
 } from "./runtime-config";
 import type { NetworkConfig } from "./ethereum";
+import { seedPhraseToPrivateKey, validateSeedPhrase } from "./seed-phrase";
 
 const envPrivateKeySchema = z
   .string()
@@ -26,41 +26,45 @@ const envPrivateKeySchema = z
 
 const envApiKeySchema = z.string().trim().min(1, "Enter a Safe API key.");
 
+const envSeedPhraseSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter a seed phrase.")
+  .refine(
+    (value) => validateSeedPhrase(value),
+    "Enter a valid BIP39 seed phrase (12 or 24 words).",
+  );
+
 export const envSecretsPayloadSchema = z
   .object({
-    eoaPrivateKey: envPrivateKeySchema.optional(),
+    seedPhrase: envSeedPhraseSchema.optional(),
     safeSignerPrivateKey: envPrivateKeySchema.optional(),
     safeApiKey: envApiKeySchema.optional(),
-    railgunMnemonic: z.string().trim().min(1, "Enter a Railgun mnemonic.").optional(),
   })
   .refine(
     (value) =>
-      value.eoaPrivateKey !== undefined ||
+      value.seedPhrase !== undefined ||
       value.safeSignerPrivateKey !== undefined ||
-      value.safeApiKey !== undefined ||
-      value.railgunMnemonic !== undefined,
+      value.safeApiKey !== undefined,
     "Provide at least one key to save.",
   );
 
 export type EnvSecretStatus = {
-  eoaPrivateKey: boolean;
+  seedPhrase: boolean;
   safeSignerPrivateKey: boolean;
   safeApiKey: boolean;
-  railgunMnemonic: boolean;
   accessDenied: boolean;
 };
 
 type SavedEnvVariable =
-  | "eoaPrivateKey"
+  | "seedPhrase"
   | "safeSignerPrivateKey"
-  | "safeApiKey"
-  | "railgunMnemonic";
+  | "safeApiKey";
 
 const ENV_SECRET_VARIABLES: Record<SavedEnvVariable, SecretStoreKey> = {
-  eoaPrivateKey: "EOA_PRIVATE_KEY",
+  seedPhrase: "SEED_PHRASE",
   safeSignerPrivateKey: "SAFE_SIGNER_PRIVATE_KEY",
   safeApiKey: "SAFE_API_KEY",
-  railgunMnemonic: "RAILGUN_MNEMONIC",
 };
 
 function normalizePrivateKey(value: string | undefined) {
@@ -76,19 +80,17 @@ export async function getEnvSecretStatus(): Promise<EnvSecretStatus> {
     const configuredKeys = new Set((await listStoredSecretKeys()) ?? []);
 
     return {
-      eoaPrivateKey: configuredKeys.has("EOA_PRIVATE_KEY"),
+      seedPhrase: configuredKeys.has("SEED_PHRASE"),
       safeSignerPrivateKey: configuredKeys.has("SAFE_SIGNER_PRIVATE_KEY"),
       safeApiKey: configuredKeys.has("SAFE_API_KEY"),
-      railgunMnemonic: configuredKeys.has("RAILGUN_MNEMONIC"),
       accessDenied: false,
     };
   } catch (error) {
     if (isMacKeychainAccessDeniedError(error)) {
       return {
-        eoaPrivateKey: false,
+        seedPhrase: false,
         safeSignerPrivateKey: false,
         safeApiKey: false,
-        railgunMnemonic: false,
         accessDenied: true,
       };
     }
@@ -100,11 +102,15 @@ export async function getEnvSecretStatus(): Promise<EnvSecretStatus> {
 export async function mergeRuntimeConfigWithEnvSecrets(
   runtimeConfig: RuntimeConfig,
 ): Promise<RuntimeConfig> {
-  const [signerKey, eoaKey, railgunMnemonic] = await Promise.all([
+  const [signerKey, seedPhrase] = await Promise.all([
     getSecret("SAFE_SIGNER_PRIVATE_KEY"),
-    getSecret("EOA_PRIVATE_KEY"),
-    getSecret("RAILGUN_MNEMONIC"),
+    getSecret("SEED_PHRASE"),
   ]);
+
+  const trimmedSeedPhrase = seedPhrase?.trim() || "";
+  const derivedEoaPrivateKey = trimmedSeedPhrase
+    ? seedPhraseToPrivateKey(trimmedSeedPhrase)
+    : "";
 
   return {
     ...runtimeConfig,
@@ -114,52 +120,54 @@ export async function mergeRuntimeConfigWithEnvSecrets(
     },
     wallet: {
       ...runtimeConfig.wallet,
-      eoaPrivateKey: normalizePrivateKey(eoaKey?.trim()),
+      eoaPrivateKey: derivedEoaPrivateKey,
     },
     railgun: {
       ...runtimeConfig.railgun,
-      mnemonic: railgunMnemonic?.trim() || "",
+      mnemonic: trimmedSeedPhrase,
     },
   };
 }
 
-async function getDeveloperWalletPrivateKey() {
-  const value = await getSecret("EOA_PRIVATE_KEY");
+async function getDeveloperSeedPhrase() {
+  const value = await getSecret("SEED_PHRASE");
   if (!value) {
     throw new Error(
-      "Developer mode requires EOA_PRIVATE_KEY in .env.tianjin.",
+      "Developer mode requires SEED_PHRASE in .env.tianjin.",
     );
   }
 
-  const normalized = value.startsWith("0x") ? value : `0x${value}`;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(normalized)) {
-    throw new Error("Developer mode wallet private key is not a valid 32-byte hex value.");
+  const trimmed = value.trim();
+  if (!validateSeedPhrase(trimmed)) {
+    throw new Error("Developer mode SEED_PHRASE is not a valid BIP39 mnemonic.");
   }
 
-  return normalized;
+  return trimmed;
 }
 
 export async function getConfiguredEoaPrivateKey() {
-  return getDeveloperWalletPrivateKey();
+  const seedPhrase = await getDeveloperSeedPhrase();
+  return seedPhraseToPrivateKey(seedPhrase);
 }
 
 export async function createDeveloperRuntimeConfig(): Promise<RuntimeConfig> {
   const displayRuntimeConfig = createDeveloperDisplayRuntimeConfig();
-  const developerWalletPrivateKey = await getDeveloperWalletPrivateKey();
+  const seedPhrase = await getDeveloperSeedPhrase();
+  const derivedPrivateKey = seedPhraseToPrivateKey(seedPhrase);
 
   return {
     ...displayRuntimeConfig,
     safe: {
       ...displayRuntimeConfig.safe,
-      signerPrivateKey: developerWalletPrivateKey,
+      signerPrivateKey: derivedPrivateKey,
     },
     wallet: {
       ...displayRuntimeConfig.wallet,
-      eoaPrivateKey: developerWalletPrivateKey,
+      eoaPrivateKey: derivedPrivateKey,
     },
     railgun: {
       ...displayRuntimeConfig.railgun,
-      mnemonic: "",
+      mnemonic: seedPhrase,
     },
   };
 }
@@ -168,9 +176,7 @@ export async function mergeDeveloperRuntimeConfig(
   overrides?: RuntimeConfig | null,
   networkConfig?: NetworkConfig,
 ) {
-  return normalizeDeveloperRuntimeConfig(
-    mergeRuntimeConfigOverrides(await createDeveloperRuntimeConfig(), overrides, networkConfig),
-  );
+  return mergeRuntimeConfigOverrides(await createDeveloperRuntimeConfig(), overrides, networkConfig);
 }
 
 export async function saveEnvSecrets(

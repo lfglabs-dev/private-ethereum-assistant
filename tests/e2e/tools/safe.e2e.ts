@@ -21,7 +21,7 @@ const safeRuntimeConfig = {
 }
 const tools = createTools(ARBITRUM_CONFIG, safeRuntimeConfig)
 const hasSafeSwapPrereqs = Boolean(
-  (await getSecret("SAFE_API_KEY")) && (await getSecret("EOA_PRIVATE_KEY")),
+  (await getSecret("SAFE_API_KEY")) && (await getSecret("SEED_PHRASE")),
 )
 
 describe("Safe E2E", () => {
