@@ -1,8 +1,6 @@
 import { DEFAULT_NETWORK_CONFIG, getChainMetadata, type NetworkConfig } from "./ethereum";
 import {
   createDefaultRuntimeConfig,
-  getActiveModel,
-  getProviderLabel,
   type RuntimeConfig,
 } from "./runtime-config";
 import { getModeLabel } from "./mode";
@@ -26,9 +24,6 @@ export function getSystemPrompt(
 ) {
   const resolvedRuntimeConfig = buildRuntimeConfig(networkConfig, runtimeConfig);
   const chainMetadata = getChainMetadata(resolvedRuntimeConfig.network);
-  const isBaseNetwork = resolvedRuntimeConfig.network.chainId === 8453;
-  const providerLabel = getProviderLabel(resolvedRuntimeConfig.llm.provider);
-  const activeModel = getActiveModel(resolvedRuntimeConfig);
   const activeMode = resolvedRuntimeConfig.actor.type;
   const activeModeLabel = getModeLabel(activeMode);
   const availableToolDescriptions = [
