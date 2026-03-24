@@ -14,6 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import {
   applyNetworkPreset,
   getActiveModelDraftValue,
@@ -500,25 +501,23 @@ export const RuntimeConfigForm = forwardRef<RuntimeConfigFormHandle, RuntimeConf
             <CardContent className="space-y-4">
               <label className="block space-y-1">
                 <span className="text-xs text-muted-foreground">Preset</span>
-                <select
+                <Select
                   data-testid="runtime-network-preset"
-                  className="flex h-9 w-full rounded-lg border border-input bg-transparent px-3 text-sm outline-none"
                   value={selectedPresetId}
-                  onChange={(event) => {
-                    const nextId = event.target.value;
+                  onChange={(nextId) => {
                     if (nextId === "custom") {
                       return;
                     }
                     onChange(applyNetworkPreset(draft, nextId));
                   }}
-                >
-                  {NETWORK_PRESETS.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.name} ({preset.chainId})
-                    </option>
-                  ))}
-                  <option value="custom">Custom</option>
-                </select>
+                  options={[
+                    ...NETWORK_PRESETS.map((preset) => ({
+                      value: preset.id,
+                      label: `${preset.name} (${preset.chainId})`,
+                    })),
+                    { value: "custom", label: "Custom" },
+                  ]}
+                />
               </label>
 
               <label className="block space-y-1">

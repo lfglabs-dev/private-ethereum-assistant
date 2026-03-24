@@ -63,35 +63,6 @@ export const PORTFOLIO_TOKENS: Record<number, PortfolioTokenEntry[]> = {
     { symbol: "DAI", name: "Dai Stablecoin", address: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", decimals: 18, isStablecoin: true, poolFee: 0 },
   ],
 
-  // Polygon PoS
-  137: [
-    { symbol: "POL", name: "POL", address: "native", decimals: 18, wrappedAddress: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", isStablecoin: false, poolFee: 3000 },
-    { symbol: "USDC", name: "USD Coin", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6, isStablecoin: true, poolFee: 0 },
-    { symbol: "USDT", name: "Tether USD", address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6, isStablecoin: true, poolFee: 0 },
-    { symbol: "WETH", name: "Wrapped Ether", address: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", decimals: 18, isStablecoin: false, poolFee: 500 },
-    { symbol: "WPOL", name: "Wrapped POL", address: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", decimals: 18, isStablecoin: false, poolFee: 3000 },
-    { symbol: "DAI", name: "Dai Stablecoin", address: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063", decimals: 18, isStablecoin: true, poolFee: 0 },
-    { symbol: "WBTC", name: "Wrapped BTC", address: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6", decimals: 8, isStablecoin: false, poolFee: 3000 },
-  ],
-
-  // BNB Smart Chain
-  56: [
-    { symbol: "BNB", name: "BNB", address: "native", decimals: 18, wrappedAddress: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", isStablecoin: false, poolFee: 2500 },
-    { symbol: "USDT", name: "Tether USD", address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18, isStablecoin: true, poolFee: 0 },
-    { symbol: "USDC", name: "USD Coin", address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18, isStablecoin: true, poolFee: 0 },
-    { symbol: "WBNB", name: "Wrapped BNB", address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", decimals: 18, isStablecoin: false, poolFee: 2500 },
-    { symbol: "ETH", name: "Ethereum", address: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", decimals: 18, isStablecoin: false, poolFee: 2500 },
-    { symbol: "BTCB", name: "Bitcoin BEP2", address: "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", decimals: 18, isStablecoin: false, poolFee: 2500 },
-  ],
-
-  // Avalanche C-Chain
-  43114: [
-    { symbol: "AVAX", name: "Avalanche", address: "native", decimals: 18, wrappedAddress: "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7", isStablecoin: false, poolFee: 3000 },
-    { symbol: "USDC", name: "USD Coin", address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", decimals: 6, isStablecoin: true, poolFee: 0 },
-    { symbol: "USDT", name: "Tether USD", address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", decimals: 6, isStablecoin: true, poolFee: 0 },
-    { symbol: "WAVAX", name: "Wrapped AVAX", address: "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7", decimals: 18, isStablecoin: false, poolFee: 3000 },
-    { symbol: "WETH.e", name: "Wrapped Ether", address: "0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB", decimals: 18, isStablecoin: false, poolFee: 3000 },
-  ],
 };
 
 export const USDC_ADDRESSES: Record<number, { address: Address; decimals: number }> = {
@@ -99,9 +70,6 @@ export const USDC_ADDRESSES: Record<number, { address: Address; decimals: number
   8453: { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6 },
   42161: { address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals: 6 },
   10: { address: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", decimals: 6 },
-  137: { address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6 },
-  56: { address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18 },
-  43114: { address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", decimals: 6 },
 };
 
 export function getPortfolioTokens(chainId: number): PortfolioTokenEntry[] {

@@ -388,6 +388,7 @@ function ConfiguredAssistant({
               message={message}
               onConfirmModeSwitch={handleConfirmModeSwitch}
               pendingModeSwitchKey={pendingModeSwitchKey}
+              onSendMessage={(text) => sendChatMessage(text)}
               isStreaming={
                 isLoading &&
                 index === messages.length - 1 &&

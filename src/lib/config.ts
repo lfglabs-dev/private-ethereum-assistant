@@ -49,7 +49,7 @@ export const config = {
       .map((url) => url.trim())
       .filter(Boolean),
     mnemonic: "",
-    walletCreationBlock: Number(process.env.RAILGUN_WALLET_CREATION_BLOCK || "56109834"),
+    walletCreationBlock: Number(process.env.RAILGUN_WALLET_CREATION_BLOCK || "416594021"),
     scanTimeoutMs: Number(process.env.RAILGUN_SCAN_TIMEOUT_MS || "180000"),
     pollingIntervalMs: Number(process.env.RAILGUN_POLLING_INTERVAL_MS || "15000"),
     shieldApprovalThreshold: getTokenAmountEnv(

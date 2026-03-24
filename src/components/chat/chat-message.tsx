@@ -78,6 +78,7 @@ interface ChatMessageProps {
   onToggleTrace?: () => void
   onConfirmModeSwitch?: (request: ModeSwitchRequiredResult) => void | Promise<void>
   pendingModeSwitchKey?: string | null
+  onSendMessage?: (text: string) => void
 }
 
 export function ChatMessage({
@@ -89,6 +90,7 @@ export function ChatMessage({
   onToggleTrace,
   onConfirmModeSwitch,
   pendingModeSwitchKey = null,
+  onSendMessage,
 }: ChatMessageProps) {
   const isUser = message.role === "user"
   const parts = message.parts as Part[] | undefined
@@ -175,7 +177,7 @@ export function ChatMessage({
                     transition={{ duration: 0.2 }}
                   >
                     {toolInfo.state === "output-available" ? (
-                      <ToolResultCard result={toolInfo.output} preliminary={toolInfo.preliminary} />
+                      <ToolResultCard result={toolInfo.output} preliminary={toolInfo.preliminary} onSendMessage={onSendMessage} />
                     ) : toolInfo.state === "output-error" ? (
                       <ToolResultCard
                         result={{
