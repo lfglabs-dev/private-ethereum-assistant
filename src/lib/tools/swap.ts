@@ -34,6 +34,7 @@ import { getChainMetadata, type NetworkConfig } from "../ethereum";
 import { resolveTokenMetadata, resolveTokenQuery } from "../token-metadata";
 import { createDefaultRuntimeConfig, type RuntimeConfig } from "../runtime-config";
 import { buildTrustWalletTokenPaths } from "../trustwallet-assets";
+import { TOKEN_ALIASES } from "../token-aliases";
 import { getSecret } from "../secret-store";
 import { getSafeUiLink, proposeSafeTransactions } from "./safe";
 import {
@@ -48,35 +49,23 @@ const SWAP_APP_CODE = "PrivateEthereumAssistant";
 const KNOWN_TOKEN_ALIASES: Record<
   number,
   Record<string, Omit<ResolvedSwapToken, "kind" | "source"> & { kind?: "erc20" }>
-> = {
-  1: {
-    USDC: {
-      address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-      displayAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-      symbol: "USDC",
-      name: "USD Coin",
-      decimals: 6,
-    },
-  },
-  42161: {
-    USDC: {
-      address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-      displayAddress: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-      symbol: "USDC",
-      name: "USD Coin",
-      decimals: 6,
-    },
-  },
-  8453: {
-    USDC: {
-      address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-      displayAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-      symbol: "USDC",
-      name: "USD Coin",
-      decimals: 6,
-    },
-  },
-};
+> = Object.fromEntries(
+  Object.entries(TOKEN_ALIASES).map(([chainId, tokens]) => [
+    Number(chainId),
+    Object.fromEntries(
+      Object.entries(tokens).map(([symbol, entry]) => [
+        symbol,
+        {
+          address: entry.address,
+          displayAddress: entry.address,
+          symbol: entry.symbol,
+          name: entry.name,
+          decimals: entry.decimals,
+        },
+      ]),
+    ),
+  ]),
+);
 
 const swapInputSchema = z.object({
   sellToken: z

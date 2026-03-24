@@ -23,7 +23,7 @@ describe("mode-scoped tool registry", () => {
 
     expect(Object.keys(tools)).toEqual(
       expect.arrayContaining([
-        "prepare_eoa_transfer",
+        "send_token",
         "send_eoa_transfer",
         "prepare_swap",
         "execute_swap",
@@ -48,7 +48,7 @@ describe("mode-scoped tool registry", () => {
         "get_balance",
       ]),
     );
-    expect(Object.keys(tools)).not.toContain("prepare_eoa_transfer");
+    expect(Object.keys(tools)).not.toContain("send_token");
     expect(Object.keys(tools)).not.toContain("railgun_balance");
   });
 
@@ -68,7 +68,7 @@ describe("mode-scoped tool registry", () => {
         "get_balance",
       ]),
     );
-    expect(Object.keys(tools)).not.toContain("prepare_eoa_transfer");
+    expect(Object.keys(tools)).not.toContain("send_token");
     expect(Object.keys(tools)).not.toContain("get_safe_info");
     expect(Object.keys(tools)).not.toContain("swap_tokens");
   });

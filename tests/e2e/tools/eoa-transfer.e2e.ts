@@ -18,13 +18,13 @@ const tools = createTools(ARBITRUM_CONFIG, await createE2ERuntimeConfig(ARBITRUM
 const walletAddress = await getWalletAddress()
 const TEST_AMOUNT = "0.000001"
 
-async function prepareEoaTransfer(input: {
+async function prepareSendToken(input: {
   to: string
   amount: string
-  tokenAddress?: string
+  token?: string
   gasLimit?: string
 }): Promise<unknown> {
-  return executeTool(tools.prepare_eoa_transfer, input)
+  return executeTool(tools.send_token, input)
 }
 
 async function collectSendEoaTransferUpdates(
@@ -143,14 +143,14 @@ describe("EOA transfer E2E", () => {
   let balanceAfter = BigInt(0)
 
   beforeAll(async () => {
-    preview = await prepareEoaTransfer({
+    preview = await prepareSendToken({
       to: walletAddress,
       amount: TEST_AMOUNT,
     })
 
     expectTransactionPreview(preview)
     if (!preview.confirmationId) {
-      throw new Error("prepare_eoa_transfer did not return a confirmationId.")
+      throw new Error("send_token did not return a confirmationId.")
     }
 
     balanceBefore = await verificationClient.getBalance({ address: walletAddress })
@@ -158,7 +158,7 @@ describe("EOA transfer E2E", () => {
     balanceAfter = await verificationClient.getBalance({ address: walletAddress })
   })
 
-  test("prepare_eoa_transfer builds an ETH transfer preview to self", () => {
+  test("send_token builds an ETH transfer preview to self", () => {
     expectTransactionPreview(preview)
     expect(preview.kind).toBe("transaction_preview")
     expect(preview.status).toBe("awaiting_confirmation")
@@ -173,7 +173,7 @@ describe("EOA transfer E2E", () => {
     expect(Number(preview.gasEstimate?.gasCostNative ?? "0")).toBeGreaterThan(0)
   })
 
-  test("prepare_eoa_transfer and send_eoa_transfer complete a self-transfer on Arbitrum", async () => {
+  test("send_token and send_eoa_transfer complete a self-transfer on Arbitrum", async () => {
     const finalUpdate = updates.at(-1)
     expectConfirmedTransactionProgress(finalUpdate)
 
@@ -206,8 +206,8 @@ describe("EOA transfer E2E", () => {
     ])
   })
 
-  test("prepare_eoa_transfer resolves ENS recipients", async () => {
-    const result = await prepareEoaTransfer({
+  test("send_token resolves ENS recipients", async () => {
+    const result = await prepareSendToken({
       to: "vitalik.eth",
       amount: TEST_AMOUNT,
     })
@@ -217,11 +217,11 @@ describe("EOA transfer E2E", () => {
     expect(result.recipient).toBe("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045")
   })
 
-  test("prepare_eoa_transfer handles an ERC-20 transfer request", async () => {
-    const result = await prepareEoaTransfer({
+  test("send_token handles an ERC-20 transfer request", async () => {
+    const result = await prepareSendToken({
       to: walletAddress,
       amount: "0.001",
-      tokenAddress: ARBITRUM_USDC_ADDRESS,
+      token: ARBITRUM_USDC_ADDRESS,
     })
 
     if (isRecord(result) && result.kind === "transaction_preview") {
@@ -240,11 +240,11 @@ describe("EOA transfer E2E", () => {
     )
   })
 
-  test("prepare_eoa_transfer rejects a token address with no ERC-20 contract", async () => {
-    const result = await prepareEoaTransfer({
+  test("send_token rejects a token address with no ERC-20 contract", async () => {
+    const result = await prepareSendToken({
       to: walletAddress,
       amount: "1",
-      tokenAddress: "0x0000000000000000000000000000000000000001",
+      token: "0x0000000000000000000000000000000000000001",
     })
 
     expectTransactionError(result)
@@ -253,8 +253,8 @@ describe("EOA transfer E2E", () => {
     )
   })
 
-  test("prepare_eoa_transfer returns an insufficient balance error", async () => {
-    const result = await prepareEoaTransfer({
+  test("send_token returns an insufficient balance error", async () => {
+    const result = await prepareSendToken({
       to: walletAddress,
       amount: "999999",
     })
