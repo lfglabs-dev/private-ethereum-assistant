@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type ReactNode,
 } from "react"
 import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -24,7 +23,6 @@ type SelectProps = {
   placeholder?: string
   className?: string
   "data-testid"?: string
-  children?: ReactNode
 }
 
 export function Select({
@@ -197,11 +195,6 @@ export function Select({
             "animate-in fade-in-0 zoom-in-95 duration-100",
           )}
           onKeyDown={handleListKeyDown}
-          onFocus={() => {
-            // auto-focus listbox when opened
-          }}
-          // eslint-disable-next-line jsx-a11y/no-autofocus
-          autoFocus
         >
           {options.map((option, index) => {
             const isSelected = option.value === value
