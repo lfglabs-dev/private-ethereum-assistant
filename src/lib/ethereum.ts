@@ -2,12 +2,9 @@ import { z } from "zod";
 import { createPublicClient, http, type Chain } from "viem";
 import {
   arbitrum,
-  avalanche,
   base,
-  bsc,
   mainnet,
   optimism,
-  polygon,
 } from "viem/chains";
 import { config } from "./config";
 
@@ -16,9 +13,6 @@ const CHAIN_BY_ID: Record<number, Chain> = {
   [base.id]: base,
   [arbitrum.id]: arbitrum,
   [optimism.id]: optimism,
-  [polygon.id]: polygon,
-  [avalanche.id]: avalanche,
-  [bsc.id]: bsc,
 };
 
 export const networkConfigSchema = z.object({
@@ -47,9 +41,6 @@ export const NETWORK_PRESETS = [
   { id: "arbitrum", chain: arbitrum, name: "Arbitrum One" },
   { id: "base", chain: base, name: "Base" },
   { id: "optimism", chain: optimism, name: "OP Mainnet" },
-  { id: "polygon", chain: polygon, name: "Polygon PoS" },
-  { id: "bnb", chain: bsc, name: "BNB Smart Chain" },
-  { id: "avalanche", chain: avalanche, name: "Avalanche C-Chain" },
 ].map(({ id, chain, name }) => ({
   id,
   name,

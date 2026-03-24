@@ -40,9 +40,6 @@ const UNISWAP_V3_FACTORY: Record<number, Address> = {
   8453: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
   42161: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
   10: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
-  137: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
-  56: "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865", // PancakeSwap V3
-  43114: "0x740b1c1de25031C31FF4fC9A62f554A55cdC1baD", // Uniswap V3 on Avalanche
 };
 
 type PriceCache = Map<string, { price: number | null; fetchedAt: number }>;

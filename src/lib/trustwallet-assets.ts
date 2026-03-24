@@ -9,20 +9,14 @@ export type FetchLike = (
 export type SupportedTrustWalletChainId =
   | 1
   | 10
-  | 56
-  | 137
   | 8453
-  | 42161
-  | 43114;
+  | 42161;
 
 export type TrustWalletChainSlug =
   | "ethereum"
   | "optimism"
-  | "smartchain"
-  | "polygon"
   | "base"
-  | "arbitrum"
-  | "avalanchec";
+  | "arbitrum";
 
 export type TrustWalletTokenInfo = {
   name?: string;
@@ -76,11 +70,8 @@ const CHAIN_SLUG_BY_ID: Record<
 > = {
   1: "ethereum",
   10: "optimism",
-  56: "smartchain",
-  137: "polygon",
   8453: "base",
   42161: "arbitrum",
-  43114: "avalanchec",
 };
 
 const SUPPORTED_CHAIN_IDS = Object.keys(CHAIN_SLUG_BY_ID).map((chainId) =>

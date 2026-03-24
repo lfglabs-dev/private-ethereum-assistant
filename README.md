@@ -178,11 +178,13 @@ Sample prompts to verify each wallet type works correctly.
 
 - "Send 0.001 ETH to vitalik.eth"
 - "What is the ETH balance of my wallet?"
+- "Swap 0.0001 ETH for USDC"
 
 ### Safe
 
 - "Send 0.001 ETH from the Safe to vitalik.eth"
 - "Show pending transactions on the Safe"
+- "Swap 0.0001 ETH for USDC from the Safe"
 
 ### Railgun
 

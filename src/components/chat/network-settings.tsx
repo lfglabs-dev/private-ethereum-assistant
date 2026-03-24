@@ -4,6 +4,7 @@ import { Globe, Settings2 } from "lucide-react"
 import { NETWORK_PRESETS } from "@/lib/ethereum"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Select } from "@/components/ui/select"
 
 export type NetworkFormState = {
   chainId: string
@@ -74,12 +75,11 @@ export function NetworkSettings({
 
             <label className="block space-y-1">
               <span className="text-xs text-muted-foreground">Preset</span>
-              <select
+              <Select
                 data-testid="network-settings-preset"
-                className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm outline-none"
+                className="h-8 px-2.5 py-1"
                 value={presetId}
-                onChange={(event) => {
-                  const nextId = event.target.value
+                onChange={(nextId) => {
                   const preset = NETWORK_PRESETS.find((entry) => entry.id === nextId)
                   if (!preset) return
                   onChange({
@@ -87,14 +87,14 @@ export function NetworkSettings({
                     rpcUrl: preset.rpcUrl,
                   })
                 }}
-              >
-                {NETWORK_PRESETS.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.name} ({preset.chainId})
-                  </option>
-                ))}
-                <option value="custom">Custom</option>
-              </select>
+                options={[
+                  ...NETWORK_PRESETS.map((preset) => ({
+                    value: preset.id,
+                    label: `${preset.name} (${preset.chainId})`,
+                  })),
+                  { value: "custom", label: "Custom" },
+                ]}
+              />
             </label>
 
             <label className="block space-y-1">

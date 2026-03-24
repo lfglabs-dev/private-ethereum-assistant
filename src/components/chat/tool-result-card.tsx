@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils"
 type ToolResultCardProps = {
   result: unknown
   preliminary?: boolean
+  onSendMessage?: (text: string) => void
 }
 
 function formatAgeMs(value: unknown) {
@@ -814,7 +815,6 @@ function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
       }
       titleClassName={isAborted ? "text-destructive" : isLocalApproval ? "text-orange-600" : "text-amber-500"}
     >
-        <p>{data.summary}</p>
         {approvalSummary ? (
           <div className="space-y-2 rounded-md bg-background/60 p-3" data-testid="approval-summary">
             <ActionDetailRow label="Recipient:" value={approvalSummary.recipient} />
@@ -824,46 +824,64 @@ function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
             <ActionDetailRow label="Estimated gas:" value={approvalSummary.estimatedGas} />
           </div>
         ) : null}
-        <div className="space-y-1.5">
-          <ActionDetailRow label="Network:" value={data.chain.name} />
-          {data.sender && (
-            <ActionDetailRow
-              label="From:"
-              value={data.sender}
-              valueClassName="truncate font-mono text-xs"
-            />
-          )}
-          {data.recipient && (
-            <ActionDetailRow
-              label="To:"
-              value={data.recipient}
-              valueClassName="truncate font-mono text-xs"
-            />
-          )}
-          {data.resolvedEnsName && (
-            <ActionDetailRow label="ENS:" value={data.resolvedEnsName} />
-          )}
-          {data.asset && data.amount && (
-            <ActionDetailRow
-              label="Amount:"
-              value={`${data.amount} ${data.asset.symbol}`}
-            />
-          )}
-          {data.gasEstimate && (
-            <>
-              <ActionDetailRow label="Gas limit:" value={data.gasEstimate.gasLimit} />
-              <ActionDetailRow label="Max fee:" value={`${data.gasEstimate.maxFeePerGasGwei} gwei`} />
-              <ActionDetailRow
-                label="Gas cost:"
-                value={`~${data.gasEstimate.gasCostNative} ${data.chain.nativeSymbol}`}
+
+        {/* Transfer panel */}
+        {data.amount && (
+          <div className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">You send</p>
+            <p className="mt-3 text-2xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
+              -{data.amount} {data.asset?.symbol ?? data.chain.nativeSymbol}
+            </p>
+            <div className="mt-4 flex items-center gap-3">
+              <TokenAvatar
+                symbol={data.asset?.symbol ?? data.chain.nativeSymbol}
+                address={data.asset?.tokenAddress ?? ""}
+                isNative={data.asset?.type === "ETH" || !data.asset}
               />
-            </>
+              <div className="min-w-0">
+                <p className="truncate font-medium">{data.asset?.symbol ?? data.chain.nativeSymbol}</p>
+                {data.asset?.type === "ERC20" && data.asset.tokenAddress ? (
+                  <p className="truncate font-mono text-[11px] text-muted-foreground" title={data.asset.tokenAddress}>
+                    {shortenAddress(data.asset.tokenAddress)}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Recipient panel */}
+        {(data.recipient || data.resolvedEnsName) && (
+          <div className="rounded-xl bg-background/70 p-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">To</p>
+            <p className="mt-1 truncate font-medium" title={data.recipient}>
+              {data.resolvedEnsName ?? (data.recipient ? shortenAddress(data.recipient) : "")}
+            </p>
+            {data.resolvedEnsName && data.recipient ? (
+              <p className="truncate font-mono text-[11px] text-muted-foreground" title={data.recipient}>
+                {shortenAddress(data.recipient)}
+              </p>
+            ) : null}
+          </div>
+        )}
+
+        {/* Metrics grid */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1 rounded-xl bg-background/70 p-3">
+            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Network</p>
+            <p className="font-medium">{data.chain.name}</p>
+          </div>
+          {data.gasEstimate && (
+            <div className="space-y-1 rounded-xl bg-background/70 p-3">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Gas cost</p>
+              <p className="font-medium">~{data.gasEstimate.gasCostNative} {data.chain.nativeSymbol}</p>
+            </div>
           )}
           {data.balance && (
-            <ActionDetailRow
-              label="Signer balance:"
-              value={`${data.balance.amount} ${data.balance.asset}`}
-            />
+            <div className="space-y-1 rounded-xl bg-background/70 p-3">
+              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Balance</p>
+              <p className="font-medium">{data.balance.amount} {data.balance.asset}</p>
+            </div>
           )}
         </div>
         {data.approval?.required && data.approval.thresholdAmount && data.approval.thresholdAssetSymbol ? (
@@ -1710,10 +1728,11 @@ function SwapResultCard({ data }: { data: SwapResultData }) {
   )
 }
 
-export function ToolResultCard({ result, preliminary }: ToolResultCardProps) {
+export function ToolResultCard({ result, preliminary, onSendMessage }: ToolResultCardProps) {
   const [liveResult, setLiveResult] = useState(result)
   const [pendingAction, setPendingAction] = useState<"approve" | "reject" | null>(null)
   const [isLocalOverride, setIsLocalOverride] = useState(false)
+  const [chatConfirmationSent, setChatConfirmationSent] = useState(false)
 
   useEffect(() => {
     if (!isLocalOverride) {
@@ -1836,6 +1855,12 @@ export function ToolResultCard({ result, preliminary }: ToolResultCardProps) {
       previewData.approval.state !== "rejected" &&
       Boolean(previewData.confirmationId)
 
+    const showChatConfirmation =
+      !canApproveLocally &&
+      previewData.status === "awaiting_confirmation" &&
+      !chatConfirmationSent &&
+      onSendMessage != null
+
     return (
       <div className="space-y-3">
         <TransactionPreviewResult data={previewData} />
@@ -1862,6 +1887,33 @@ export function ToolResultCard({ result, preliminary }: ToolResultCardProps) {
             </Button>
           </div>
         ) : null}
+        {showChatConfirmation ? (
+          <div className="flex gap-2">
+            <Button
+              data-testid="chat-confirm-approve"
+              size="sm"
+              onClick={() => {
+                setChatConfirmationSent(true)
+                onSendMessage("I approve")
+              }}
+            >
+              <Check className="size-3.5" />
+              Approve
+            </Button>
+            <Button
+              data-testid="chat-confirm-decline"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setChatConfirmationSent(true)
+                onSendMessage("I decline")
+              }}
+            >
+              <X className="size-3.5" />
+              Decline
+            </Button>
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -1883,6 +1935,12 @@ export function ToolResultCard({ result, preliminary }: ToolResultCardProps) {
       swapData.approval?.required === true &&
       swapData.approval.state !== "rejected" &&
       Boolean(swapData.confirmationId)
+
+    const showSwapChatConfirmation =
+      !canApproveLocally &&
+      swapData.status === "awaiting_confirmation" &&
+      !chatConfirmationSent &&
+      onSendMessage != null
 
     return (
       <div className="space-y-3">
@@ -1907,6 +1965,33 @@ export function ToolResultCard({ result, preliminary }: ToolResultCardProps) {
             >
               {pendingAction === "reject" ? <Loader2 className="size-3.5 animate-spin" /> : null}
               Reject
+            </Button>
+          </div>
+        ) : null}
+        {showSwapChatConfirmation ? (
+          <div className="flex gap-2">
+            <Button
+              data-testid="chat-swap-confirm-approve"
+              size="sm"
+              onClick={() => {
+                setChatConfirmationSent(true)
+                onSendMessage("I approve")
+              }}
+            >
+              <Check className="size-3.5" />
+              Approve
+            </Button>
+            <Button
+              data-testid="chat-swap-confirm-decline"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setChatConfirmationSent(true)
+                onSendMessage("I decline")
+              }}
+            >
+              <X className="size-3.5" />
+              Decline
             </Button>
           </div>
         ) : null}
