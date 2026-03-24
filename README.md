@@ -170,6 +170,26 @@ dotenvx run -f .env.tianjin -- bun test:e2e:tools
 
 These tests also read developer-mode wallet and Safe credentials from `.env.tianjin`.
 
+## Quick feature tests
+
+Sample prompts to verify each wallet type works correctly.
+
+### EOA
+
+- "Send 0.001 ETH to vitalik.eth"
+- "What is the ETH balance of my wallet?"
+
+### Safe
+
+- "Send 0.001 ETH from the Safe to vitalik.eth"
+- "Show pending transactions on the Safe"
+
+### Railgun
+
+- "Shield 0.001 ETH into Railgun"
+- "Send 0.0005 private ETH to 0zk1qy…"
+- "Unshield the remaining ETH from Railgun"
+
 ## Troubleshooting
 
 **OpenRouter requests fail:**
