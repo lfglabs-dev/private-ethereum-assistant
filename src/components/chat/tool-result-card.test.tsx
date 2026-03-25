@@ -224,6 +224,71 @@ describe("ToolResultCard", () => {
     expect(html).toContain("Safe Tx:")
   })
 
+  // Tests for the streaming race condition fix:
+  // Clicking approve/decline during LLM streaming caused duplicate widgets.
+  // Fix: hide chat confirmation buttons while isStreaming=true.
+  const mockTransactionPreview = {
+    kind: "transaction_preview",
+    status: "awaiting_confirmation",
+    summary: "Sending 0.1 USDC to prendrelelead.eth",
+    message: "Transaction prepared. Please confirm.",
+    confirmationId: "test-confirmation-id-123",
+    chain: { id: 8453, name: "Base" },
+    sender: "0x1234567890123456789012345678901234567890",
+    recipient: "0xabcdef1234567890abcdef1234567890abcdef12",
+    recipientInput: "prendrelelead.eth",
+    resolvedEnsName: "prendrelelead.eth",
+    asset: { type: "ERC20", symbol: "USDC", tokenAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
+    amount: "0.1",
+    balance: { asset: "ETH", amount: "0.5" },
+    gasEstimate: {
+      gasLimit: "65000",
+      maxFeePerGasGwei: "1.5",
+      gasCostNative: "0.0001",
+    },
+    approval: { required: false, state: "not_required", summary: { recipient: "prendrelelead.eth", asset: "USDC", amount: "0.1 USDC", network: "Base", estimatedGas: "65000 gas @ max 1.5 gwei (~0.0001 ETH)" } },
+  }
+
+  test("hides chat confirmation buttons while isStreaming=true", () => {
+    const html = renderToStaticMarkup(
+      <ToolResultCard
+        result={mockTransactionPreview}
+        onSendMessage={() => {}}
+        isStreaming={true}
+      />,
+    )
+
+    expect(html).not.toContain("chat-confirm-approve")
+    expect(html).not.toContain("chat-confirm-decline")
+    expect(html).not.toContain(">Approve<")
+    expect(html).not.toContain(">Decline<")
+  })
+
+  test("shows chat confirmation buttons when isStreaming=false", () => {
+    const html = renderToStaticMarkup(
+      <ToolResultCard
+        result={mockTransactionPreview}
+        onSendMessage={() => {}}
+        isStreaming={false}
+      />,
+    )
+
+    expect(html).toContain("chat-confirm-approve")
+    expect(html).toContain("chat-confirm-decline")
+  })
+
+  test("shows chat confirmation buttons when isStreaming is not provided", () => {
+    const html = renderToStaticMarkup(
+      <ToolResultCard
+        result={mockTransactionPreview}
+        onSendMessage={() => {}}
+      />,
+    )
+
+    expect(html).toContain("chat-confirm-approve")
+    expect(html).toContain("chat-confirm-decline")
+  })
+
   test("renders swap execution links", () => {
     const html = renderToStaticMarkup(
       <ToolResultCard
