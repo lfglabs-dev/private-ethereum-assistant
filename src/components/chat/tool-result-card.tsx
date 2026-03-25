@@ -30,6 +30,7 @@ type ToolResultCardProps = {
   result: unknown
   preliminary?: boolean
   onSendMessage?: (text: string) => void
+  isStreaming?: boolean
 }
 
 function formatAgeMs(value: unknown) {
@@ -1728,7 +1729,7 @@ function SwapResultCard({ data }: { data: SwapResultData }) {
   )
 }
 
-export function ToolResultCard({ result, preliminary, onSendMessage }: ToolResultCardProps) {
+export function ToolResultCard({ result, preliminary, onSendMessage, isStreaming }: ToolResultCardProps) {
   const [liveResult, setLiveResult] = useState(result)
   const [pendingAction, setPendingAction] = useState<"approve" | "reject" | null>(null)
   const [isLocalOverride, setIsLocalOverride] = useState(false)
@@ -1859,6 +1860,7 @@ export function ToolResultCard({ result, preliminary, onSendMessage }: ToolResul
       !canApproveLocally &&
       previewData.status === "awaiting_confirmation" &&
       !chatConfirmationSent &&
+      !isStreaming &&
       onSendMessage != null
 
     return (
@@ -1940,6 +1942,7 @@ export function ToolResultCard({ result, preliminary, onSendMessage }: ToolResul
       !canApproveLocally &&
       swapData.status === "awaiting_confirmation" &&
       !chatConfirmationSent &&
+      !isStreaming &&
       onSendMessage != null
 
     return (

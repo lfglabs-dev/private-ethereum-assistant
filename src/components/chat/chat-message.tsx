@@ -177,7 +177,7 @@ export function ChatMessage({
                     transition={{ duration: 0.2 }}
                   >
                     {toolInfo.state === "output-available" ? (
-                      <ToolResultCard result={toolInfo.output} preliminary={toolInfo.preliminary} onSendMessage={onSendMessage} />
+                      <ToolResultCard result={toolInfo.output} preliminary={toolInfo.preliminary} onSendMessage={onSendMessage} isStreaming={isStreaming} />
                     ) : toolInfo.state === "output-error" ? (
                       <ToolResultCard
                         result={{

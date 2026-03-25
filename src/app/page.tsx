@@ -260,6 +260,9 @@ function ConfiguredAssistant({
     if (clearPendingModeSwitch) {
       setPendingModeSwitchKey(null);
     }
+    // Stop any ongoing stream before sending a new message to prevent
+    // the old stream from pushing duplicate messages to the state.
+    stop();
     sendMessage(
       { text },
       {
