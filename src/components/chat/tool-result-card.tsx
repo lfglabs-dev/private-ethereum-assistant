@@ -364,11 +364,69 @@ function formatSignedTokenAmount(
   return `${direction === "sell" ? "-" : "+"}${amount} ${symbol}`.trim()
 }
 
-function SwapMetric({ label, value }: { label: string; value: string }) {
+function SwapMetric({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
   return (
     <div className="space-y-1 rounded-xl bg-background/70 p-3">
       <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
-      <p className="font-medium">{value}</p>
+      <p className={cn("font-medium", valueClassName)}>{value}</p>
+    </div>
+  )
+}
+
+function SendPanel({
+  amount,
+  symbol,
+  tokenAddress,
+  isNative,
+}: {
+  amount: string
+  symbol: string
+  tokenAddress?: string
+  isNative?: boolean
+}) {
+  return (
+    <div className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">You send</p>
+      <p className="mt-3 text-2xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
+        -{amount} {symbol}
+      </p>
+      <div className="mt-4 flex items-center gap-3">
+        <TokenAvatar
+          symbol={symbol}
+          address={tokenAddress ?? ""}
+          isNative={isNative ?? false}
+        />
+        <div className="min-w-0">
+          <p className="truncate font-medium">{symbol}</p>
+          {tokenAddress && !isNative && (
+            <p className="truncate font-mono text-[11px] text-muted-foreground" title={tokenAddress}>
+              {shortenAddress(tokenAddress)}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RecipientPanel({
+  address,
+  resolvedEnsName,
+}: {
+  address: string
+  resolvedEnsName?: string
+}) {
+  return (
+    <div className="rounded-xl bg-background/70 p-3">
+      <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">To</p>
+      <p className="mt-1 truncate font-medium" title={address}>
+        {resolvedEnsName ?? shortenAddress(address)}
+      </p>
+      {resolvedEnsName && (
+        <p className="truncate font-mono text-[11px] text-muted-foreground" title={address}>
+          {shortenAddress(address)}
+        </p>
+      )}
     </div>
   )
 }
@@ -437,6 +495,14 @@ function SwapTokenPanel({
   )
 }
 
+function parseSafeAmount(formatted: string | undefined): { amount: string; symbol: string } | null {
+  if (!formatted) return null
+  const trimmed = formatted.trim()
+  const lastSpace = trimmed.lastIndexOf(" ")
+  if (lastSpace < 0) return null
+  return { amount: trimmed.slice(0, lastSpace), symbol: trimmed.slice(lastSpace + 1) }
+}
+
 function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
   const tx = (data.transaction as Record<string, string | undefined>) ?? {}
   const signers = Array.isArray(data.signers) ? (data.signers as string[]) : []
@@ -452,134 +518,137 @@ function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
   const safeTxHash = data.safeTxHash ? String(data.safeTxHash) : null
   const safeAddress = data.safeAddress ? String(data.safeAddress) : null
   const proposerAddress = data.proposerAddress ? String(data.proposerAddress) : null
-  const title =
-    status === "proposed"
-      ? "Safe Transaction Proposed"
-      : status === "manual_creation_required"
-        ? "Manual Safe Action Required"
-        : "Safe Transaction Error"
-  const accentClass =
-    status === "error"
-      ? "border-destructive/20 bg-destructive/5"
-      : "border-amber-500/20 bg-amber-500/5"
-  const titleClass = status === "error" ? "text-destructive" : "text-amber-500"
-  const iconClass = status === "error" ? "text-destructive" : "text-amber-500"
+
+  const isError = status === "error"
+  const title = isError
+    ? "Safe Transaction Error"
+    : status === "manual_creation_required"
+      ? "Manual Safe Action Required"
+      : "Safe Transaction Proposed"
+  const accentClass = isError
+    ? "border-destructive/20 bg-destructive/5"
+    : "border-amber-500/20 bg-amber-500/5"
+  const titleClass = isError ? "text-destructive" : "text-amber-500"
   const ctaLabel = status === "proposed" ? "Sign on Safe" : "Open Safe"
+
+  // Resolve what amount to display: prefer ERC-20 tokenAmount, fall back to non-zero ETH value
+  const hasNonZeroNativeValue = tx.value && tx.value !== "0 ETH" && tx.value !== "0"
+  const rawAmount = tx.tokenAmount ?? (hasNonZeroNativeValue ? tx.value : null)
+  const parsed = parseSafeAmount(rawAmount ?? undefined)
+  const isNativeTransfer = !tx.tokenAmount
+
+  const badge = requiredConfirmations > 0 ? (
+    <Badge variant="outline" className="border-amber-500/30 text-amber-600">
+      {currentConfirmations}/{requiredConfirmations} signatures
+    </Badge>
+  ) : statusLabel ? (
+    <Badge variant={isError ? "destructive" : "secondary"}>
+      {isError ? <X className="size-3" /> : <Info className="size-3" />}
+      {statusLabel}
+    </Badge>
+  ) : null
 
   return (
     <ActionResultCard
+      testId="result-safe-transaction"
       title={title}
-      icon={<ArrowUpRight className={`size-4 ${iconClass}`} />}
+      icon={<Shield className={`size-4 ${titleClass}`} />}
+      badge={badge}
       className={accentClass}
       titleClassName={titleClass}
     >
-        {"summary" in data && (
-          <p className="text-sm font-medium">{String(data.summary)}</p>
-        )}
-        {"message" in data && (
-          <p className="text-sm text-muted-foreground">{String(data.message)}</p>
-        )}
-        {"signerMessage" in data && (
-          <p className="text-xs text-muted-foreground">{String(data.signerMessage)}</p>
-        )}
-        <div className="space-y-1 text-sm">
-          {safeAddress && (
-            <ActionDetailRow
-              label="Safe:"
-              value={shortenAddress(safeAddress)}
-              valueClassName="font-mono text-xs"
-            />
-          )}
-          <ActionDetailRow label="Type:" value={String(tx.type ?? "Transaction")} />
-          <ActionDetailRow
-            label="To:"
-            value={String(tx.to ?? "Unknown")}
-            valueClassName="truncate font-mono text-xs"
+      {"summary" in data && (
+        <p className="text-sm font-medium">{String(data.summary)}</p>
+      )}
+      {"message" in data && (
+        <p className="text-sm text-muted-foreground">{String(data.message)}</p>
+      )}
+
+      {/* Send panel — mirrors EOA clear widget */}
+      {parsed && (
+        <SendPanel
+          amount={parsed.amount}
+          symbol={parsed.symbol}
+          isNative={isNativeTransfer}
+        />
+      )}
+
+      {/* Recipient panel */}
+      {tx.to && (
+        <RecipientPanel address={tx.to} />
+      )}
+
+      {/* Metrics grid */}
+      <div className="grid grid-cols-2 gap-2">
+        {safeAddress && (
+          <SwapMetric
+            label="Safe"
+            value={shortenAddress(safeAddress)}
+            valueClassName="font-mono text-xs"
           />
-          <ActionDetailRow label="Value:" value={String(tx.value ?? "0 ETH")} />
-          {tx.tokenAmount && (
-            <ActionDetailRow label="Amount:" value={String(tx.tokenAmount)} />
-          )}
-          {tx.data && tx.data !== "0x" && (
-            <ActionDetailRow
-              label="Data:"
-              value={String(tx.data)}
-              valueClassName="truncate font-mono text-xs"
-            />
-          )}
-          {actionCount > 1 && (
-            <ActionDetailRow label="Actions:" value={String(actionCount)} />
-          )}
-          {safeTxHash && (
-            <ActionDetailRow
-              label="Safe Tx:"
-              value={safeTxHash}
-              valueClassName="truncate font-mono text-xs"
-            />
-          )}
-          {requiredConfirmations > 0 && (
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <span className="text-muted-foreground">Confirmations</span>
-              <Badge variant="outline" className="text-xs">
-                {currentConfirmations}/{requiredConfirmations} signatures
-              </Badge>
+        )}
+        {signers.length > 0 && (
+          <SwapMetric
+            label="Threshold"
+            value={`${requiredConfirmations || Number(data.threshold ?? 0)} of ${signers.length}`}
+          />
+        )}
+        {actionCount > 1 && (
+          <SwapMetric label="Actions" value={String(actionCount)} />
+        )}
+        {proposerAddress && (
+          <SwapMetric
+            label="Signed by"
+            value={shortenAddress(proposerAddress)}
+            valueClassName="font-mono text-xs"
+          />
+        )}
+      </div>
+
+      {/* Bundled transactions detail */}
+      {bundledTransactions.length > 1 && (
+        <div className="space-y-2 rounded-md bg-background/50 p-3">
+          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+            Bundled actions
+          </p>
+          {bundledTransactions.map((transaction, index) => (
+            <div key={`${String(transaction.to)}-${index}`} className="space-y-1 text-xs">
+              <p className="font-medium">{String(transaction.type ?? "Transaction")}</p>
+              <p className="truncate font-mono text-[11px] text-muted-foreground">
+                {String(transaction.to ?? "")}
+              </p>
             </div>
-          )}
-          {statusLabel && (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">Status</span>
-              <Badge variant={status === "error" ? "destructive" : "secondary"}>
-                {status === "error" ? <X className="size-3" /> : <Info className="size-3" />}
-                {statusLabel}
-              </Badge>
-            </div>
-          )}
-          {signers.length > 0 && (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">Threshold</span>
-              <Badge variant="secondary">
-                <Users className="size-3" />
-                {requiredConfirmations || Number(data.threshold ?? 0)} of {signers.length} owners
-              </Badge>
-            </div>
-          )}
-          {proposerAddress && (
-            <ActionDetailRow
-              label="Signer:"
-              value={shortenAddress(proposerAddress)}
-              valueClassName="font-mono text-xs"
-            />
-          )}
+          ))}
         </div>
-        {bundledTransactions.length > 1 && (
-          <div className="space-y-2 rounded-md bg-background/50 p-3">
-            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-              Bundled actions
-            </p>
-            {bundledTransactions.map((transaction, index) => (
-              <div key={`${String(transaction.to)}-${index}`} className="space-y-1 text-xs">
-                <p className="font-medium">{String(transaction.type ?? "Transaction")}</p>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">
-                  {String(transaction.to ?? "")}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-        {"pendingTransactionsHint" in data && (
-          <p className="text-xs text-muted-foreground">{String(data.pendingTransactionsHint)}</p>
-        )}
-        {safeUILink && (
-          <a
-            href={safeUILink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-400"
-          >
-            {ctaLabel}
-            <ExternalLink className="size-3" />
-          </a>
-        )}
+      )}
+
+      {safeTxHash && (
+        <ActionDetailRow
+          label="Safe Tx:"
+          value={safeTxHash}
+          valueClassName="truncate font-mono text-xs"
+        />
+      )}
+
+      {"signerMessage" in data && (
+        <p className="text-xs text-muted-foreground">{String(data.signerMessage)}</p>
+      )}
+      {"pendingTransactionsHint" in data && (
+        <p className="text-xs text-muted-foreground">{String(data.pendingTransactionsHint)}</p>
+      )}
+
+      {/* CTA — "Sign on Safe" link replaces approve/decline buttons */}
+      {safeUILink && (
+        <a
+          href={safeUILink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-400"
+        >
+          {ctaLabel}
+          <ExternalLink className="size-3" />
+        </a>
+      )}
     </ActionResultCard>
   )
 }
@@ -828,61 +897,36 @@ function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
 
         {/* Transfer panel */}
         {data.amount && (
-          <div className="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">You send</p>
-            <p className="mt-3 text-2xl font-semibold tracking-tight text-rose-600 dark:text-rose-400">
-              -{data.amount} {data.asset?.symbol ?? data.chain.nativeSymbol}
-            </p>
-            <div className="mt-4 flex items-center gap-3">
-              <TokenAvatar
-                symbol={data.asset?.symbol ?? data.chain.nativeSymbol}
-                address={data.asset?.tokenAddress ?? ""}
-                isNative={data.asset?.type === "ETH" || !data.asset}
-              />
-              <div className="min-w-0">
-                <p className="truncate font-medium">{data.asset?.symbol ?? data.chain.nativeSymbol}</p>
-                {data.asset?.type === "ERC20" && data.asset.tokenAddress ? (
-                  <p className="truncate font-mono text-[11px] text-muted-foreground" title={data.asset.tokenAddress}>
-                    {shortenAddress(data.asset.tokenAddress)}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </div>
+          <SendPanel
+            amount={data.amount}
+            symbol={data.asset?.symbol ?? data.chain.nativeSymbol}
+            tokenAddress={data.asset?.tokenAddress}
+            isNative={data.asset?.type === "ETH" || !data.asset}
+          />
         )}
 
         {/* Recipient panel */}
         {(data.recipient || data.resolvedEnsName) && (
-          <div className="rounded-xl bg-background/70 p-3">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">To</p>
-            <p className="mt-1 truncate font-medium" title={data.recipient}>
-              {data.resolvedEnsName ?? (data.recipient ? shortenAddress(data.recipient) : "")}
-            </p>
-            {data.resolvedEnsName && data.recipient ? (
-              <p className="truncate font-mono text-[11px] text-muted-foreground" title={data.recipient}>
-                {shortenAddress(data.recipient)}
-              </p>
-            ) : null}
-          </div>
+          <RecipientPanel
+            address={data.recipient ?? ""}
+            resolvedEnsName={data.resolvedEnsName}
+          />
         )}
 
         {/* Metrics grid */}
         <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1 rounded-xl bg-background/70 p-3">
-            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Network</p>
-            <p className="font-medium">{data.chain.name}</p>
-          </div>
+          <SwapMetric label="Network" value={data.chain.name} />
           {data.gasEstimate && (
-            <div className="space-y-1 rounded-xl bg-background/70 p-3">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Gas cost</p>
-              <p className="font-medium">~{data.gasEstimate.gasCostNative} {data.chain.nativeSymbol}</p>
-            </div>
+            <SwapMetric
+              label="Gas cost"
+              value={`~${data.gasEstimate.gasCostNative} ${data.chain.nativeSymbol}`}
+            />
           )}
           {data.balance && (
-            <div className="space-y-1 rounded-xl bg-background/70 p-3">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Balance</p>
-              <p className="font-medium">{data.balance.amount} {data.balance.asset}</p>
-            </div>
+            <SwapMetric
+              label="Balance"
+              value={`${data.balance.amount} ${data.balance.asset}`}
+            />
           )}
         </div>
         {data.approval?.required && data.approval.thresholdAmount && data.approval.thresholdAssetSymbol ? (
