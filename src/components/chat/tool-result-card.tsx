@@ -422,7 +422,7 @@ function RecipientPanel({
       <p className="mt-1 truncate font-medium" title={address}>
         {resolvedEnsName ?? shortenAddress(address)}
       </p>
-      {resolvedEnsName && (
+      {resolvedEnsName && address && (
         <p className="truncate font-mono text-[11px] text-muted-foreground" title={address}>
           {shortenAddress(address)}
         </p>
