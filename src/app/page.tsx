@@ -14,7 +14,6 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThinkingIndicator } from "@/components/ui/thinking-indicator";
 import { ChatMessage } from "@/components/chat/chat-message";
-import { ChatDebugPanel } from "@/components/chat/chat-debug-panel";
 import { ChatWelcome } from "@/components/chat/chat-welcome";
 import { ChatInput } from "@/components/chat/chat-input";
 import { ChatError } from "@/components/chat/chat-error";
@@ -24,8 +23,6 @@ import { useScrollToBottom } from "@/hooks/use-scroll-to-bottom";
 import {
   assistantDataPartSchemas,
   type AssistantUIMessage,
-  type DebugLogEntry,
-  createDebugLog,
 } from "@/lib/chat-stream";
 import {
   createDeveloperDisplayRuntimeConfig,
@@ -115,9 +112,7 @@ function ConfiguredAssistant({
   onSaveRuntimeConfig,
   onDeleteAllSettings,
 }: ConfiguredAssistantProps) {
-  const [debugEntries, setDebugEntries] = useState<DebugLogEntry[]>([]);
   const [pendingModeSwitchKey, setPendingModeSwitchKey] = useState<string | null>(null);
-  const [showDebugTrace, setShowDebugTrace] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hasServerSeedPhrase, setHasServerSeedPhrase] = useState(appMode === "developer");
   const [settingsDraft, setSettingsDraft] = useState<RuntimeConfigDraft>(() =>
@@ -128,36 +123,17 @@ function ConfiguredAssistant({
   const settingsFormRef = useRef<RuntimeConfigFormHandle>(null);
   const { containerRef, endRef, isAtBottom, scrollToBottom } = useScrollToBottom();
 
-  const appendDebugEntry = (entry: DebugLogEntry) => {
-    setDebugEntries((entries) => [...entries.slice(-23), entry]);
-  };
-
   const { messages, sendMessage, stop, status, error, clearError } =
     useChat<AssistantUIMessage>({
       dataPartSchemas: assistantDataPartSchemas,
       onData: (part) => {
         if (part.type === "data-debug") {
-          appendDebugEntry(part.data);
-          if (part.data.level === "error") {
-            setShowDebugTrace(true);
-          }
           return;
         }
 
         if (part.type === "data-modeSwitchRequired") {
           return;
         }
-      },
-      onError: (nextError) => {
-        appendDebugEntry(
-          createDebugLog({
-            level: "error",
-            stage: "error",
-            message: "Chat request failed",
-            detail: nextError.message || "Unknown chat error",
-          }),
-        );
-        setShowDebugTrace(true);
       },
     });
 
@@ -255,8 +231,6 @@ function ConfiguredAssistant({
     nextRuntimeConfig: RuntimeConfig = runtimeConfig,
     clearPendingModeSwitch = true,
   ) => {
-    setDebugEntries([]);
-    setShowDebugTrace(false);
     if (clearPendingModeSwitch) {
       setPendingModeSwitchKey(null);
     }
@@ -389,14 +363,6 @@ function ConfiguredAssistant({
                 index === messages.length - 1 &&
                 message.role === "assistant"
               }
-              traceEntries={debugEntries}
-              showTrace={
-                showDebugTrace &&
-                index === messages.length - 1 &&
-                message.role === "assistant"
-              }
-              canToggleTrace={index === messages.length - 1 && message.role === "assistant"}
-              onToggleTrace={() => setShowDebugTrace((visible) => !visible)}
             />
           ))}
 
@@ -407,26 +373,15 @@ function ConfiguredAssistant({
               animate={{ opacity: 1, y: 0 }}
               className="flex gap-3"
             >
-              <button
-                type="button"
-                onClick={() => setShowDebugTrace((visible) => !visible)}
-                className="rounded-full transition-transform hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-                aria-label={showDebugTrace ? "Hide model trace" : "Show model trace"}
-                title={showDebugTrace ? "Hide model trace" : "Show model trace"}
-              >
-                <Avatar size="sm" className="mt-0.5 shrink-0">
-                  <AvatarFallback className="bg-secondary">
-                    <EthereumIcon className="size-3.5" />
-                  </AvatarFallback>
-                </Avatar>
-              </button>
+              <Avatar size="sm" className="mt-0.5 shrink-0">
+                <AvatarFallback className="bg-secondary">
+                  <EthereumIcon className="size-3.5" />
+                </AvatarFallback>
+              </Avatar>
               <div className="max-w-[80%] space-y-2">
                 <div className="rounded-2xl rounded-tl-sm bg-secondary/30 px-4 py-3">
                   <ThinkingIndicator />
                 </div>
-                {showDebugTrace ? (
-                  <ChatDebugPanel entries={debugEntries} isStreaming={isLoading} />
-                ) : null}
               </div>
             </motion.div>
           ) : null}
@@ -434,9 +389,6 @@ function ConfiguredAssistant({
           {error ? (
             <div className="mx-auto max-w-3xl space-y-3">
               <ChatError error={error} onDismiss={clearError} />
-              {debugEntries.length > 0 ? (
-                <ChatDebugPanel entries={debugEntries} isStreaming={false} />
-              ) : null}
             </div>
           ) : null}
         </div>

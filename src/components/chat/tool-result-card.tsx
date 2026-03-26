@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import {
   AlertCircle,
   ArrowUpRight,
@@ -63,7 +63,7 @@ type TransactionPreviewData = {
   recipient?: string
   recipientInput?: string
   resolvedEnsName?: string
-  asset?: { type: "ETH" | "ERC20"; symbol: string; tokenAddress?: string }
+  asset?: { type: "ETH" | "ERC20"; symbol: string; tokenAddress?: string; iconUrl?: string }
   amount?: string
   balance?: { asset: string; amount: string }
   gasEstimate?: {
@@ -122,7 +122,7 @@ type TransactionProgressData = {
   recipient: string
   recipientInput: string
   resolvedEnsName?: string
-  asset: { type: "ETH" | "ERC20"; symbol: string; tokenAddress?: string }
+  asset: { type: "ETH" | "ERC20"; symbol: string; tokenAddress?: string; iconUrl?: string }
   amount: string
   steps: ProgressStep[]
   txHash?: string
@@ -654,7 +654,7 @@ function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
 }
 
 function SafeInfoResult({ data }: { data: Record<string, unknown> }) {
-  const owners = data.owners as string[]
+  const owners = Array.isArray(data.owners) ? (data.owners as string[]) : []
   return (
     <Card data-testid="result-safe-info" size="sm" className="border-0 bg-secondary/50">
       <CardHeader className="pb-0">
@@ -695,7 +695,7 @@ function SafeInfoResult({ data }: { data: Record<string, unknown> }) {
 }
 
 function PendingTransactionsResult({ data }: { data: Record<string, unknown> }) {
-  const txs = data.transactions as Array<Record<string, string | number>>
+  const txs = Array.isArray(data.transactions) ? (data.transactions as Array<Record<string, string | number>>) : []
   const safeUILink = data.safeUILink ? String(data.safeUILink) : null
   const safeAddress = data.safeAddress ? String(data.safeAddress) : null
   if (txs.length === 0) {
@@ -1774,16 +1774,16 @@ function SwapResultCard({ data }: { data: SwapResultData }) {
 }
 
 export function ToolResultCard({ result, preliminary, onSendMessage, isStreaming }: ToolResultCardProps) {
-  const [liveResult, setLiveResult] = useState(result)
+  const [localResult, setLocalResult] = useState<unknown>(null)
   const [pendingAction, setPendingAction] = useState<"approve" | "reject" | null>(null)
   const [isLocalOverride, setIsLocalOverride] = useState(false)
   const [chatConfirmationSent, setChatConfirmationSent] = useState(false)
 
-  useEffect(() => {
-    if (!isLocalOverride) {
-      setLiveResult(result)
-    }
-  }, [isLocalOverride, result])
+  const liveResult = isLocalOverride ? localResult : result
+  const setLiveResult = (value: unknown) => {
+    setIsLocalOverride(true)
+    setLocalResult(value)
+  }
 
   if (!liveResult || typeof liveResult !== "object") return null
   const data = liveResult as Record<string, unknown>
@@ -1797,7 +1797,6 @@ export function ToolResultCard({ result, preliminary, onSendMessage, isStreaming
     }
 
     setPendingAction(action)
-    setIsLocalOverride(true)
     try {
       const response = await fetch("/api/eoa-approval", {
         method: "POST",
@@ -1847,7 +1846,6 @@ export function ToolResultCard({ result, preliminary, onSendMessage, isStreaming
     }
 
     setPendingAction(action)
-    setIsLocalOverride(true)
     try {
       const response = await fetch("/api/eoa-swap-approval", {
         method: "POST",

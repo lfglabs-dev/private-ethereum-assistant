@@ -44,14 +44,7 @@ export const config = {
     privacyGuidanceText:
       process.env.RAILGUN_PRIVACY_GUIDANCE_TEXT ||
       "Shielding is a public deposit on Arbitrum, but once confirmed the resulting private balance can fund later Railgun actions without publicly linking future transfers to the deposit address.",
-    poiNodeUrls: (process.env.RAILGUN_POI_NODE_URLS || "https://ppoi-agg.horsewithsixlegs.xyz")
-      .split(",")
-      .map((url) => url.trim())
-      .filter(Boolean),
     mnemonic: "",
-    walletCreationBlock: Number(process.env.RAILGUN_WALLET_CREATION_BLOCK || "416594021"),
-    scanTimeoutMs: Number(process.env.RAILGUN_SCAN_TIMEOUT_MS || "180000"),
-    pollingIntervalMs: Number(process.env.RAILGUN_POLLING_INTERVAL_MS || "15000"),
     shieldApprovalThreshold: getTokenAmountEnv(
       "RAILGUN_SHIELD_APPROVAL_THRESHOLD",
       "1",

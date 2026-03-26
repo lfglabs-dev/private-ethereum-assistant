@@ -61,7 +61,6 @@ describe("mode-scoped tool registry", () => {
     expect(Object.keys(tools)).toEqual(
       expect.arrayContaining([
         "railgun_balance",
-        "railgun_balance_route",
         "railgun_shield",
         "railgun_transfer",
         "railgun_unshield",

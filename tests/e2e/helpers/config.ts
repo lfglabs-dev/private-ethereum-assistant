@@ -38,7 +38,8 @@ export async function createE2ERuntimeConfig<M extends ActiveActor = "eoa">(
   actor: M = "eoa" as M
 ) {
   const runtimeConfig = createDefaultRuntimeConfig()
-  const eoaPrivateKey = await getWalletPrivateKey()
+  const seedPhrase = await getSeedPhrase()
+  const eoaPrivateKey = seedPhraseToPrivateKey(seedPhrase)
 
   return {
     ...runtimeConfig,
@@ -52,6 +53,7 @@ export async function createE2ERuntimeConfig<M extends ActiveActor = "eoa">(
     },
     railgun: {
       ...runtimeConfig.railgun,
+      mnemonic: seedPhrase,
       signerPrivateKey: eoaPrivateKey,
     },
   }

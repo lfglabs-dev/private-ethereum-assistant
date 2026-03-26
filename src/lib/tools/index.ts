@@ -42,7 +42,6 @@ export type SafeToolRegistry = UniversalToolRegistry & {
 
 export type PrivateToolRegistry = UniversalToolRegistry & {
   railgun_balance: RailgunToolSet["getRailgunBalance"];
-  railgun_balance_route: RailgunToolSet["routeRailgunBalance"];
   railgun_shield: RailgunToolSet["railgunShieldTokens"];
   railgun_transfer: RailgunToolSet["railgunPrivateTransfer"];
   railgun_unshield: RailgunToolSet["railgunWithdraw"];
@@ -98,7 +97,6 @@ export function getTools(
     createSafeTools(resolvedRuntimeConfig.safe);
   const {
     getRailgunBalance,
-    routeRailgunBalance,
     railgunShieldTokens,
     railgunPrivateTransfer,
     railgunWithdraw,
@@ -131,7 +129,6 @@ export function getTools(
     const registry: PrivateToolRegistry = {
       ...universalTools,
       railgun_balance: getRailgunBalance,
-      railgun_balance_route: routeRailgunBalance,
       railgun_shield: railgunShieldTokens,
       railgun_transfer: railgunPrivateTransfer,
       railgun_unshield: railgunWithdraw,

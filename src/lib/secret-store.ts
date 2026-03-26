@@ -70,9 +70,8 @@ export function selectSecretBackend(backends: readonly SecretBackend[]) {
 }
 
 export async function getSecret(key: SecretStoreKey): Promise<string | null> {
-  const envValue = getDeveloperModeEnvSecret(key);
-  if (envValue !== null) {
-    return envValue;
+  if (isDeveloperMode()) {
+    return getDeveloperModeEnvSecret(key);
   }
 
   if (loadedSecretKeys.has(key)) {

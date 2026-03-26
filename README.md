@@ -170,27 +170,26 @@ dotenvx run -f .env.tianjin -- bun test:e2e:tools
 
 These tests also read developer-mode wallet and Safe credentials from `.env.tianjin`.
 
-## Quick feature tests
+## Benchmarks
 
-Sample prompts to verify each wallet type works correctly.
+Model benchmark reports compare tool-routing accuracy and response quality across OpenRouter cloud models and local models.
 
-### EOA
+- [OpenRouter Cloud Model Benchmark](./OpenRouter_Benchmark.md) — qwen3-32b, deepseek-r1-distill-qwen-32b, gemma-3-27b-it across EOA, Safe, and Railgun modes (11 prompts per model)
+- [MacBook Air Local Model Benchmark](./MacBook_Air_Benchmark.md) — small local models via Ollama on M1 hardware (4 EOA prompts per model)
 
-- "Send 0.001 ETH to vitalik.eth"
-- "What is the ETH balance of my wallet?"
-- "Swap 0.0001 ETH for USDC"
+### Running the OpenRouter benchmark
 
-### Safe
+```bash
+dotenvx run -f .env.tianjin -- bun run benchmark
+```
 
-- "Send 0.001 ETH from the Safe to vitalik.eth"
-- "Show pending transactions on the Safe"
-- "Swap 0.0001 ETH for USDC from the Safe"
+Override the model list with `BENCHMARK_MODELS`:
 
-### Railgun
+```bash
+BENCHMARK_MODELS="qwen/qwen3-32b,google/gemma-3-27b-it" dotenvx run -f .env.tianjin -- bun run benchmark
+```
 
-- "Shield 0.001 ETH into Railgun"
-- "Send 0.0005 private ETH to 0zk1qy…"
-- "Unshield the remaining ETH from Railgun"
+The script starts the dev server, sends 11 prompts per model, and writes `OpenRouter_Benchmark.md` to the project root.
 
 ## Troubleshooting
 

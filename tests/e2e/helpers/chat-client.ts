@@ -15,6 +15,7 @@ import { ARBITRUM_CONFIG, getWalletPrivateKey } from "./config"
 
 const APP_URL = process.env.E2E_APP_URL ?? "http://127.0.0.1:3100"
 const DEV_PORT = new URL(APP_URL).port || "3000"
+const ORIGIN_URL = `http://localhost:${DEV_PORT}`
 
 let devServer: Bun.Subprocess | undefined
 let startedDevServer = false
@@ -240,6 +241,16 @@ export async function sendChatPrompt({
   const resolvedNetworkConfig = networkConfig ?? resolvedRuntimeConfig.network
   const transport = new DefaultChatTransport<AssistantUIMessage>({
     api: `${APP_URL}/api/chat`,
+    fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+      globalThis.fetch(input, {
+        ...init,
+        headers: {
+          ...(init?.headers instanceof Headers
+            ? Object.fromEntries(init.headers.entries())
+            : init?.headers ?? {}),
+          Origin: ORIGIN_URL,
+        },
+      })) as typeof fetch,
   })
   const nextMessages = [...messages, createUserMessage(prompt)]
   const stream = await transport.sendMessages({

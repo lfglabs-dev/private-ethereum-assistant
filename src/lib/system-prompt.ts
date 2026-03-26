@@ -51,7 +51,6 @@ export function getSystemPrompt(
     ...(activeMode === "railgun"
       ? [
           `- railgun_balance: Check shielded balances on ${resolvedRuntimeConfig.railgun.networkLabel}.`,
-          `- railgun_balance_route: Check if you have enough private balance before sending.`,
           `- railgun_shield: Deposit tokens into Railgun for private use.`,
           `- railgun_transfer: Send tokens privately to a 0zk address. Never use for 0x addresses.`,
           `- railgun_unshield: Withdraw from Railgun to a public 0x address.`,
@@ -92,14 +91,13 @@ Safe mode:
 - After a proposal, state the confirmation count and link to Safe UI.
 - For swaps, use swap_tokens.` : ""}${activeMode === "railgun" ? `
 Railgun mode:
-- Before transfers or unshields, call railgun_balance_route first.
 - 0zk addresses use railgun_transfer. 0x/ENS addresses use railgun_unshield.
 - Shielding is public; explain this before calling railgun_shield.
 - If awaiting_local_approval is returned, direct the user to the approval UI.
 - If balance is insufficient, explain clearly and stop.` : ""}
 
 Balances:
-- For "my" or "our" balances, use the Safe address: ${resolvedRuntimeConfig.safe.address}
+${activeMode === "safe" ? `- For "my" or "our" balances, use the Safe address: ${resolvedRuntimeConfig.safe.address}` : activeMode === "railgun" ? `- For "my" or "our" balances, use railgun_balance to check shielded balances.` : `- For "my" or "our" balances, check the connected EOA wallet.`}
 - For a full overview on Base, prefer get_portfolio.
 - Pass token names like USDC directly to get_balance (e.g. token: "USDC").`;
 }
