@@ -2300,7 +2300,11 @@ export async function railgunUnshield(
       let prepared: RailgunPreparedUnshield;
       try {
         prepared = await buildUnshieldContext(recipient, tokenSelector, amount);
-      } catch {
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (!errMsg.toLowerCase().includes("balance") && !errMsg.toLowerCase().includes("utxo")) {
+          return { error: `Unshield failed: ${errMsg}` };
+        }
         const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
         const balanceRouting = await buildBalanceRouting(
           runtime,

@@ -97,7 +97,7 @@ Railgun mode:
 - If balance is insufficient, explain clearly and stop.` : ""}
 
 Balances:
-- For "my" or "our" balances, use the Safe address: ${resolvedRuntimeConfig.safe.address}
+${activeMode === "safe" ? `- For "my" or "our" balances, use the Safe address: ${resolvedRuntimeConfig.safe.address}` : activeMode === "railgun" ? `- For "my" or "our" balances, use railgun_balance to check shielded balances.` : `- For "my" or "our" balances, check the connected EOA wallet.`}
 - For a full overview on Base, prefer get_portfolio.
 - Pass token names like USDC directly to get_balance (e.g. token: "USDC").`;
 }

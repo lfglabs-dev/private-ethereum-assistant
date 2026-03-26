@@ -176,6 +176,7 @@ patchFile(
       else url = ipfsRoot + '/circuits/' + variant + '/' + fileName;
       console.log('[circuits] IPFS fallback:', url);
       const resp = await fetch(url);
+      if (!resp.ok) throw new Error('[circuits] IPFS fetch failed (' + resp.status + '): ' + url);
       return Buffer.from(await resp.arrayBuffer());
     };
   })()`,

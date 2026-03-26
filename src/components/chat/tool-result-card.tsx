@@ -584,7 +584,7 @@ function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
 }
 
 function SafeInfoResult({ data }: { data: Record<string, unknown> }) {
-  const owners = data.owners as string[]
+  const owners = Array.isArray(data.owners) ? (data.owners as string[]) : []
   return (
     <Card data-testid="result-safe-info" size="sm" className="border-0 bg-secondary/50">
       <CardHeader className="pb-0">
@@ -625,7 +625,7 @@ function SafeInfoResult({ data }: { data: Record<string, unknown> }) {
 }
 
 function PendingTransactionsResult({ data }: { data: Record<string, unknown> }) {
-  const txs = data.transactions as Array<Record<string, string | number>>
+  const txs = Array.isArray(data.transactions) ? (data.transactions as Array<Record<string, string | number>>) : []
   const safeUILink = data.safeUILink ? String(data.safeUILink) : null
   const safeAddress = data.safeAddress ? String(data.safeAddress) : null
   if (txs.length === 0) {
