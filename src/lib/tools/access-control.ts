@@ -15,7 +15,6 @@ const TOOL_MODE_ALLOWLIST = {
   get_pending_transactions: ["safe"],
   propose_transaction: ["safe"],
   railgun_balance: ["railgun"],
-  railgun_balance_route: ["railgun"],
   railgun_shield: ["railgun"],
   railgun_transfer: ["railgun"],
   railgun_unshield: ["railgun"],

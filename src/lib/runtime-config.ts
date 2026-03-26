@@ -9,7 +9,7 @@ export const RUNTIME_CONFIG_STORAGE_EVENT =
   "private-ethereum-assistant.runtime-config.changed";
 
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-export const OPENROUTER_DEFAULT_MODEL = "mistralai/mistral-large";
+export const OPENROUTER_DEFAULT_MODEL = "qwen/qwen3.5-27b";
 export const LOCAL_DEFAULT_MODEL = config.llm.model;
 export const DEVELOPER_MODE_PLACEHOLDER_PRIVATE_KEY =
   `0x${"0".repeat(64)}` as const;
@@ -89,13 +89,7 @@ const runtimeConfigSections = {
       .string()
       .trim()
       .min(1, "Enter the Railgun privacy guidance text."),
-    poiNodeUrls: z
-      .array(z.string().trim().url())
-      .min(1, "Enter at least one Railgun POI node URL."),
     mnemonic: z.string().trim(),
-    walletCreationBlock: nonNegativeIntegerSchema,
-    scanTimeoutMs: positiveIntegerSchema,
-    pollingIntervalMs: positiveIntegerSchema,
     shieldApprovalThreshold: tokenAmountSchema,
     transferApprovalThreshold: tokenAmountSchema,
     unshieldApprovalThreshold: tokenAmountSchema,
@@ -142,11 +136,7 @@ export type RuntimeConfigDraft = {
     rpcUrl: string;
     explorerTxBaseUrl: string;
     privacyGuidanceText: string;
-    poiNodeUrls: string;
     mnemonic: string;
-    walletCreationBlock: string;
-    scanTimeoutMs: string;
-    pollingIntervalMs: string;
     shieldApprovalThreshold: string;
     transferApprovalThreshold: string;
     unshieldApprovalThreshold: string;
@@ -208,11 +198,7 @@ export function createDefaultRuntimeConfig(): RuntimeConfig {
       rpcUrl: config.railgun.rpcUrl,
       explorerTxBaseUrl: config.railgun.explorerTxBaseUrl,
       privacyGuidanceText: config.railgun.privacyGuidanceText,
-      poiNodeUrls: config.railgun.poiNodeUrls,
       mnemonic: "",
-      walletCreationBlock: config.railgun.walletCreationBlock,
-      scanTimeoutMs: config.railgun.scanTimeoutMs,
-      pollingIntervalMs: config.railgun.pollingIntervalMs,
       shieldApprovalThreshold: config.railgun.shieldApprovalThreshold,
       transferApprovalThreshold: config.railgun.transferApprovalThreshold,
       unshieldApprovalThreshold: config.railgun.unshieldApprovalThreshold,
@@ -282,11 +268,6 @@ export function mergeRuntimeConfigOverrides(
       rpcUrl: overrides.railgun.rpcUrl,
       explorerTxBaseUrl: overrides.railgun.explorerTxBaseUrl,
       privacyGuidanceText: overrides.railgun.privacyGuidanceText,
-      poiNodeUrls: overrides.railgun.poiNodeUrls,
-      mnemonic: overrides.railgun.mnemonic,
-      walletCreationBlock: overrides.railgun.walletCreationBlock,
-      scanTimeoutMs: overrides.railgun.scanTimeoutMs,
-      pollingIntervalMs: overrides.railgun.pollingIntervalMs,
       shieldApprovalThreshold: overrides.railgun.shieldApprovalThreshold,
       transferApprovalThreshold: overrides.railgun.transferApprovalThreshold,
       unshieldApprovalThreshold: overrides.railgun.unshieldApprovalThreshold,
@@ -355,11 +336,7 @@ export function createRuntimeConfigDraft(
       rpcUrl: runtimeConfig.railgun.rpcUrl,
       explorerTxBaseUrl: runtimeConfig.railgun.explorerTxBaseUrl,
       privacyGuidanceText: runtimeConfig.railgun.privacyGuidanceText,
-      poiNodeUrls: runtimeConfig.railgun.poiNodeUrls.join("\n"),
       mnemonic: runtimeConfig.railgun.mnemonic,
-      walletCreationBlock: String(runtimeConfig.railgun.walletCreationBlock),
-      scanTimeoutMs: String(runtimeConfig.railgun.scanTimeoutMs),
-      pollingIntervalMs: String(runtimeConfig.railgun.pollingIntervalMs),
       shieldApprovalThreshold: runtimeConfig.railgun.shieldApprovalThreshold,
       transferApprovalThreshold: runtimeConfig.railgun.transferApprovalThreshold,
       unshieldApprovalThreshold: runtimeConfig.railgun.unshieldApprovalThreshold,
@@ -403,14 +380,7 @@ export function parseRuntimeConfigDraft(draft: RuntimeConfigDraft): RuntimeConfi
       rpcUrl: draft.railgun.rpcUrl,
       explorerTxBaseUrl: draft.railgun.explorerTxBaseUrl,
       privacyGuidanceText: draft.railgun.privacyGuidanceText,
-      poiNodeUrls: draft.railgun.poiNodeUrls
-        .split(/\n|,/)
-        .map((value) => value.trim())
-        .filter(Boolean),
       mnemonic: draft.railgun.mnemonic,
-      walletCreationBlock: draft.railgun.walletCreationBlock,
-      scanTimeoutMs: draft.railgun.scanTimeoutMs,
-      pollingIntervalMs: draft.railgun.pollingIntervalMs,
       shieldApprovalThreshold: draft.railgun.shieldApprovalThreshold,
       transferApprovalThreshold: draft.railgun.transferApprovalThreshold,
       unshieldApprovalThreshold: draft.railgun.unshieldApprovalThreshold,
@@ -472,9 +442,9 @@ export function getSuggestedModels(provider: LlmProvider) {
   return provider === "local"
     ? ["llama3.2:3b", "qwen3:8b", "qwen2.5:14b-instruct"]
     : [
-        "mistralai/mistral-large",
-        "openai/gpt-4o-mini",
-        "anthropic/claude-3.7-sonnet",
+        "qwen/qwen3.5-27b",
+        "qwen/qwen3-32b",
+        "openai/gpt-oss-20b",
       ];
 }
 

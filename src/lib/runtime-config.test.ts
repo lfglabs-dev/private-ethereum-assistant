@@ -47,7 +47,6 @@ describe("runtime-config helpers", () => {
 
     expect(runtimeConfig.wallet.eoaPrivateKey).toBe("");
     expect(runtimeConfig.safe.signerPrivateKey).toBe("");
-    expect(runtimeConfig.railgun.poiNodeUrls.length).toBeGreaterThan(0);
     expect(runtimeConfig.railgun.shieldApprovalThreshold).toBe("1");
     expect(runtimeConfig.railgun.transferApprovalThreshold).toBe("1");
     expect(runtimeConfig.railgun.unshieldApprovalThreshold).toBe("1");

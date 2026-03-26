@@ -2,11 +2,11 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: [
-    "@railgun-community/engine",
-    "@railgun-community/shared-models",
-    "@railgun-community/wallet",
-    "leveldown",
+    "@kohaku-eth/railgun",
+    "@kohaku-eth/plugins",
+    "@kohaku-eth/provider",
     "snarkjs",
+    "ethers",
   ],
   turbopack: {
     root: __dirname,

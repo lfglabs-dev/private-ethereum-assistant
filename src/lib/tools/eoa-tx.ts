@@ -25,6 +25,7 @@ import {
   type NetworkConfig,
 } from "../ethereum";
 import { resolveTokenBySymbolOrAddress } from "../token-aliases";
+import { buildTrustWalletTokenPaths } from "../trustwallet-assets";
 import {
   consumeTransferRateLimitSlot,
   evaluateSessionTransferApproval,
@@ -144,6 +145,7 @@ type PreviewResult = {
     type: "ETH" | "ERC20";
     symbol: string;
     tokenAddress?: string;
+    iconUrl?: string;
   };
   amount?: string;
   balance?: {
@@ -190,6 +192,7 @@ type ProgressResult = {
     type: "ETH" | "ERC20";
     symbol: string;
     tokenAddress?: string;
+    iconUrl?: string;
   };
   amount: string;
   steps: ProgressStep[];
@@ -483,6 +486,7 @@ function buildPreviewFromPrepared(
           type: "ERC20",
           symbol: prepared.token.symbol,
           tokenAddress: prepared.token.address,
+          iconUrl: buildTrustWalletTokenPaths(prepared.chain.id, prepared.token.address)?.logoUrl,
         }
       : {
           type: "ETH",
@@ -967,6 +971,7 @@ function makeProgressBase(prepared: PreparedTransfer): Omit<
           type: "ERC20",
           symbol: prepared.token.symbol,
           tokenAddress: prepared.token.address,
+          iconUrl: buildTrustWalletTokenPaths(prepared.chain.id, prepared.token.address)?.logoUrl,
         }
       : {
           type: "ETH",

@@ -38,6 +38,15 @@ yarn-error.log*
 !.env.tianjin
 !.env.local.example
 
+# playwright MCP logs
+.playwright-mcp/
+
+# debug/one-off scripts
+scripts/fast-sync.ts
+scripts/test-railgun-unshield.ts
+scripts/quick-unshield-test.ts
+scripts/benchmark-local-models.ts
+
 # vercel
 .vercel
 

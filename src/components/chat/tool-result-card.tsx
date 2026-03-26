@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import {
   AlertCircle,
   ArrowUpRight,
@@ -62,7 +62,7 @@ type TransactionPreviewData = {
   recipient?: string
   recipientInput?: string
   resolvedEnsName?: string
-  asset?: { type: "ETH" | "ERC20"; symbol: string; tokenAddress?: string }
+  asset?: { type: "ETH" | "ERC20"; symbol: string; tokenAddress?: string; iconUrl?: string }
   amount?: string
   balance?: { asset: string; amount: string }
   gasEstimate?: {
@@ -121,7 +121,7 @@ type TransactionProgressData = {
   recipient: string
   recipientInput: string
   resolvedEnsName?: string
-  asset: { type: "ETH" | "ERC20"; symbol: string; tokenAddress?: string }
+  asset: { type: "ETH" | "ERC20"; symbol: string; tokenAddress?: string; iconUrl?: string }
   amount: string
   steps: ProgressStep[]
   txHash?: string
@@ -836,6 +836,7 @@ function TransactionPreviewResult({ data }: { data: TransactionPreviewData }) {
               <TokenAvatar
                 symbol={data.asset?.symbol ?? data.chain.nativeSymbol}
                 address={data.asset?.tokenAddress ?? ""}
+                iconUrl={data.asset?.iconUrl}
                 isNative={data.asset?.type === "ETH" || !data.asset}
               />
               <div className="min-w-0">
@@ -1729,16 +1730,16 @@ function SwapResultCard({ data }: { data: SwapResultData }) {
 }
 
 export function ToolResultCard({ result, preliminary, onSendMessage }: ToolResultCardProps) {
-  const [liveResult, setLiveResult] = useState(result)
+  const [localResult, setLocalResult] = useState<unknown>(null)
   const [pendingAction, setPendingAction] = useState<"approve" | "reject" | null>(null)
   const [isLocalOverride, setIsLocalOverride] = useState(false)
   const [chatConfirmationSent, setChatConfirmationSent] = useState(false)
 
-  useEffect(() => {
-    if (!isLocalOverride) {
-      setLiveResult(result)
-    }
-  }, [isLocalOverride, result])
+  const liveResult = isLocalOverride ? localResult : result
+  const setLiveResult = (value: unknown) => {
+    setIsLocalOverride(true)
+    setLocalResult(value)
+  }
 
   if (!liveResult || typeof liveResult !== "object") return null
   const data = liveResult as Record<string, unknown>
@@ -1752,7 +1753,6 @@ export function ToolResultCard({ result, preliminary, onSendMessage }: ToolResul
     }
 
     setPendingAction(action)
-    setIsLocalOverride(true)
     try {
       const response = await fetch("/api/eoa-approval", {
         method: "POST",
@@ -1802,7 +1802,6 @@ export function ToolResultCard({ result, preliminary, onSendMessage }: ToolResul
     }
 
     setPendingAction(action)
-    setIsLocalOverride(true)
     try {
       const response = await fetch("/api/eoa-swap-approval", {
         method: "POST",

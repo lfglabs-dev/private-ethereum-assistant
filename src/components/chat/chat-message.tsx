@@ -3,7 +3,6 @@
 import type { UIMessage } from "ai"
 import { motion } from "framer-motion"
 import { Loader2, User } from "lucide-react"
-import { ChatDebugPanel } from "@/components/chat/chat-debug-panel"
 import { EthereumIcon } from "@/components/icons/ethereum-icon"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer"
@@ -11,7 +10,7 @@ import { ThinkingIndicator } from "@/components/ui/thinking-indicator"
 import { ToolResultCard } from "@/components/chat/tool-result-card"
 import { MessageActions } from "@/components/chat/message-actions"
 import { ModeSwitchCard } from "@/components/chat/mode-switch-card"
-import type { DebugLogEntry, AssistantUIMessage } from "@/lib/chat-stream"
+import type { AssistantUIMessage } from "@/lib/chat-stream"
 import type { ModeSwitchRequiredResult } from "@/lib/mode"
 
 type Part = { type: string; [key: string]: unknown }
@@ -50,8 +49,6 @@ function getToolLabel(toolName: string): string {
   switch (toolName) {
     case "railgun_balance":
       return "Scanning Railgun balances on Arbitrum"
-    case "railgun_balance_route":
-      return "Checking Railgun private/public balance routing"
     case "railgun_shield":
       return "Preparing Railgun shield on Arbitrum"
     case "railgun_transfer":
@@ -72,10 +69,6 @@ function getToolLabel(toolName: string): string {
 interface ChatMessageProps {
   message: UIMessage | AssistantUIMessage
   isStreaming?: boolean
-  traceEntries?: DebugLogEntry[]
-  showTrace?: boolean
-  canToggleTrace?: boolean
-  onToggleTrace?: () => void
   onConfirmModeSwitch?: (request: ModeSwitchRequiredResult) => void | Promise<void>
   pendingModeSwitchKey?: string | null
   onSendMessage?: (text: string) => void
@@ -84,10 +77,6 @@ interface ChatMessageProps {
 export function ChatMessage({
   message,
   isStreaming,
-  traceEntries = [],
-  showTrace = false,
-  canToggleTrace = false,
-  onToggleTrace,
   onConfirmModeSwitch,
   pendingModeSwitchKey = null,
   onSendMessage,
@@ -101,7 +90,6 @@ export function ChatMessage({
       getToolOutput(p) ||
       getModeSwitchData(p),
   )
-  const showTracePanel = !isUser && showTrace
   const assistantAvatar = (
     <Avatar size="sm" className="mt-0.5 shrink-0">
       <AvatarFallback className="bg-secondary">
@@ -124,16 +112,6 @@ export function ChatMessage({
             <User className="size-3.5" />
           </AvatarFallback>
         </Avatar>
-      ) : canToggleTrace ? (
-        <button
-          type="button"
-          onClick={onToggleTrace}
-          className="rounded-full transition-transform hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          aria-label={showTracePanel ? "Hide model trace" : "Show model trace"}
-          title={showTracePanel ? "Hide model trace" : "Show model trace"}
-        >
-          {assistantAvatar}
-        </button>
       ) : (
         assistantAvatar
       )}
@@ -219,10 +197,6 @@ export function ChatMessage({
 
             {!isStreaming && hasContent && (
               <MessageActions content={getTextContent(parts)} />
-            )}
-
-            {showTracePanel && (
-              <ChatDebugPanel entries={traceEntries} isStreaming={Boolean(isStreaming)} />
             )}
           </>
         )}
