@@ -2303,7 +2303,13 @@ export async function railgunUnshield(
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         if (!errMsg.toLowerCase().includes("balance") && !errMsg.toLowerCase().includes("utxo")) {
-          return { error: `Unshield failed: ${errMsg}` };
+          return {
+            railgun: true,
+            status: "error",
+            operation: "unshield",
+            network: currentConfig.networkLabel,
+            message: `Unshield failed: ${errMsg}`,
+          } satisfies RailgunErrorResult;
         }
         const amountRaw = parseTokenAmount(amount, resolvedToken.decimals);
         const balanceRouting = await buildBalanceRouting(
