@@ -18,9 +18,11 @@ export async function POST(req: Request) {
   }
 
   try {
+    const appMode = getAppMode();
+    console.log("[railgun-warm] starting, mode=%s", appMode);
+
     const { warmRailgun } = await import("@/lib/railgun");
     let selectedRuntimeConfig;
-    const appMode = getAppMode();
 
     if (appMode === "developer") {
       selectedRuntimeConfig = await createDeveloperRuntimeConfig();
@@ -33,13 +35,20 @@ export async function POST(req: Request) {
       ).selectedRuntimeConfig;
     }
 
+    const hasEoaKey = !!selectedRuntimeConfig.wallet.eoaPrivateKey?.trim();
+    const hasMnemonic = !!selectedRuntimeConfig.railgun.mnemonic?.trim();
+    console.log("[railgun-warm] config: hasEoaKey=%s hasMnemonic=%s chainId=%s",
+      hasEoaKey, hasMnemonic, selectedRuntimeConfig.railgun.chainId);
+
     const result = await warmRailgun({
       ...selectedRuntimeConfig.railgun,
       signerPrivateKey: selectedRuntimeConfig.wallet.eoaPrivateKey,
     });
 
+    console.log("[railgun-warm] success:", JSON.stringify(result).slice(0, 200));
     return Response.json(result);
   } catch (error) {
+    console.error("[railgun-warm] failed:", error);
     return new Response(
       JSON.stringify({
         error: error instanceof Error ? error.message : "Failed to warm Railgun.",

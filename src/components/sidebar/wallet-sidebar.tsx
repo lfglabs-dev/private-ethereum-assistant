@@ -1,11 +1,12 @@
 "use client";
 
-import { Settings2, ShieldCheck, Loader2 } from "lucide-react";
+import { Settings2, ShieldCheck, Loader2, RefreshCw } from "lucide-react";
 import { EthereumIcon } from "@/components/icons/ethereum-icon";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import type { RuntimeConfig } from "@/lib/runtime-config";
 import type { ExecutionMode } from "@/lib/mode";
+import type { RailgunSyncInfo } from "@/lib/portfolio/portfolio-service";
 import { usePortfolio } from "@/hooks/use-portfolio";
 import { PortfolioHeader } from "./portfolio-header";
 import { TokenList } from "./token-list";
@@ -53,8 +54,60 @@ function NoWalletMessage() {
     <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
       <p className="text-sm font-medium text-foreground">No wallet configured</p>
       <p className="text-xs text-muted-foreground">
-        Open Settings to add your wallet key
+        Check your seed phrase configuration
       </p>
+    </div>
+  );
+}
+
+function PortfolioErrorMessage({ message }: { message: string }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 text-center">
+      <p className="text-sm font-medium text-foreground">Failed to load portfolio</p>
+      <p className="text-xs text-muted-foreground">{message}</p>
+    </div>
+  );
+}
+
+function formatTimeAgo(isoString: string): string {
+  const ms = Date.now() - Date.parse(isoString);
+  if (ms < 0 || !Number.isFinite(ms)) return "just now";
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function RailgunSyncStatus({ sync, isRefreshing }: { sync: RailgunSyncInfo; isRefreshing: boolean }) {
+  const isLive = sync.freshness?.source === "live";
+  const isSyncing = sync.syncStatus === "syncing" || isRefreshing;
+  const lastSyncLabel = sync.lastSyncAt ? formatTimeAgo(sync.lastSyncAt) : "never";
+  const freshnessLabel = sync.freshness?.updatedAt
+    ? formatTimeAgo(sync.freshness.updatedAt)
+    : null;
+
+  return (
+    <div className="border-t px-4 py-2">
+      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+        {isSyncing ? (
+          <RefreshCw className="size-3 animate-spin" />
+        ) : (
+          <div className={`size-1.5 rounded-full ${isLive ? "bg-green-500" : "bg-amber-500"}`} />
+        )}
+        <span className="flex-1 truncate">
+          {isSyncing
+            ? "Syncing…"
+            : `Indexed ${lastSyncLabel}`}
+        </span>
+        {freshnessLabel && !isSyncing && (
+          <span className="shrink-0 tabular-nums">
+            {isLive ? "live" : `cached ${freshnessLabel}`}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -130,7 +183,7 @@ export function WalletSidebar({
         ) : isLoading && !portfolio ? (
           <SidebarSkeleton />
         ) : error && !portfolio ? (
-          <NoWalletMessage />
+          <PortfolioErrorMessage message={error} />
         ) : portfolio ? (
           <>
             <PortfolioHeader
@@ -144,6 +197,11 @@ export function WalletSidebar({
           <NoWalletMessage />
         )}
       </div>
+
+      {/* Railgun sync status */}
+      {portfolio?.railgunSync && (
+        <RailgunSyncStatus sync={portfolio.railgunSync} isRefreshing={isLoading} />
+      )}
 
       {/* Footer: Settings + Theme */}
       <div className="flex items-center justify-between border-t px-4 py-2.5">

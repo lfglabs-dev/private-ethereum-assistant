@@ -42,6 +42,8 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { runtimeConfig: rawConfig } = body;
 
+    console.log("[portfolio] mode=%s actor=%s", appMode, rawConfig?.actor?.type);
+
     let resolvedConfig;
     let networkConfig = DEFAULT_NETWORK_CONFIG;
 
@@ -50,7 +52,11 @@ export async function POST(req: Request) {
       if (parsed.success) {
         resolvedConfig = await mergeRuntimeConfigWithEnvSecrets(parsed.data);
         networkConfig = parsed.data.network;
+        const hasEoaKey = !!resolvedConfig.wallet.eoaPrivateKey?.trim();
+        const hasMnemonic = !!resolvedConfig.railgun.mnemonic?.trim();
+        console.log("[portfolio] config resolved: hasEoaKey=%s hasMnemonic=%s", hasEoaKey, hasMnemonic);
       } else {
+        console.error("[portfolio] invalid runtime config:", parsed.error.issues);
         return new Response(
           JSON.stringify({ error: "Invalid runtime config." }),
           { status: 400, headers: { "Content-Type": "application/json" } },
@@ -64,7 +70,11 @@ export async function POST(req: Request) {
         });
         resolvedConfig = resolved.selectedRuntimeConfig;
         networkConfig = resolved.selectedNetworkConfig;
+        const hasEoaKey = !!resolvedConfig.wallet.eoaPrivateKey?.trim();
+        const hasMnemonic = !!resolvedConfig.railgun.mnemonic?.trim();
+        console.log("[portfolio] standard config resolved: hasEoaKey=%s hasMnemonic=%s", hasEoaKey, hasMnemonic);
       } catch (error) {
+        console.error("[portfolio] config resolution failed:", error);
         return new Response(
           JSON.stringify({
             error: error instanceof Error ? error.message : "Config resolution failed.",
@@ -76,23 +86,28 @@ export async function POST(req: Request) {
 
     // Railgun mode: fetch shielded balances and use 0zk address.
     if (resolvedConfig.actor.type === "railgun") {
+      console.log("[portfolio] fetching railgun portfolio…");
       const { fetchRailgunPortfolio } = await import("@/lib/portfolio/portfolio-service");
       const portfolio = await fetchRailgunPortfolio(networkConfig);
+      console.log("[portfolio] railgun portfolio fetched: tokens=%d", portfolio.tokens?.length ?? 0);
       return Response.json(portfolio);
     }
 
     const walletAddress = deriveWalletAddress(resolvedConfig);
     if (!walletAddress) {
+      console.warn("[portfolio] no wallet address derived from config");
       return Response.json(
         { error: "no_wallet", message: "No wallet address configured." },
         { status: 200 },
       );
     }
 
+    console.log("[portfolio] fetching portfolio for %s…", walletAddress);
     const portfolio = await fetchPortfolio(walletAddress, networkConfig);
 
     return Response.json(portfolio);
   } catch (error) {
+    console.error("[portfolio] unhandled error:", error);
     return new Response(
       JSON.stringify({
         error: error instanceof Error ? error.message : "Portfolio fetch failed.",

@@ -246,7 +246,15 @@ let operationQueue: Promise<void> = Promise.resolve();
 const RAILGUN_APPROVAL_TTL_MS = 10 * 60 * 1000;
 const RAILGUN_SYNC_FRESH_MS = 5 * 60 * 1000;
 const RAILGUN_BALANCE_CACHE_MAX_AGE_MS = 60 * 1000;
-const pendingRailgunApprovals = new Map<string, PendingRailgunApproval>();
+// Persist across HMR reloads and separate Next.js API route module scopes.
+const PENDING_APPROVALS_KEY = "__pendingRailgunApprovals__";
+const pendingRailgunApprovals: Map<string, PendingRailgunApproval> =
+  ((globalThis as Record<string, unknown>)[PENDING_APPROVALS_KEY] as Map<string, PendingRailgunApproval>) ??
+  (() => {
+    const map = new Map<string, PendingRailgunApproval>();
+    (globalThis as Record<string, unknown>)[PENDING_APPROVALS_KEY] = map;
+    return map;
+  })();
 const optimisticShieldedBalances = new Map<string, bigint>();
 let backgroundRefreshPromise: Promise<void> | undefined;
 let backgroundRefreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -2370,15 +2378,26 @@ export async function approveRailgunAction(
   approvalId: string,
 ): Promise<RailgunResult> {
   cleanupPendingRailgunApprovals();
+  railgunLog("info", "approval:verify", {
+    pendingCount: pendingRailgunApprovals.size,
+    approvalIdPrefix: approvalId.slice(0, 30) + "…",
+  });
   const internalApprovalId = verifyLocalActionId(approvalId, "railgun-approval");
   if (!internalApprovalId) {
-    throw new Error("Railgun approval request was not found or has expired.");
+    railgunLog("error", "approval:signature-invalid", {
+      approvalIdPrefix: approvalId.slice(0, 30) + "…",
+    });
+    throw new Error("Railgun approval signature verification failed.");
   }
 
   const pendingApproval = pendingRailgunApprovals.get(internalApprovalId);
 
   if (!pendingApproval) {
-    throw new Error("Railgun approval request was not found or has expired.");
+    railgunLog("error", "approval:not-in-map", {
+      internalApprovalId,
+      pendingKeys: [...pendingRailgunApprovals.keys()],
+    });
+    throw new Error("Railgun approval request was not found or has expired (map miss — likely HMR reload).");
   }
 
   pendingRailgunApprovals.delete(internalApprovalId);
