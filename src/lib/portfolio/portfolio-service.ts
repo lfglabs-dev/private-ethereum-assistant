@@ -19,6 +19,17 @@ export type PortfolioToken = {
   isNative: boolean;
 };
 
+export type RailgunSyncInfo = {
+  lastSyncAt: string | null;
+  syncStatus: string | null;
+  freshness: {
+    source: string;
+    updatedAt: string;
+    ageMs: number;
+    refreshing: boolean;
+  } | null;
+};
+
 export type PortfolioData = {
   chainId: number;
   chainName: string;
@@ -27,6 +38,7 @@ export type PortfolioData = {
   totalUsdValue: number;
   tokens: PortfolioToken[];
   fetchedAt: number;
+  railgunSync?: RailgunSyncInfo;
 };
 
 function getTokenIconUrl(chainId: number, tokenAddress: string): string | undefined {
@@ -250,7 +262,7 @@ export async function fetchRailgunPortfolio(
     throw new Error(message);
   }
 
-  const { railgunAddress, balances } = result;
+  const { railgunAddress, balances, scan, freshness } = result;
   const chainMetadata = getChainMetadata(networkConfig);
   const tokenEntries = getPortfolioTokens(networkConfig.chainId);
 
@@ -350,5 +362,10 @@ export async function fetchRailgunPortfolio(
     totalUsdValue,
     tokens,
     fetchedAt: Date.now(),
+    railgunSync: {
+      lastSyncAt: scan.lastSyncAt ?? null,
+      syncStatus: scan.syncStatus ?? null,
+      freshness: freshness ?? null,
+    },
   };
 }

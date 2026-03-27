@@ -7,7 +7,7 @@ import {
 export const runtime = "nodejs";
 
 const approvalRequestSchema = z.object({
-  approvalId: z.string().uuid(),
+  approvalId: z.string().min(1),
   decision: z.enum(["approve", "reject"]),
 });
 

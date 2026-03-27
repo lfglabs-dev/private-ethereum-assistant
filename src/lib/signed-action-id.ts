@@ -1,7 +1,17 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
-const SIGNING_SECRET =
-  process.env.LOCAL_ACTION_SIGNING_SECRET?.trim() || randomBytes(32).toString("hex");
+// Cache in globalThis so the secret survives HMR / module reloads in Next.js dev.
+const GLOBAL_KEY = "__local_action_signing_secret__";
+function getSigningSecret(): string {
+  const env = process.env.LOCAL_ACTION_SIGNING_SECRET?.trim();
+  if (env) return env;
+  const g = globalThis as Record<string, unknown>;
+  if (typeof g[GLOBAL_KEY] === "string") return g[GLOBAL_KEY] as string;
+  const secret = randomBytes(32).toString("hex");
+  g[GLOBAL_KEY] = secret;
+  return secret;
+}
+const SIGNING_SECRET = getSigningSecret();
 
 function signValue(value: string) {
   return createHmac("sha256", SIGNING_SECRET).update(value).digest("base64url");
