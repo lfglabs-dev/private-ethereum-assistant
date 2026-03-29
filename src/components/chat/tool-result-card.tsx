@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Image from "next/image"
 import {
   AlertCircle,
   ArrowUpRight,
@@ -10,7 +11,6 @@ import {
   Hash,
   Info,
   Loader2,
-  Shield,
   Users,
   Wallet,
   X,
@@ -25,6 +25,42 @@ import {
 } from "@/components/ui/action-result"
 import { TokenAvatar } from "@/components/ui/token-avatar"
 import { cn } from "@/lib/utils"
+
+function KohakuIcon({ className }: { className?: string }) {
+  return (
+    <Image
+      src="/kohaku-fish.webp"
+      alt="Kohaku"
+      width={16}
+      height={16}
+      className={cn("rounded-full", className)}
+    />
+  )
+}
+
+function SafeIcon({ className }: { className?: string }) {
+  return (
+    <Image
+      src="/safe-logo.webp"
+      alt="Safe"
+      width={16}
+      height={16}
+      className={cn("rounded-full", className)}
+    />
+  )
+}
+
+function CowSwapIcon({ className }: { className?: string }) {
+  return (
+    <Image
+      src="/cowswap-logo.webp"
+      alt="CoW Swap"
+      width={16}
+      height={16}
+      className={cn("rounded-full", className)}
+    />
+  )
+}
 
 type ToolResultCardProps = {
   result: unknown
@@ -552,7 +588,7 @@ function SafeTransactionResult({ data }: { data: Record<string, unknown> }) {
     <ActionResultCard
       testId="result-safe-transaction"
       title={title}
-      icon={<Shield className={`size-4 ${titleClass}`} />}
+      icon={<SafeIcon className="size-4" />}
       badge={badge}
       className={accentClass}
       titleClassName={titleClass}
@@ -659,7 +695,7 @@ function SafeInfoResult({ data }: { data: Record<string, unknown> }) {
     <Card data-testid="result-safe-info" size="sm" className="border-0 bg-secondary/50">
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
-          <Shield className="size-4 text-muted-foreground" />
+          <SafeIcon className="size-4" />
           <CardTitle className="text-sm">Safe Info</CardTitle>
         </div>
       </CardHeader>
@@ -1087,7 +1123,7 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
       >
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
-            <Shield className="size-4 text-red-500" />
+            <KohakuIcon className="size-4" />
             <CardTitle className="text-sm text-red-500">
               {titleByOperation[operation] ?? "Railgun Error"}
             </CardTitle>
@@ -1136,7 +1172,7 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
       <Card size="sm" className="border-0 bg-secondary/50">
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
-            <Shield className="size-4 text-muted-foreground" />
+            <KohakuIcon className="size-4" />
             <CardTitle className="text-sm">Railgun Balance Routing</CardTitle>
           </div>
         </CardHeader>
@@ -1197,7 +1233,7 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
       >
         <CardHeader className="pb-0">
           <div className="flex items-center gap-2">
-            <Shield className="size-4 text-muted-foreground" />
+            <KohakuIcon className="size-4" />
             <CardTitle className="text-sm">Railgun Balances</CardTitle>
           </div>
         </CardHeader>
@@ -1252,7 +1288,7 @@ function RailgunResult({ data }: { data: Record<string, unknown> }) {
     >
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
-          <Shield className="size-4 text-muted-foreground" />
+          <KohakuIcon className="size-4" />
           <CardTitle className="text-sm">
             {titleByOperation[operation] ?? "Railgun Operation"}
           </CardTitle>
@@ -1461,7 +1497,7 @@ function RailgunApprovalResult({ data }: { data: Record<string, unknown> }) {
       <CardHeader className="pb-0">
         <div className="flex items-center gap-2">
           {isAwaiting ? (
-            <Shield className="size-4 text-amber-500" />
+            <KohakuIcon className="size-4" />
           ) : (
             <X className="size-4 text-muted-foreground" />
           )}
@@ -1646,7 +1682,10 @@ function SwapResultCard({ data }: { data: SwapResultData }) {
       <CardHeader className="pb-0">
         <div className="flex items-center justify-between gap-2">
           <div className="space-y-1">
-            <CardTitle className="text-sm">{summary}</CardTitle>
+            <div className="flex items-center gap-2">
+              <CowSwapIcon className="size-4" />
+              <CardTitle className="text-sm">{summary}</CardTitle>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">{actor}</Badge>
               {chain && typeof chain.name === "string" ? (

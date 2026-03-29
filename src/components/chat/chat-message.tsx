@@ -2,6 +2,7 @@
 
 import type { UIMessage } from "ai"
 import { motion } from "framer-motion"
+import Image from "next/image"
 import { Loader2, User } from "lucide-react"
 import { EthereumIcon } from "@/components/icons/ethereum-icon"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -45,24 +46,35 @@ function getModeSwitchData(part: Part) {
   return data as ModeSwitchRequiredResult
 }
 
-function getToolLabel(toolName: string): string {
+type ToolLabelInfo = {
+  label: string
+  icon?: string
+}
+
+function getToolLabel(toolName: string): ToolLabelInfo {
   switch (toolName) {
     case "railgun_balance":
-      return "Scanning Railgun balances on Arbitrum"
+      return { label: "Scanning Railgun balances with Kohaku", icon: "/kohaku-fish.webp" }
     case "railgun_shield":
-      return "Preparing Railgun shield on Arbitrum"
+      return { label: "Shielding with Kohaku", icon: "/kohaku-fish.webp" }
     case "railgun_transfer":
-      return "Generating Railgun transfer proof"
+      return { label: "Transferring with Kohaku", icon: "/kohaku-fish.webp" }
     case "railgun_unshield":
-      return "Generating Railgun unshield proof"
+      return { label: "Unshielding with Kohaku", icon: "/kohaku-fish.webp" }
     case "swap_tokens":
-      return "Planning mode-aware CoW swap"
+      return { label: "Planning mode-aware CoW swap", icon: "/cowswap-logo.webp" }
     case "prepare_swap":
-      return "Preparing EOA CoW swap"
+      return { label: "Preparing EOA CoW swap", icon: "/cowswap-logo.webp" }
     case "execute_swap":
-      return "Executing prepared EOA swap"
+      return { label: "Executing prepared EOA swap", icon: "/cowswap-logo.webp" }
+    case "get_safe_info":
+      return { label: "Fetching Safe info", icon: "/safe-logo.webp" }
+    case "get_pending_transactions":
+      return { label: "Loading pending Safe transactions", icon: "/safe-logo.webp" }
+    case "propose_transaction":
+      return { label: "Proposing Safe transaction", icon: "/safe-logo.webp" }
     default:
-      return `Running ${toolName}`
+      return { label: `Running ${toolName}` }
   }
 }
 
@@ -168,7 +180,23 @@ export function ChatMessage({
                     ) : (
                       <div className="flex items-center gap-2 rounded-2xl rounded-tl-sm bg-secondary/30 px-4 py-3 text-sm text-muted-foreground">
                         <Loader2 className="size-3.5 animate-spin" />
-                        <span>{getToolLabel(toolInfo.toolName)}</span>
+                        {(() => {
+                          const toolLabel = getToolLabel(toolInfo.toolName)
+                          return (
+                            <>
+                              {toolLabel.icon && (
+                                <Image
+                                  src={toolLabel.icon}
+                                  alt=""
+                                  width={20}
+                                  height={20}
+                                  className="rounded-full"
+                                />
+                              )}
+                              <span>{toolLabel.label}</span>
+                            </>
+                          )
+                        })()}
                       </div>
                     )}
                   </motion.div>
